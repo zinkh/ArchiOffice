@@ -9,6 +9,7 @@ import { proposalToXml, xmlToProposal } from '../../src/lib/xmlHelper';
 import { validateBody } from '../../src/lib/validateRequest';
 import { proposalSchema } from '../../src/schemas/proposal.schema';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { erreurTranchesJson, donneesPourContrat, totauxParTranche, tranchesActives, listeTranches, trancheDeMission } from '../../src/lib/tranches';
 import { serializeProposalIllustrations } from '../../src/lib/proposalIllustrations';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 
@@ -42,6 +43,8 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
     try {
       const tenantId = await getTenantId(req.user.id);
       const p = stripProposalTracking(req.body);
+      const erreurTranches = erreurTranchesJson(p.fee_distribution);
+      if (erreurTranches) return res.status(400).json({ error: `Tranches invalides : ${erreurTranches}` });
       const id = p.id || crypto.randomUUID();
       const created_at = new Date().toISOString();
       const { specialties_list, client_name: _cn, construction_cost_num: _ccn, ...proposalData } = p;
@@ -80,6 +83,8 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const p = stripProposalTracking(req.body);
+      const erreurTranches = erreurTranchesJson(p.fee_distribution);
+      if (erreurTranches) return res.status(400).json({ error: `Tranches invalides : ${erreurTranches}` });
 
       // Fetch old proposal to check status transition
       const { data: oldProposal } = await supabaseAdmin.from('proposals').select('*').eq('id', id).eq('tenant_id', tenantId).single();
@@ -147,7 +152,12 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
         // so the project's HONOS tab has real mission %/cotraitant data instead of
         // starting empty (fee_distribution otherwise stays orphaned on the proposal).
         try {
-          const feeData = p.fee_distribution ? JSON.parse(p.fee_distribution) : null;
+          const feeBrut = p.fee_distribution ? JSON.parse(p.fee_distribution) : null;
+          // Tranches : le contrat reprend la tranche ferme seule ou toutes les tranches,
+          // selon le choix enregistré avec la répartition (`contrat_tranches`).
+          const feeData = feeBrut && Array.isArray(feeBrut.missions) ? donneesPourContrat(feeBrut) : feeBrut;
+          const avecTranches = tranchesActives(feeData);
+          const listeT = listeTranches(feeData);
           const missions: any[] = feeData?.missions || [];
           if (missions.length > 0) {
             const totalBaseAmount = missions
@@ -166,8 +176,13 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
               id: m.id, name: m.name, incluse: true,
               pct: totalBaseAmount > 0 ? (m.amount || 0) / totalBaseAmount * 100 : 0,
               category: categoryOf(m.category),
+              ...(avecTranches ? { tranche: trancheDeMission(m, listeT).label } : {}),
             }));
-            const totalHonoraires = p.amount || totalBaseAmount || 1;
+            // Ferme seule : le montant du contrat est celui de la tranche ferme, pas le total.
+            const montantContrat = avecTranches && feeBrut.contrat_tranches === 'ferme'
+              ? totauxParTranche(feeData).ferme
+              : p.amount;
+            const totalHonoraires = montantContrat || totalBaseAmount || 1;
             const cotraitants = (specialties_list || []).map((spec: any) => {
               const montant_honoraires = missions.reduce((acc: number, m: any) =>
                 acc + (m.amount || 0) * ((m.percentages?.[spec.contact_id] || 0) / 100), 0);
@@ -180,7 +195,7 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
               id: crypto.randomUUID(), tenant_id: tenantId, project_id: projectId,
               client_id: p.client_id || null, intitule_projet: p.title,
               type_contrat: 'construction_neuve', type_moa: 'prive', status: 'Brouillon',
-              mode_honoraires: 'forfait', montant_honoraires: p.amount || null,
+              mode_honoraires: 'forfait', montant_honoraires: montantContrat || null,
               missions_list, cotraitants,
             });
           }

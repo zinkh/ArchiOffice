@@ -19,6 +19,7 @@ import { MiqcpComplexityWizardModal } from './MiqcpComplexityWizardModal';
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
 import { DEFAULT_MISSIONS, calculateFeeRatios, defaultFeeDistribution, exportFeeDistributionToXlsx } from '../lib/feeDistribution';
 import { FeeDistributionGrid } from './FeeDistributionGrid';
+import { TranchesToolbar, TranchesSummary } from './TranchesControls';
 import { useSettings } from '../hooks/useSettings';
 
 export interface HonorairesSpecialty {
@@ -315,6 +316,7 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
             >
               <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
             </button>
+            <TranchesToolbar feeDistribution={doc.fee_distribution} onChange={fd => onChange({ fee_distribution: fd })} />
             <button type="button" onClick={handleLoadMiqcpPhaseRepartition} className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
               {t('miqcp_wizard_load_phase_repartition_btn')}
             </button>
@@ -329,6 +331,7 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
             </button>
           </div>
         </div>
+        <TranchesSummary feeDistribution={doc.fee_distribution} onChange={fd => onChange({ fee_distribution: fd })} />
         <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 bg-white dark:bg-zinc-900/50 min-h-[400px]">
           <FeeDistributionGrid
             doc={doc}

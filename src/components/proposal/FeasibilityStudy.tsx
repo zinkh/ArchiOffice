@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IconSparkles, IconWand, IconTrash, IconPlus, IconGripVertical, IconMap2, IconListDetails, IconLock,
-  IconFileTypePdf, IconFileTypeDocx, IconAlertTriangle, IconChevronDown, IconX, IconLoader2, IconPhoto,
+  IconFileTypePdf, IconFileTypeDocx, IconAlertTriangle, IconChevronDown, IconX, IconLoader2, IconPhoto, IconLink,
 } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
 import { startPressDrag } from '../../lib/pressDrag';
@@ -21,6 +21,7 @@ import { useUser } from '../../UserContext';
 import { SignedImage } from '../SignedImage';
 import { FeasibilityMapDialog } from './FeasibilityMapDialog';
 import { FeasibilityPhotoDialog, type PhotoWithCaption } from './FeasibilityPhotoDialog';
+import { PhotoUrlDialog } from './PhotoUrlDialog';
 import {
   FEASIBILITY_BLOCK_KINDS, appendBlock, buildFeasibilityBlock,
   type FeasibilityBlockKind, type FeasibilityIllustration, type FeasibilitySection, type FeasibilitySiteData,
@@ -83,6 +84,7 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
   const photoTargetRef = useRef<string | null>(null);
   // Photos choisies, en attente de leur légende avant l'envoi.
   const [pendingPhotos, setPendingPhotos] = useState<{ sectionId: string; files: File[] } | null>(null);
+  const [photoUrlSection, setPhotoUrlSection] = useState<string | null>(null);
 
   const sectionsRef = useRef(sections);
   sectionsRef.current = sections;
@@ -452,6 +454,12 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
                 className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60" style={softButton}>
                 {photoUploadingFor === section.id ? <IconLoader2 size={12} className="animate-spin" /> : <IconPhoto size={12} />} {t('feas_photo')}
               </button>
+              <button type="button" disabled={photoUploadingFor === section.id}
+                onClick={() => setPhotoUrlSection(section.id)}
+                title={t('feas_photo_url_title') as string}
+                className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60" style={softButton}>
+                <IconLink size={12} /> {t('feas_photo_url')}
+              </button>
               {!showInstructions && (
                 <button type="button" onClick={() => setInstructionsOpen(prev => new Set(prev).add(section.id))}
                   className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg" style={{ color: 'var(--tblr-muted)' }}>
@@ -493,6 +501,13 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
           const target = photoTargetRef.current;
           if (target && files.length) setPendingPhotos({ sectionId: target, files });
         }} />
+
+      {photoUrlSection && (
+        <PhotoUrlDialog
+          onFile={file => { setPendingPhotos({ sectionId: photoUrlSection, files: [file] }); setPhotoUrlSection(null); }}
+          onClose={() => setPhotoUrlSection(null)}
+        />
+      )}
 
       {pendingPhotos && (
         <FeasibilityPhotoDialog

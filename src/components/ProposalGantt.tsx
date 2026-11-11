@@ -1,12 +1,15 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DUREE_MISSION_PAR_DEFAUT_JOURS, planifierCalendrier } from '../lib/proposalExport';
+import { DUREE_MISSION_PAR_DEFAUT_JOURS, planifierCalendrierParTranches } from '../lib/proposalExport';
+import type { Tranche } from '../lib/tranches';
 import { parsePlanning, serializePlanning, withOverride, type ProposalPlanning } from '../lib/proposalPlanning';
 
-interface Mission { id: string; name: string; category?: string }
+interface Mission { id: string; name: string; category?: string; tranche_id?: string }
 
 interface ProposalGanttProps {
   missions: Mission[];
+  /** Tranches fermes et conditionnelles : chaque tranche démarre à la fin de la précédente. */
+  tranches?: Tranche[];
   /** JSON enregistré dans `proposals.planning`. */
   planning: string | null | undefined;
   onChange: (planning: string | null) => void;
@@ -17,15 +20,20 @@ const DAYS_PER_MONTH = 30;
 
 /**
  * Planning prévisionnel d'une proposition : le même calcul que l'export PDF
- * (`planifierCalendrier`), avec des réglages manuels (durée, jour de début) enregistrés
+ * (`planifierCalendrier`, tranche par tranche), avec des réglages manuels (durée, jour de début) enregistrés
  * dans la proposition. Les barres se déplacent (début) et s'étirent (durée) à la souris.
  */
-export default function ProposalGantt({ missions, planning, onChange }: ProposalGanttProps) {
+export default function ProposalGantt({ missions, tranches, planning, onChange }: ProposalGanttProps) {
   const { t } = useTranslation();
   const settings = useMemo(() => parsePlanning(planning), [planning]);
   const items = useMemo(
-    () => planifierCalendrier(missions.map(m => ({ id: m.id, designation: m.name })), DUREE_MISSION_PAR_DEFAUT_JOURS, settings.items),
-    [missions, settings.items],
+    () => planifierCalendrierParTranches(
+      missions.map(m => ({ id: m.id, designation: m.name, trancheId: m.tranche_id })),
+      tranches ?? [],
+      DUREE_MISSION_PAR_DEFAUT_JOURS,
+      settings.items,
+    ),
+    [missions, tranches, settings.items],
   );
   const chartRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);

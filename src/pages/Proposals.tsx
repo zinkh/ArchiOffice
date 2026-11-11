@@ -31,6 +31,7 @@ import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import ProposalGantt from '../components/ProposalGantt';
+import { listeTranches, tranchesActives } from '../lib/tranches';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedMeetings from '../components/LinkedMeetings';
@@ -50,6 +51,7 @@ import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardM
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
 import { DEFAULT_MISSIONS, calculateFeeRatios, defaultFeeDistribution, exportFeeDistributionToXlsx } from '../lib/feeDistribution';
 import { FeeDistributionGrid } from '../components/FeeDistributionGrid';
+import { TranchesToolbar, TranchesSummary } from '../components/TranchesControls';
 import { computeFees, applyDiscountAndVat, scopeShare, roundFee, FEE_ROUNDING_OPTIONS, PC_SCOPE_DEFAULT_SHARE_PCT, PC_SCOPE_MISSION_IDS, type FeeRounding, type MissionScope } from '../lib/proposalFees';
 
 const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
@@ -249,7 +251,7 @@ export default function Proposals() {
       missions: DEFAULT_MISSIONS.map(m => ({ 
         ...m, 
         amount: m.default_pct ? (0 * (m.default_pct / 100)) : 0,
-        percentages: {} 
+        percentages: { architect: 100 } 
       })) 
     }),
     construction_cost: 0,
@@ -620,7 +622,7 @@ export default function Proposals() {
   };
 
   const handleLoadMiqcpPhaseRepartition = () => {
-    const currentData = newProposal.fee_distribution ? JSON.parse(newProposal.fee_distribution) : { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
+    const currentData = newProposal.fee_distribution ? JSON.parse(newProposal.fee_distribution) : { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: { architect: 100 } })) };
     const baseTotal = newProposal.amount || 0;
     const precision = newProposal.decimal_precision ?? 2;
     const missions = (currentData.missions || []).map((m: any) => {
@@ -644,7 +646,10 @@ export default function Proposals() {
   }), [newProposal.construction_cost, newProposal.base_fee_percent, newProposal.complexity_rate, newProposal.mission_scope, newProposal.scope_share_pct, newProposal.fee_rounding, newProposal.discount_mode, newProposal.discount_value, newProposal.vat_rate]);
   // Décomposition affichée : calculée depuis les facteurs ; à défaut (montant saisi à la main), depuis le montant.
   const ganttMissions = React.useMemo(() => {
-    try { return (JSON.parse(newProposal.fee_distribution || '{}').missions || []).map((m: any) => ({ id: m.id, name: m.name, category: m.category })); } catch { return []; }
+    try { return (JSON.parse(newProposal.fee_distribution || '{}').missions || []).map((m: any) => ({ id: m.id, name: m.name, category: m.category, tranche_id: m.tranche_id })); } catch { return []; }
+  }, [newProposal.fee_distribution]);
+  const ganttTranches = React.useMemo(() => {
+    try { return tranchesActives(JSON.parse(newProposal.fee_distribution || '{}')) ? listeTranches(JSON.parse(newProposal.fee_distribution || '{}')) : []; } catch { return []; }
   }, [newProposal.fee_distribution]);
   const feeBreakdown = React.useMemo(
     () => computeFees(feeInputs) ?? applyDiscountAndVat(newProposal.fee_gross ?? newProposal.amount ?? 0, feeInputs),
@@ -1590,6 +1595,10 @@ export default function Proposals() {
                       >
                         <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
                       </button>
+                      <TranchesToolbar
+                        feeDistribution={newProposal.fee_distribution}
+                        onChange={(fd) => setNewProposal(prev => ({ ...prev, fee_distribution: fd }))}
+                      />
                       <button
                         type="button"
                         onClick={handleLoadMiqcpPhaseRepartition}
@@ -1635,6 +1644,10 @@ export default function Proposals() {
                       </button>
                     </div>
                   </div>
+                  <TranchesSummary
+                    feeDistribution={newProposal.fee_distribution}
+                    onChange={(fd) => setNewProposal(prev => ({ ...prev, fee_distribution: fd }))}
+                  />
                   <div className="overflow-x-auto border border-[var(--tblr-border)] rounded-lg p-2 bg-[var(--tblr-surface)] min-h-[400px]">
                     <FeeDistributionGrid
                       doc={newProposal}
@@ -1663,6 +1676,7 @@ export default function Proposals() {
                     </h3>
                     <ProposalGantt
                       missions={ganttMissions}
+                      tranches={ganttTranches}
                       planning={newProposal.planning}
                       onChange={(planning) => setNewProposal(prev => ({ ...prev, planning }))}
                     />

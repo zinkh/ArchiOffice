@@ -64,6 +64,17 @@ export const mapTileLimiter = rateLimit({
   message: { error: 'Trop de tuiles demandées. Patientez quelques instants.' },
 });
 
+// Photo insérée par lien dans une proposition (/api/feasibility/photo-from-url) :
+// le serveur télécharge une image publique pour le compte de la personne.
+export const photoUrlLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de liens traités. Patientez quelques instants.' },
+});
+
 // Outbound mail relays a tenant's own SMTP credentials — still worth capping
 // so a compromised/misused account can't be turned into a spam cannon.
 export const sendEmailLimiter = rateLimit({

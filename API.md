@@ -4,21 +4,42 @@ ArchiOffice's entire backend is a single Express app (`server.ts`) exposing a RE
 
 There is no separate public/partner API — this is the same API the React frontend uses. Treat it as an internal API you can also call directly, with the caveats in [Limitations](#limitations-for-integrators) below.
 
+Pour les assistants externes, voir [MCP.md](MCP.md). Pour retrouver une route
+et son implémentation exacte, voir [l’inventaire issu du code](docs/api-routes.md).
+
 ## Authentication
 
-Every route under `/api/**` (except the exemptions below) requires a **Supabase Auth JWT**:
+For an interactive integration, routes under `/api/**` (except the exemptions below) accept a **Supabase Auth JWT**:
 
 ```
 Authorization: Bearer <supabase-access-token>
 ```
 
-The server verifies the token by calling `supabaseAdmin.auth.getUser(token)` against your Supabase project — it does **not** accept an API key, a service-account token, or any other credential type. In practice this means an external integration needs to authenticate as a real user, the same way the SPA does:
+The server verifies a user JWT with `supabaseAdmin.auth.getUser(token)`. Authenticate
+as a user and refresh that session as needed. A Supabase project API key or
+service-role credential is not a user access token for this middleware.
 
-1. Sign in via Supabase Auth (email/password, or Google OAuth through `POST /api/auth/google/token`).
-2. Send the resulting access token as a Bearer token on every request.
-3. Refresh it before it expires, same as the frontend does with the Supabase JS client.
+### Automation API keys (n8n / HTTP clients)
 
-**There is currently no long-lived API key, no OAuth2 client-credentials grant, and no scoped/read-only token.** If you're planning a server-to-server integration, budget time for token refresh handling, and raise it with the team if you need a proper API-key mechanism — it doesn't exist yet (tracked in [ROADMAP.md](ROADMAP.md#platform)).
+A tenant administrator can issue a revocable `auto_at_` key from Settings or
+`POST /api/automation/api-keys` with `{ "name": "n8n" }`. The response is
+`{ id, key, name }` (HTTP 200). The clear key is shown **only once**; keep it in
+the integration’s secret store and send it as `Authorization: Bearer <key>`.
+`GET /api/automation/api-keys` returns redacted metadata;
+`DELETE /api/automation/api-keys/:id` revokes it.
+
+These keys bind the issuing user and tenant; they are not independent service
+accounts or scoped read-only credentials. Do not use `X-Tenant-Id` to attempt to
+move an automation key to another cabinet. The issuing user's role checks and
+the tenant suspension guard still apply. Source: `server/automationApiKeys.ts`
+and the authentication middleware in `server.ts`.
+
+The middleware also recognises MCP (`mcp_at_`), Telegram (`tg_at_`), temporary
+mail-relay (`mail_at_`) and desktop-device (`ds_at_`) tokens. These are issued
+by their respective connection flows, not interchangeable integration keys.
+Device tokens are restricted to `/api/desktop/v1`; see
+[desktop sync contract](docs/desktop-sync-contract.md). For MCP use the
+[OAuth connection flow](MCP.md), not a manually copied browser token.
 
 ### Multi-tenancy
 
@@ -39,20 +60,44 @@ Omit the header and the server serves the user's **default** tenant (`profiles.t
 ## Conventions
 
 - **Success responses** are raw JSON, not wrapped in an envelope: list endpoints return a plain array (`res.json(data || [])`), single-resource fetches return the object directly, creates return `{ id }` with `201`, and most updates/deletes return `{ success: true }`.
-- **Errors** are always `{ "error": "message" }` with one of these status codes:
+- **Errors** generally contain `{ "error": "message" }` with one of these status codes:
   | Code | Meaning |
   |---|---|
   | 400 | Validation error (missing/invalid fields) |
+  | 404 | Resource not found or not visible |
+  | 413 | Request or file too large |
+  | 429 | Rate limit reached; respect retry headers |
   | 401 | Missing or invalid bearer token |
   | 402 | Plan quota exceeded or trial expired (`checkQuota`) |
   | 403 | Role/permission check failed |
   | 409 | Conflict — duplicate slug, no tenant attached, etc. |
   | 500 | Unhandled server error (message usually includes the underlying cause) |
   | 503 | A required integration isn't configured (e.g. `GEMINI_API_KEY` unset) |
-- **Almost no pagination.** List endpoints return the full tenant-scoped table, so large tenants get large responses. The two exceptions are `GET /api/projects` and `GET /api/invoices`, which accept optional `limit` + `cursor` and then answer `{ data, nextCursor }` instead of a bare array; pass neither and they behave exactly as before. Don't assume any other list endpoint takes them.
-- **No API versioning**, except the self-contained `/api/maf/v1/*` namespace.
+- **Pagination depends on the route.** Many list endpoints return the full tenant-scoped table. For example, `GET /api/projects` and `GET /api/invoices`, which accept optional `limit` + `cursor` and then answer `{ data, nextCursor }` instead of a bare array; pass neither and they behave exactly as before. Don't assume any other list endpoint takes them.
+- **No uniform API versioning.** Some namespaces have their own version, notably `/api/maf/v1/*` and `/api/desktop/v1/*`.
 - **File uploads** use `multipart/form-data` with a `file` field (50 MB limit), handled by `multer` in memory. Used by the visas, plans, documents, proposal import, meeting photos, profile CV/avatar, and chat-attachment endpoints. Most land in Supabase Storage; documents, document versions, visa attachments and plans instead go to the tenant's **own** storage space when it has connected one (see *Storage* below).
 - **A stored file reference is not a fetchable URL.** Whatever `file_url` / `document_url` / `attachment_url` a response returns is an opaque reference the server resolves — a private Supabase object, or an object on the tenant's own Drive. Exchange it for a link with `GET /api/storage/signed-url?url=<reference>`; never fetch it directly.
+
+## Webhooks sortants : contrat de livraison
+
+Créer un abonnement avec `POST /api/webhooks` :
+`{ "name": "n8n", "targetUrl": "https://example.com/webhook", "eventTypes": ["invoice.created"] }`.
+Choisir les codes réellement rendus par `GET /api/webhooks/event-types` ; l’exemple
+ne remplace pas cette découverte. Le secret `secret` est rendu à la création
+uniquement. Les routes de gestion sont réservées aux administrateurs du cabinet.
+
+Chaque requête sortante est un POST JSON contenant `event`, `deliveryId`,
+`occurredAt`, `tenantId`, `data`. Les en-têtes sont `X-ArchiOffice-Event`,
+`X-ArchiOffice-Delivery` et `X-ArchiOffice-Signature: sha256=<hex>`.
+Vérifier ce dernier avec HMAC-SHA256 sur les **octets bruts du corps**, avec le
+secret de l’abonnement, et une comparaison en temps constant. Dédupliquer selon
+l’identifiant de livraison, sans supposer qu’un événement ne sera reçu qu’une fois.
+
+`POST /api/webhooks/:id/test` envoie un ping ;
+`GET /api/webhooks/:id/deliveries` donne l’historique ;
+`POST /api/webhooks/:id/deliveries/:deliveryId/retry` relance une livraison.
+Un échec de livraison ne fait pas échouer l’action métier ; ne pas supposer une
+livraison garantie ni une relance automatique. Source : `server/webhookDispatch.ts`.
 
 ## Endpoint catalog
 
@@ -75,7 +120,7 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET/PUT /api/profile`, `GET /api/profile/:userId`, `POST/DELETE /api/profile/cv`, `POST/PUT/DELETE /api/profile/education(/:id)`, `POST/PUT/DELETE /api/profile/experience(/:id)`.
 
 ### Projects & planning
-- `GET/POST/PUT/DELETE /api/projects(/:id)`, `GET /api/projects/:id/full` (full project payload for the detail page; also records the opening in `project_recent_views`, which `GET /api/projects` reads back as a per-user `last_opened_at` — the default « ouverts récemment » order of the projects list).
+- `GET/POST /api/projects`, `PUT/DELETE /api/projects/:id`, `GET /api/projects/:id/full` (full project payload for the detail page; also records the opening in `project_recent_views`, which `GET /api/projects` reads back as a per-user `last_opened_at` — the default « ouverts récemment » order of the projects list).
 - `GET/POST/DELETE /api/project_categories(/:id)`.
 - `GET/POST/PUT/DELETE /api/project-templates(/:id)`.
 - `GET/POST/PUT/DELETE /api/tasks(/:id)` — Gantt tasks.
@@ -123,7 +168,7 @@ CCTP is not a separate resource — it's the `cctpDescription`/`cctpOnly` fields
 - `GET/POST/PUT/DELETE /api/projects/:projectId/observations`, `GET/PUT/DELETE /api/observations/:id`, `GET /api/reports/:reportId/observations`, `POST /api/observations/:id/link/:reportId`.
 
 ### Documents & plans
-- `GET/POST/PUT/DELETE /api/documents(/:id)` (file upload), `GET /api/documents/:id/versions`, `PATCH /api/documents/:id/statut`, `GET/POST /api/documents/:id/diffusions`, `PATCH /api/documents/:id/diffusions/:diffId/acknowledge`.
+- `GET/POST /api/documents`, `PUT/DELETE /api/documents/:id` (file upload), `GET /api/documents/:id/versions`, `PATCH /api/documents/:id/statut`, `GET/POST /api/documents/:id/diffusions`, `PATCH /api/documents/:id/diffusions/:diffId/acknowledge`.
 - `GET/POST/DELETE /api/plans(/:id)` (file upload).
 
 ### Inspiration boards
@@ -190,6 +235,11 @@ Writes on `/api/external-storage/*` require a tenant admin.
 ### Billing & plans
 - `GET /api/billing/status`, `POST /api/billing/checkout`, `POST /api/billing/webhook` (Stancer, no auth), `GET /api/billing/history`, `GET /api/billing/credits/packs`, `POST /api/billing/credits/checkout`.
 
+### Automation and MCP connections
+- `GET/POST /api/automation/api-keys`, `DELETE /api/automation/api-keys/:id` — tenant admin key management.
+- `GET /api/webhooks/event-types`, `GET/POST /api/webhooks` — outgoing event subscriptions; see the generated inventory for delivery, update, test and revoke routes.
+- `POST /api/mcp/authorize`, `GET /api/mcp/connections`, `DELETE /api/mcp/connections/:id` — MCP consent and connection management. The transport itself is `POST /mcp`, outside `/api`.
+
 ### External integrations
 Connection status endpoints are available to every tenant member. Tenant-wide administration (`auth`/connect, `disconnect`, `sync`, credential `test`, and configuration through `PUT /api/settings`) is restricted to users whose tenant role is `admin`. Operational invoice submission and status lookup keep their domain-specific permissions.
 
@@ -226,11 +276,49 @@ Each of these follows roughly the same shape (`status`, `disconnect`, and OAuth 
 
 ## Limitations for integrators
 
-- **No API key / service-account auth.** You must hold a real Supabase user session. Plan for token refresh.
+- **No independent service-account auth or universal read-only scope.** Automation keys exist (see Authentication) and act as their issuing user in their bound tenant. Refresh interactive user sessions; revoke and replace automation keys when needed.
 - **CORS is an allow-list of known ArchiOffice origins** (`server.ts`, shared with the Host-header redirect check), not a blanket reflect-any-origin — a browser-based third-party integration running from its own origin won't get a CORS grant at all, and only `Content-Type`/`Authorization` are permitted as custom request headers regardless.
 - **Rate limiting exists only on specific endpoints**, not as a blanket policy — see `server/rateLimit.ts` (public auth, local login, AI generation, outbound email, the billing webhook, the SMTP test). Self-throttle everywhere else; the server won't do it for you.
-- **No outbound webhooks/events.** The only webhooks are inbound (Stancer billing events, Ragic sync). If you need to react to changes in ArchiOffice in near-real-time, you'll need to poll.
-- **Pagination exists only on `/api/projects` and `/api/invoices`** (opt-in `?limit=&cursor=`, returning `{ data, nextCursor }` — omit both and you get the old plain-array response). Every other list endpoint still returns the full tenant-scoped array, unpaged.
+- **Outbound webhooks exist.** Configure subscriptions via `/api/webhooks` and discover supported events with `/api/webhooks/event-types`. Delivery history, tests and manual retries are available. Do not assume every table change emits an event; see `server/webhookEvents.ts`.
+- **Pagination is not uniform.** `/api/projects` and `/api/invoices` support opt-in `?limit=&cursor=` and return `{ data, nextCursor }`; other namespaces, including desktop sync, have their own contracts. Inspect each route rather than applying one list format globally.
 - **Duplicated data model in one spot**: `/api/dpgf` vs `/api/dpgfs` (per-field CRUD vs. a whole-document JSON blob, same underlying `dpgfs` table) reflects an in-progress consolidation, not two supported alternatives — check [ROADMAP.md](ROADMAP.md) or ask before building against either.
 
 See [ROADMAP.md](ROADMAP.md) for what's implemented vs. planned at a feature level, and the main [README](README.md) for local setup and the end-to-end product workflow.
+
+## Exemples REST vérifiés dans les routes
+
+```bash
+# Session utilisateur : lister les cabinets accessibles.
+curl --fail-with-body "$BASE_URL/api/tenants/mine" \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# Première page : limit entre 1 et 500 ; réponse { data, nextCursor }.
+curl --fail-with-body "$BASE_URL/api/projects?limit=20" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H "X-Tenant-Id: $TENANT_ID"
+
+# La lecture détaillée enregistre aussi l’ouverture dans les vues récentes.
+curl --fail-with-body "$BASE_URL/api/projects/$PROJECT_ID/full" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" -H "X-Tenant-Id: $TENANT_ID"
+```
+
+Définir `BASE_URL` sur l’origine de l’instance et fournir les secrets depuis un
+gestionnaire de secrets. Les identifiants proviennent des lectures précédentes.
+Avec une clé d’automatisation, employer la clé comme Bearer et son cabinet lié.
+
+Pour la page suivante, envoyer le `nextCursor` opaque dans le paramètre `cursor`
+(URL-encodé), avec le même cabinet et le même `limit`. Ne pas traiter cette
+réponse comme un tableau simple. Sans `limit`, `/api/projects` renvoie un tableau.
+Les objets et statuts de réponse varient selon les routes : lire leur gestionnaire
+avant de généraliser une convention.
+
+Pour les pièces jointes REST, utiliser `FormData` avec `file`, sans fixer soi-même
+le boundary `Content-Type`. Pour les références de stockage, obtenir un lien signé
+via `/api/storage/signed-url` avec le paramètre `url` encodé. Les liens peuvent
+expirer ; conserver la référence plutôt que le lien temporaire.
+
+## Maintenir cette référence
+
+`npm run docs:routes` régénère l’inventaire des déclarations de routes ;
+`npm run docs:check` vérifie qu’il correspond au code. L’inventaire indique ses
+limites et les sources : il ne prétend pas décrire les corps JSON, les droits ou
+les branches activées à l’exécution. Aucun schéma OpenAPI exhaustif n’est annoncé.

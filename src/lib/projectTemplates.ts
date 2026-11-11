@@ -109,7 +109,7 @@ export function feeDistributionFromTemplate(
         category: complementaire ? 'Missions complémentaires' : 'Mission base',
         default_pct: complementaire ? undefined : pct,
         amount: complementaire ? 0 : Number((total * (pct / 100)).toFixed(precision)),
-        percentages: {},
+        percentages: { architect: 100 },
       };
     }),
   });

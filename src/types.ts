@@ -1720,6 +1720,8 @@ export interface ContratMOEMission {
   pct?: number;
   incluse: boolean;
   category?: ContratMissionCategory;
+  /** Libellé de la tranche (ferme ou conditionnelle) reprise de la proposition, le cas échéant. */
+  tranche?: string;
 }
 
 /**

@@ -9,6 +9,11 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Contact, Milestone } from '../types';
 import { DEFAULT_MISSIONS, applyDefaultCotraitantShares } from '../lib/feeDistribution';
+import {
+  tranchesActives, listeTranches, trancheDeMission, missionsDeTranche, totauxParTranche,
+  modifierTranche, supprimerTranche, deplacerTranche, affecterMission, dupliquerMissionSurTranche,
+  type Tranche,
+} from '../lib/tranches';
 
 /**
  * Champ numérique contrôlé : affiche toujours la valeur calculée (un `defaultValue`
@@ -66,7 +71,7 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
         return JSON.parse(doc.fee_distribution);
       } catch (e) {}
     }
-    return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
+    return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: { architect: 100 } })) };
   }, [doc.fee_distribution]);
 
   React.useEffect(() => {
@@ -144,9 +149,7 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
     updateMission(missionId, 'amount', (newRelPct * refAmount) / 100);
   };
 
-  // Un cotraitant qui apparaît reçoit, sur chaque mission, la part par défaut du
-  // tableau type du cabinet ; l'architecte prend le complément. Seules les parts
-  // jamais saisies sont complétées : une valeur déjà posée, même à 0, reste.
+  // Compléter uniquement les parts absentes, sans modifier les saisies manuelles.
   const contactIdsKey = selectedContacts.map((c: any) => c.id).join('|');
   React.useEffect(() => {
     const ids = contactIdsKey ? contactIdsKey.split('|') : [];
@@ -154,6 +157,11 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
     if (next) onChange({ ...data, missions: next });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contactIdsKey, doc.fee_distribution]);
+
+  // Tranches fermes et conditionnelles (voir src/lib/tranches.ts) : sans liste de
+  // tranches enregistrée, la grille s'affiche exactement comme avant.
+  const tranchesOn = tranchesActives(data);
+  const tranches: Tranche[] = listeTranches(data);
 
   const deleteMission = (missionId: string) => {
     const newData = { ...data, missions: data.missions.filter((m: any) => m.id !== missionId) };
@@ -164,15 +172,18 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
   const tdStyle: React.CSSProperties = { padding: '2px 4px', border: '1px solid #e2e8f0', fontSize: 12 };
   const inputStyle: React.CSSProperties = { width: '100%', border: 'none', background: 'transparent', fontSize: 12, padding: '2px', outline: 'none', textAlign: 'right' };
   const catStyle: React.CSSProperties = { padding: '3px 6px', border: '1px solid #e2e8f0', background: '#e2e8f0', fontWeight: 700, fontSize: 12 };
+  const trancheStyle: React.CSSProperties = { padding: '5px 6px', border: '1px solid #94a3b8', background: '#cbd5e1', fontWeight: 700, fontSize: 13 };
   const totalStyle: React.CSSProperties = { padding: '3px 6px', border: '1px solid #e2e8f0', background: '#f8fafc', fontWeight: 700, fontSize: 12, textAlign: 'right' };
 
   const colCount = 6 + selectedContacts.length * 2 + 1;
 
   const renderMissionRow = (m: any) => {
-    const isBase = m.category === 'Mission base';
+    const isBase = m.category === 'Mission base' && !String(m.id).includes('__');
+    const trancheCourante = trancheDeMission(m, tranches);
+    const autresTranches = tranches.filter(x => x.id !== trancheCourante.id);
     const amt = m.amount || 0;
     const relPct = refAmount > 0 ? (amt / refAmount) * 100 : 0;
-    const archPct = m.percentages['architect'] || 0;
+    const archPct = m.percentages?.['architect'] ?? 100;
     const archAmt = amt * (archPct / 100);
     let sumPct = archPct;
     selectedContacts.forEach((c: any) => { sumPct += (m.percentages[c.id] || 0); });
@@ -206,7 +217,27 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
             </React.Fragment>
           );
         })}
-        <td style={{ ...tdStyle, textAlign: 'center' }}>
+        <td style={{ ...tdStyle, textAlign: 'center', whiteSpace: 'nowrap' }}>
+          {tranchesOn && autresTranches.length > 0 && (
+            <>
+              <select
+                aria-label={t('fee_tranches_move')} title={t('fee_tranches_move')} value=""
+                style={{ fontSize: 11, maxWidth: 46 }}
+                onChange={e => { if (e.target.value) onChange(affecterMission(data, m.id, e.target.value)); }}
+              >
+                <option value="">⇄</option>
+                {autresTranches.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
+              </select>
+              <select
+                aria-label={t('fee_tranches_split')} title={t('fee_tranches_split')} value=""
+                style={{ fontSize: 11, maxWidth: 46 }}
+                onChange={e => { if (e.target.value) onChange(dupliquerMissionSurTranche(data, m.id, e.target.value)); }}
+              >
+                <option value="">⧉</option>
+                {autresTranches.map(x => <option key={x.id} value={x.id}>{x.label}</option>)}
+              </select>
+            </>
+          )}
           {!isBase && (
             <button onClick={() => deleteMission(m.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 14 }} title="Supprimer">🗑️</button>
           )}
@@ -215,22 +246,22 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
     );
   };
 
-  const renderTotalRow = (label: string, missions: any[]) => {
+  const renderTotalRow = (label: string, missions: any[], opts: { key?: string; display?: string } = {}) => {
     const totalAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
     const relPct = refAmount > 0 ? (totalAmt / refAmount) * 100 : 0;
     // Le sous-total de base doit faire 100 % des honoraires de base : on signale tout écart.
-    const relEcart = label === 'Sous-total Base' && refAmount > 0 && Math.abs(relPct - 100) > 0.005;
+    const relEcart = !tranchesOn && label === 'Sous-total Base' && refAmount > 0 && Math.abs(relPct - 100) > 0.005;
     const totalSolde = missions.reduce((acc: number, m: any) => {
       const mAmt = m.amount || 0;
-      const archPct = m.percentages['architect'] || 0;
+      const archPct = m.percentages?.['architect'] ?? 100;
       let sumPct = archPct;
       selectedContacts.forEach((c: any) => { sumPct += (m.percentages[c.id] || 0); });
       return acc + mAmt * ((100 - sumPct) / 100);
     }, 0);
-    const totalArchAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages['architect'] || 0) / 100), 0);
+    const totalArchAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages?.['architect'] ?? 100) / 100), 0);
     return (
-      <tr key={label}>
-        <td style={totalStyle}>{totalLabels[label] ?? label}</td>
+      <tr key={opts.key ?? label}>
+        <td style={totalStyle}>{opts.display ?? totalLabels[label] ?? label}</td>
         <td style={totalStyle}>{safeNum(totalAmt).toLocaleString('fr-FR')}</td>
         <td
           style={relEcart ? { ...totalStyle, color: '#b91c1c' } : totalStyle}
@@ -290,6 +321,70 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
           </tr>
         </thead>
         <tbody>
+          {tranchesOn ? (
+            <>
+              {tranches.map((tr, idx) => {
+                const missionsTr = missionsDeTranche(data.missions, tr, tranches);
+                const parCategorie = [
+                  { cat: 'Mission base', label: t('fee_grid_cat_base') },
+                  { cat: 'Mission Exécution', label: t('fee_grid_cat_exe') },
+                  { cat: 'Missions complémentaires', label: t('fee_grid_cat_comp') },
+                ];
+                return (
+                  <React.Fragment key={tr.id}>
+                    <tr>
+                      <td style={trancheStyle} colSpan={colCount}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <input
+                            key={`${tr.id}-${tr.label}`} defaultValue={tr.label} aria-label="Nom de la tranche"
+                            style={{ ...inputStyle, textAlign: 'left', width: 220, fontWeight: 700, background: '#fff', border: '1px solid #94a3b8', borderRadius: 4 }}
+                            onBlur={e => { if (e.target.value.trim() && e.target.value !== tr.label) onChange(modifierTranche(data, tr.id, { label: e.target.value.trim() })); }}
+                          />
+                          <select
+                            value={tr.type} aria-label="Type de tranche" style={{ fontSize: 12 }}
+                            onChange={e => onChange(modifierTranche(data, tr.id, { type: e.target.value as Tranche['type'] }))}
+                          >
+                            <option value="ferme">{t('fee_tranches_type_firm')}</option>
+                            <option value="conditionnelle">{t('fee_tranches_type_cond')}</option>
+                          </select>
+                          {tr.type === 'conditionnelle' && (
+                            <input
+                              key={`${tr.id}-cond`} defaultValue={tr.condition ?? ''} placeholder={t('fee_tranches_condition_ph')}
+                              style={{ ...inputStyle, textAlign: 'left', flex: 1, minWidth: 240, fontWeight: 400, background: '#fff', border: '1px solid #94a3b8', borderRadius: 4 }}
+                              onBlur={e => { if (e.target.value !== (tr.condition ?? '')) onChange(modifierTranche(data, tr.id, { condition: e.target.value })); }}
+                            />
+                          )}
+                          <button type="button" title={t('fee_tranches_up')} disabled={idx === 0} onClick={() => onChange(deplacerTranche(data, tr.id, -1))} style={{ border: 'none', background: 'none', cursor: 'pointer' }}>↑</button>
+                          <button type="button" title={t('fee_tranches_down')} disabled={idx === tranches.length - 1} onClick={() => onChange(deplacerTranche(data, tr.id, 1))} style={{ border: 'none', background: 'none', cursor: 'pointer' }}>↓</button>
+                          {tranches.length > 1 && (
+                            <button type="button" title={t('fee_tranches_remove')} onClick={() => onChange(supprimerTranche(data, tr.id))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444' }}>🗑️</button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                    {parCategorie.map(({ cat, label }) => {
+                      const lignes = missionsTr.filter((m: any) => m.category === cat);
+                      if (lignes.length === 0) return null;
+                      return (
+                        <React.Fragment key={cat}>
+                          <tr><td style={catStyle} colSpan={colCount}>{label}</td></tr>
+                          {lignes.map(renderMissionRow)}
+                        </React.Fragment>
+                      );
+                    })}
+                    {missionsTr.length === 0 && (
+                      <tr><td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b' }} colSpan={colCount}>{t('fee_tranches_empty')}</td></tr>
+                    )}
+                    {renderTotalRow(tr.label, missionsTr, { key: `total-${tr.id}`, display: t('fee_tranches_total', { label: tr.label }) })}
+                  </React.Fragment>
+                );
+              })}
+              {renderTotalRow('TOTAL FERME', tranches.filter(x => x.type === 'ferme').flatMap(x => missionsDeTranche(data.missions, x, tranches)), { key: 'total-ferme', display: t('fee_tranches_total_firm') })}
+              {tranches.some(x => x.type === 'conditionnelle') && renderTotalRow('TOTAL CONDITIONNEL', tranches.filter(x => x.type === 'conditionnelle').flatMap(x => missionsDeTranche(data.missions, x, tranches)), { key: 'total-cond', display: t('fee_tranches_total_cond') })}
+              {renderTotalRow('TOTAL GENERAL HT', data.missions)}
+            </>
+          ) : (
+            <>
           <tr><td style={catStyle} colSpan={colCount}>{t('fee_grid_cat_base')}</td></tr>
           {baseMissions.map(renderMissionRow)}
           {renderTotalRow('Sous-total Base', baseMissions)}
@@ -303,6 +398,9 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
           {compMissions.map(renderMissionRow)}
           {renderTotalRow('Sous-total Complémentaire', compMissions)}
           {renderTotalRow('TOTAL GENERAL HT', allMissions)}
+
+            </>
+          )}
 
           <tr>
             <td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b' }}>{t('fee_grid_vat', { rate: vatRate })}</td>

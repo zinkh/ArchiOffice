@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   formatCurrency, formatPercent, buildDefaultTemplate, loadStoredTemplate,
-  mapProposalToPdfData, planifierCalendrier, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS,
+  mapProposalToPdfData, planifierCalendrier, planifierCalendrierParTranches, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS,
 } from '../proposalExport';
 import type { Proposal } from '../../types';
 
@@ -190,5 +190,45 @@ describe('planifierCalendrier : réglages manuels', () => {
     expect(items[1].apres).toBe('');
     expect(items[2].debutJours).toBe(55);
     expect(items[2].apres).toBe('c_aps');
+  });
+});
+
+describe('planifierCalendrierParTranches', () => {
+  const tranches = [
+    { id: 'tf', type: 'ferme' as const },
+    { id: 'tc', type: 'conditionnelle' as const },
+  ];
+  const missions = [
+    { id: 'esquisse', designation: 'Esquisse', trancheId: 'tf' },
+    { id: 'aps', designation: 'A.P.S.', trancheId: 'tf' },
+    { id: 'det', designation: 'D.E.T.', trancheId: 'tc' },
+    { id: 'visa', designation: 'VISA', trancheId: 'tc' },
+  ];
+  const par = (items: ReturnType<typeof planifierCalendrierParTranches>, id: string) => items.find(i => i.id === 'c_' + id)!;
+
+  it('sans tranches (ou une seule), donne le planning habituel', () => {
+    expect(planifierCalendrierParTranches(missions, [])).toEqual(planifierCalendrier(missions));
+    expect(planifierCalendrierParTranches(missions, [tranches[0]])).toEqual(planifierCalendrier(missions));
+  });
+
+  it('démarre la conditionnelle à la fin de la ferme, phases parallèles comprises', () => {
+    const items = planifierCalendrierParTranches(missions, tranches);
+    expect(par(items, 'aps').debutJours + par(items, 'aps').dureeJours).toBe(30);
+    expect(par(items, 'det').debutJours).toBe(30);
+    expect(par(items, 'det').apres).toBe('c_aps');
+    expect(par(items, 'visa').debutJours).toBe(30);
+    expect(par(items, 'det').trancheId).toBe('tc');
+    expect(par(items, 'esquisse').trancheId).toBe('tf');
+  });
+
+  it('garde un jour de début réglé à la main absolu', () => {
+    const items = planifierCalendrierParTranches(missions, tranches, 15, { det: { debut: 90 } });
+    expect(par(items, 'det').debutJours).toBe(90);
+    expect(par(items, 'det').apres).toBe('');
+  });
+
+  it('rattache une mission à tranche inconnue à la tranche ferme', () => {
+    const items = planifierCalendrierParTranches([{ id: 'x', designation: 'Étude', trancheId: 'fantome' }], tranches);
+    expect(par(items, 'x').trancheId).toBe('tf');
   });
 });
