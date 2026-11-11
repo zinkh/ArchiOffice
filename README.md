@@ -15,7 +15,7 @@
 - **Your own file storage (optional)** — connect the cabinet's Google Drive, Dropbox, Nextcloud or kDrive, and new documents and plans are written there instead, one folder per affaire and one sub-folder per mission phase.
 - **Offline-first desktop option** — an Electron build with local storage and cloud sync for working without a constant connection.
 
-Want the full picture of what's implemented vs. still planned? See [ROADMAP.md](ROADMAP.md). Building an integration or calling the API directly? See [API.md](API.md).
+Want the full picture of what's implemented vs. still planned? See [ROADMAP.md](ROADMAP.md). Building an integration or calling the API directly? See [API.md](API.md) and [MCP.md](MCP.md).
 
 ## Screenshots
 

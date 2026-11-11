@@ -23,7 +23,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:agents": "tsx scripts/eval-agents.ts",
-    "electron:build": "npm run build && npm run build:server && electron-builder"
+    "electron:build": "npm run build && npm run build:server && electron-builder",
+    "docs:routes": "node scripts/generate-api-routes.mjs",
+    "docs:check": "node scripts/generate-api-routes.mjs --check",
+    "test:docs": "node --test scripts/generate-api-routes.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
