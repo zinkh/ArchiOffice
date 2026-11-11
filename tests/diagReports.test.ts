@@ -67,3 +67,36 @@ describe('sanitizeRichHtml', () => {
     expect(sanitizeRichHtml(html)).toBe(html);
   });
 });
+
+describe('Rédaction IA des rapports : plan Enterprise, aperçu pendant l\'essai', () => {
+  const aiWrite = (id: string) => `/api/projects/${id}/diag-reports/ai-write`;
+  const body = { mode: 'write', instruction: '' }; // refusé en 400 une fois le plan accepté : aucun appel au modèle
+
+  it('refuse un plan inférieur à Enterprise', async () => {
+    const tenantId = makeTenant({ plan: 'starter' });
+    const { token } = makeUser(tenantId);
+    seedProject(tenantId, 'diag-5');
+    const res = await request(app).post(aiWrite('diag-5')).set(authHeader(token)).send(body);
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('AI_ENTERPRISE_ONLY');
+  });
+
+  it('refuse un essai expiré', async () => {
+    const tenantId = makeTenant({ plan: 'trial', trial_ends_at: '2020-01-01T00:00:00Z' });
+    const { token } = makeUser(tenantId);
+    seedProject(tenantId, 'diag-6');
+    expect((await request(app).post(aiWrite('diag-6')).set(authHeader(token)).send(body)).status).toBe(403);
+  });
+
+  it('laisse passer Enterprise et un essai en cours (aperçu)', async () => {
+    const future = new Date(Date.now() + 5 * 86_400_000).toISOString();
+    for (const [plan, extra] of [['enterprise', {}], ['trial', { trial_ends_at: future }]] as const) {
+      const tenantId = makeTenant({ plan, ...extra });
+      const { token } = makeUser(tenantId);
+      const id = `diag-${plan}`;
+      seedProject(tenantId, id);
+      const res = await request(app).post(aiWrite(id)).set(authHeader(token)).send(body);
+      expect(res.status).toBe(400);
+    }
+  });
+});

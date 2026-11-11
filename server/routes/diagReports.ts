@@ -16,10 +16,12 @@ import { extractProjectDocuments } from './projectNotices';
 import { projectNoticeFacts } from '../../src/lib/projectNotices';
 import { htmlToPlainText } from '../../src/lib/richText';
 import { buildDiagPrompt, isDiagAiMode } from '../../src/lib/diagReports';
+import { diagAiAccess } from '../../src/lib/diagAiAccess';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  getTenantPlan: (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
   reserveAiCredit: (tenantId: string, estimateCents: number) => Promise<boolean>;
   settleAiCredit: (params: {
     tenantId: string; userId: string; agentId: string | null; conversationId: string | null;
@@ -49,7 +51,7 @@ async function projectForTenant(supabaseAdmin: any, tenantId: string, projectId:
 }
 
 export function registerDiagReportRoutes(app: Express, deps: RouteDeps) {
-  const { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents } = deps;
+  const { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents } = deps;
 
   async function runModel(tenantId: string, userId: string, prompt: string) {
     const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
@@ -147,6 +149,13 @@ export function registerDiagReportRoutes(app: Express, deps: RouteDeps) {
     let tenantId = '';
     try {
       tenantId = await getTenantId(req.user.id);
+
+      // Rédaction réservée au plan Enterprise ; l'essai de 15 jours en cours la découvre en aperçu.
+      const { plan } = await getTenantPlan(tenantId);
+      if (diagAiAccess(plan) === 'locked') {
+        return res.status(403).json({ error: 'La rédaction assistée par l’IA est réservée au plan Enterprise.', code: 'AI_ENTERPRISE_ONLY' });
+      }
+
       const mode = req.body?.mode;
       if (!isDiagAiMode(mode)) return res.status(400).json({ error: 'Commande de rédaction inconnue.' });
       const selection = str(req.body?.selection, MAX_SELECTION);
@@ -179,7 +188,7 @@ export function registerDiagReportRoutes(app: Express, deps: RouteDeps) {
 
       const out = await runModel(tenantId, req.user.id, prompt);
       if ('noCredit' in out) return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
-      res.json({ text: out.text.trim().slice(0, MAX_RESULT) });
+      res.json({ text: out.text.trim().slice(0, MAX_RESULT), access: diagAiAccess(plan) });
     } catch (error: any) {
       if (error?.code === 'LLM_NOT_CONFIGURED') return res.status(503).json({ error: error.message });
       console.error('[POST diag report AI]', error);

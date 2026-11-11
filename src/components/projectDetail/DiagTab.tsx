@@ -7,8 +7,12 @@
 // reste alors celui de l'étude de sol.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconFileTypeDocx, IconFileTypePdf, IconPlus, IconTrash } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
+import { useUser } from '../../UserContext';
+import { useSettings } from '../../hooks/useSettings';
+import { diagAiAccess } from '../../lib/diagAiAccess';
+import type { AgencySettings } from '../../lib/proposalExport';
 import { operationNature } from '../../lib/proposalSurfaces';
 import type { DiagReport } from '../../lib/diagReports';
 import type { Project } from '../../types';
@@ -58,7 +62,11 @@ export function DiagTab({ project }: { project: Project }) {
 }
 
 function DiagReports({ project }: { project: Project }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { tenantPlan, trialEndsAt } = useUser();
+  const { settings } = useSettings();
+  const access = diagAiAccess(tenantPlan, trialEndsAt);
+  const [exporting, setExporting] = useState<'pdf' | 'docx' | null>(null);
   const [reports, setReports] = useState<DiagReport[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,6 +167,27 @@ function DiagReports({ project }: { project: Project }) {
     return res.text;
   }, [base, flush, selectedId]);
 
+  const exportReport = async (format: 'pdf' | 'docx') => {
+    if (!selected) return;
+    setExporting(format);
+    setLoadError('');
+    try {
+      await flush();
+      const { exportDiagReportPdf, exportDiagReportDocx } = await import('../../lib/diagReportExport');
+      await (format === 'pdf' ? exportDiagReportPdf : exportDiagReportDocx)(project, selected, settings as AgencySettings);
+    } catch {
+      setLoadError(t('diag_export_error') as string);
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const aiHint = access === 'full'
+    ? t('diag_ai_hint')
+    : access === 'preview'
+      ? t('diag_ai_trial_preview', { date: trialEndsAt ? new Date(trialEndsAt).toLocaleDateString(i18n.language) : '' })
+      : t('diag_ai_enterprise_only');
+
   if (loading) return <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>…</p>;
 
   return (
@@ -211,6 +240,19 @@ function DiagReports({ project }: { project: Project }) {
               <span aria-live="polite" className="text-xs" style={{ color: save === 'error' ? 'var(--tblr-danger, #b42318)' : 'var(--tblr-muted)' }}>
                 {save === 'saving' ? t('diag_saving') : save === 'saved' ? t('diag_saved') : save === 'error' ? t('diag_save_error') : ''}
               </span>
+              {(['pdf', 'docx'] as const).map(format => (
+                <button
+                  key={format}
+                  type="button"
+                  onClick={() => void exportReport(format)}
+                  disabled={exporting !== null || !selected.content.trim()}
+                  className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-2 text-xs font-semibold disabled:opacity-40"
+                  style={{ borderColor: 'var(--tblr-border-color)', color: 'var(--tblr-body-color)' }}
+                >
+                  {format === 'pdf' ? <IconFileTypePdf size={16} /> : <IconFileTypeDocx size={16} />}
+                  {exporting === format ? t('diag_exporting') : t(format === 'pdf' ? 'diag_export_pdf' : 'diag_export_docx')}
+                </button>
+              ))}
               <button
                 type="button"
                 onClick={() => void remove(selected.id)}
@@ -222,14 +264,15 @@ function DiagReports({ project }: { project: Project }) {
                 <IconTrash size={16} />
               </button>
             </div>
-            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('diag_ai_hint')}</p>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{aiHint}</p>
             {/* key : changer de rapport remonte l'éditeur avec le contenu du nouveau. */}
             <RichTextEditor
               key={selected.id}
               value={selected.content}
               onChange={html => { patchLocal(selected.id, { content: html }); schedule(selected.id, { content: html }); }}
               placeholder={t('diag_report_placeholder') as string}
-              ai={ai}
+              ai={access === 'locked' ? undefined : ai}
+              aiLocked={access === 'locked' ? (t('diag_ai_enterprise_only') as string) : undefined}
               minHeight={420}
               ariaLabel={selected.title}
             />

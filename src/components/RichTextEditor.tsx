@@ -35,6 +35,8 @@ interface RichTextEditorProps {
   placeholder?: string;
   /** Fournie : les commandes IA apparaissent (menu « / » et barre d'outils). Elle renvoie le texte proposé. */
   ai?: (request: AiWriteRequest) => Promise<string>;
+  /** Sans `ai` : le message affiché quand on lance une commande IA (plan insuffisant). Les commandes restent visibles. */
+  aiLocked?: string;
   minHeight?: number;
   disabled?: boolean;
   ariaLabel?: string;
@@ -49,6 +51,8 @@ interface AiPanelState {
   error: string;
   target: { from: number; to: number };
   selection: string;
+  /** Commande IA indisponible (plan) : pas de nouvelle tentative possible. */
+  locked?: boolean;
 }
 
 const REWRITE_MODES: readonly AiMode[] = ['rewrite', 'shorten', 'expand', 'fix'];
@@ -78,7 +82,7 @@ function ToolbarButton({ label, active, disabled, onClick, children }: {
   );
 }
 
-export function RichTextEditor({ value, onChange, placeholder, ai, minHeight = 320, disabled, ariaLabel }: RichTextEditorProps) {
+export function RichTextEditor({ value, onChange, placeholder, ai, aiLocked, minHeight = 320, disabled, ariaLabel }: RichTextEditorProps) {
   const { t } = useTranslation();
   const wrapRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Editor | null>(null);
@@ -90,8 +94,8 @@ export function RichTextEditor({ value, onChange, placeholder, ai, minHeight = 3
   const [panel, setPanel] = useState<AiPanelState | null>(null);
 
   const items = useMemo(
-    () => (slash ? filterSlashItems(SLASH_ITEMS, slash.query, i => t(i.labelKey) as string, !!ai) : []),
-    [slash, ai, t],
+    () => (slash ? filterSlashItems(SLASH_ITEMS, slash.query, i => t(i.labelKey) as string, !!ai || !!aiLocked) : []),
+    [slash, ai, aiLocked, t],
   );
 
   // Les gestionnaires clavier de l'éditeur sont créés une fois : ils lisent l'état courant ici.
@@ -175,7 +179,11 @@ export function RichTextEditor({ value, onChange, placeholder, ai, minHeight = 3
 
   const startAi = useCallback((mode: AiMode) => {
     const ed = editorRef.current;
-    if (!ai || !ed) return;
+    if (!ed) return;
+    if (!ai) {
+      if (aiLocked) setPanel({ mode, instruction: '', status: 'error', result: '', error: aiLocked, target: { from: 0, to: 0 }, selection: '', locked: true });
+      return;
+    }
     const { from, to, empty, $from } = ed.state.selection;
     const blockRange = { from: $from.before(), to: $from.after() };
     let target = blockRange;
@@ -196,7 +204,7 @@ export function RichTextEditor({ value, onChange, placeholder, ai, minHeight = 3
     const next: AiPanelState = { mode, instruction: '', status: 'input', result: '', error: '', target, selection };
     if (mode === 'write' || mode === 'rewrite') setPanel(next);
     else void runAi(next);
-  }, [ai, runAi, t]);
+  }, [ai, aiLocked, runAi, t]);
 
   const acceptAi = () => {
     const ed = editorRef.current;
@@ -250,7 +258,7 @@ export function RichTextEditor({ value, onChange, placeholder, ai, minHeight = 3
           <span className="mx-1 h-4 w-px" style={{ background: 'var(--tblr-border-color)' }} aria-hidden="true" />
           <ToolbarButton label={t('richtext_undo') as string} disabled={!state?.canUndo} onClick={() => chain().undo().run()}><IconArrowBackUp size={16} /></ToolbarButton>
           <ToolbarButton label={t('richtext_redo') as string} disabled={!state?.canRedo} onClick={() => chain().redo().run()}><IconArrowForwardUp size={16} /></ToolbarButton>
-          {ai && (
+          {(ai || aiLocked) && (
             <div className="ml-auto flex flex-wrap items-center gap-1">
               <button
                 type="button"
@@ -316,7 +324,7 @@ export function RichTextEditor({ value, onChange, placeholder, ai, minHeight = 3
             <div className="flex flex-wrap items-center gap-2">
               <span role="alert" className="text-sm" style={{ color: 'var(--tblr-danger, #b42318)' }}>{panel.error}</span>
               <div className="ml-auto flex gap-2">
-                {panel.selection.trim() || panel.mode === 'write' || panel.mode === 'continue'
+                {!panel.locked && (panel.selection.trim() || panel.mode === 'write' || panel.mode === 'continue')
                   ? <button type="button" onClick={() => void runAi(panel)} className="rounded-md border px-3 py-1.5 text-xs font-semibold" style={{ borderColor: 'var(--tblr-border-color)' }}>{t('richtext_ai_retry')}</button>
                   : null}
                 <button type="button" onClick={closePanel} className="rounded-md px-3 py-1.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('richtext_ai_close')}</button>

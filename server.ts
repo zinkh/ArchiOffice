@@ -1161,7 +1161,7 @@ export async function createApp() {
   registerProjectArchiveRoutes(app, { supabaseAdmin, getTenantId, getUserName, requireRole, storeBusinessFile, checkQuota });
   registerChantierDecoupageRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectNoticeRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
-  registerDiagReportRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerDiagReportRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerMailAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerProjectStakeholdersRoutes(app, { supabaseAdmin, getTenantId });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
