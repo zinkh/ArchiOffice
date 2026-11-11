@@ -88,6 +88,11 @@ export interface FicheTechnique {
   /** Référence de stockage, ouverte par URL signée. */
   fileUrl: string;
   nom: string;
+  /**
+   * Marques à ne pas citer : l'IA décrit le produit par ses performances (« ou équivalent ») au lieu de
+   * reprendre marque, fabricant ou référence commerciale de la fiche, et l'export ne donne pas son nom de fichier.
+   */
+  anonymiser?: boolean;
 }
 
 export interface ImageArticle {

@@ -536,3 +536,14 @@ préservée par précaution.
   `POST /api/projects/:id/pro/control/suggest` (`server/proControlSuggest.ts`, testé via `tests/cctpTextes.test.ts` voisin)
   propose seulement `unite`, `designation` et `cctpDescription`, jamais prix, quantité, bâtiment ni phase ; l'écran montre
   avant/après et l'architecte applique ou écarte (`src/lib/proCorrections.ts`). Facturé comme `cctp_generation`.
+
+### Anonymisation des marques d'une fiche technique
+
+`FicheTechnique.anonymiser` (jsonb du DPGF, aucune migration). Option « Anonymiser les marques de la fiche » dans
+`FichesTechniquesEditor` : elle marque les fiches AJOUTÉES ensuite (envoyées ou rattachées, `marquerAnonymisation`) et chaque
+fiche a sa case « Anonyme » (`basculerAnonymisation`). Effets : (1) la rédaction IA (`draft-poste`, `fiche_anonymiser_ids`)
+reçoit la fiche sous le nom « Fiche n (anonymisée) », avec la consigne `CONSIGNE_ANONYMISATION` et un rappel en fin de tâche
+(décrire par les performances, « ou équivalent », aucune marque, fabricant ni référence commerciale) ; (2) l'export du CCTP
+n'imprime pas le nom de fichier (« Fiche technique n (marque non citée) »). **Limite assumée** : l'anonymisation repose sur la
+consigne donnée au modèle, il n'y a pas de détection automatique des marques : le texte proposé se relit avant d'être
+appliqué, comme toute rédaction IA. Le fichier lui-même, rangé dans les documents de l'affaire, n'est pas modifié.

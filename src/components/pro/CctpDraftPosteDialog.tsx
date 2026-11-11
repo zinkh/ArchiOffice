@@ -22,7 +22,7 @@ export interface PosteARediger {
   /** Intitulés des postes du même niveau, pour ne pas les répéter. */
   voisins: string[];
   /** Fiches techniques jointes au poste (documents de l'affaire) : l'IA peut s'en servir. */
-  fiches?: { documentId?: string; nom: string }[];
+  fiches?: { documentId?: string; nom: string; anonymiser?: boolean }[];
 }
 
 interface Props {
@@ -60,6 +60,8 @@ export const CctpDraftPosteDialog: React.FC<Props> = ({ projectId, poste, onClos
           voisins: poste.voisins, instructions, ameliorer: ameliorer && aDejaUnTexte,
           texte_existant: poste.texteExistant,
           fiche_document_ids: utiliserFiches ? fichesUtilisables.map(f => f.documentId) : [],
+          // Fiches dont les marques ne doivent pas être citées.
+          fiche_anonymiser_ids: utiliserFiches ? fichesUtilisables.filter(f => f.anonymiser).map(f => f.documentId) : [],
         }),
       });
       setFichesNonLues(res.fiches_ignorees ?? []);

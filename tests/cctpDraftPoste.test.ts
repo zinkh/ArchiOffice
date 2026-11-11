@@ -57,6 +57,22 @@ describe('construireTachePoste', () => {
     expect(t).toContain('Insister sur les essais');
     expect(t).toContain('généralités du lot');
   });
+
+  it('reprend le nom et le texte d\'une fiche technique normale, sans consigne d\'anonymisation', () => {
+    const t = construireTachePoste({ ...base, fiches: [{ nom: 'Fiche_Sika_Dalle.pdf', texte: 'Résistance 30 MPa' }] });
+    expect(t).toContain('Fiche_Sika_Dalle.pdf');
+    expect(t).toContain('Résistance 30 MPa');
+    expect(t).not.toContain('ANONYMISÉE');
+  });
+
+  it('anonymise les marques : consigne par fiche, nom de fichier masqué et rappel en fin de tâche', () => {
+    const t = construireTachePoste({ ...base, fiches: [{ nom: 'Fiche_Sika_Dalle.pdf', texte: 'Résistance 30 MPa', anonymiser: true }] });
+    expect(t).not.toContain('Sika');
+    expect(t).toContain('Fiche 1 (anonymisée)');
+    expect(t).toContain('ANONYMISÉE');
+    expect(t).toContain('ne doit citer AUCUNE marque');
+    expect(t).toContain('Résistance 30 MPa');
+  });
 });
 
 describe('POST /api/projects/:id/cctp/draft-poste', () => {

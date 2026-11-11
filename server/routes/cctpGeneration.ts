@@ -233,8 +233,11 @@ export interface TachePoste {
   instructions: string;
   voisins: string[];
   /** Texte des fiches techniques jointes au poste : source des caractéristiques, performances et références. */
-  fiches?: { nom: string; texte: string }[];
+  fiches?: { nom: string; texte: string; anonymiser?: boolean }[];
 }
+
+/** Consigne ajoutée quand une fiche est anonymisée : décrire par les performances, jamais par la marque. */
+export const CONSIGNE_ANONYMISATION = "Cette fiche est ANONYMISÉE : n'écris AUCUNE marque, nom de fabricant, nom commercial de gamme ni référence catalogue ; décris le produit par ses caractéristiques et performances (dimensions, classements, normes, essais) et ajoute « ou équivalent » quand une référence de produit serait naturellement citée.";
 
 export function construireTachePoste(p: TachePoste): string {
   const nature = p.kind === 'lot' ? 'du lot' : p.kind === 'chapitre' ? 'du chapitre' : "de l'article";
@@ -253,7 +256,9 @@ export function construireTachePoste(p: TachePoste): string {
     p.voisins.length && `Autres postes du même niveau (à ne pas répéter) : ${p.voisins.join(' ; ')}.`,
     p.existant && `Texte actuel à reprendre et améliorer, sans perdre ce qu'il prescrit :\n<<<\n${p.existant}\n>>>`,
     p.instructions && `Consignes de l'architecte : ${p.instructions}`,
-    p.fiches?.length && `Fiches techniques jointes à ce poste (source prioritaire pour les caractéristiques, performances, références et mise en œuvre du produit ; ne reprends que ce qui y figure, sans rien ajouter qui n'y soit pas) :\n${p.fiches.map(f => `--- ${f.nom} ---\n<<<\n${f.texte}\n>>>`).join('\n')}`,
+    p.fiches?.length && `Fiches techniques jointes à ce poste (source prioritaire pour les caractéristiques, performances, références et mise en œuvre du produit ; ne reprends que ce qui y figure, sans rien ajouter qui n'y soit pas) :\n${p.fiches.map((f, i) => `--- ${f.anonymiser ? `Fiche ${i + 1} (anonymisée)` : f.nom} ---\n${f.anonymiser ? `${CONSIGNE_ANONYMISATION}\n` : ''}<<<\n${f.texte}\n>>>`).join('\n')}`,
+    // Rappel en fin de tâche, là où le modèle le perd le moins : une seule fiche anonymisée suffit à l'imposer à tout le texte.
+    p.fiches?.some(f => f.anonymiser) && "Le texte rédigé ne doit citer AUCUNE marque, aucun fabricant ni aucune référence commerciale, même si une autre source de la demande en contient.",
     consigne,
   ].filter(Boolean).join('\n');
 }
@@ -542,7 +547,8 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
       const voisins: string[] = (Array.isArray(req.body?.voisins) ? req.body.voisins : [])
         .map((v: unknown) => str(v, 200)).filter(Boolean).slice(0, MAX_VOISINS);
       // Fiches techniques du poste : seuls les documents de CETTE affaire sont lus, texte borné par fiche et au total.
-      const fichesLues: { nom: string; texte: string }[] = [];
+      const fichesLues: { nom: string; texte: string; anonymiser?: boolean }[] = [];
+      const ficheAnonymes = new Set<string>((Array.isArray(req.body?.fiche_anonymiser_ids) ? req.body.fiche_anonymiser_ids : []).filter((v: unknown): v is string => typeof v === 'string'));
       const fichesIgnorees: string[] = [];
       const ficheIds: string[] = (Array.isArray(req.body?.fiche_document_ids) ? req.body.fiche_document_ids : [])
         .filter((v: unknown): v is string => typeof v === 'string').slice(0, MAX_FICHES_IA);
@@ -555,7 +561,7 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
           if (!texte || !String(texte).trim()) { fichesIgnorees.push(doc.name); continue; }
           const garde = String(texte).slice(0, Math.min(MAX_FICHE_CHARS, MAX_FICHES_CHARS_TOTAL - total));
           total += garde.length;
-          fichesLues.push({ nom: str(doc.name, 200), texte: garde });
+          fichesLues.push({ nom: str(doc.name, 200), texte: garde, ...(ficheAnonymes.has(String(doc.id)) ? { anonymiser: true } : {}) });
         }
       }
       const tache = construireTachePoste({

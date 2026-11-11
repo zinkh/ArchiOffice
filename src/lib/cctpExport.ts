@@ -100,7 +100,10 @@ export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp
       niveau, numero: l.numero, titre: l.designation, texte: texte(l.cctpDescription, n),
       localisation: texte(l.localisation, n) || undefined,
       images: imagesDeLigne(l).length ? imagesDeLigne(l) : undefined,
-      fiches: (l.fichesTechniques ?? []).map(f => f.nom).filter(Boolean).length ? (l.fichesTechniques ?? []).map(f => f.nom).filter(Boolean) : undefined,
+      // Une fiche anonymisée ne donne pas son nom de fichier (il porte souvent la marque).
+      fiches: (l.fichesTechniques ?? []).length
+        ? (l.fichesTechniques ?? []).map((f, i) => (f.anonymiser ? `Fiche technique ${i + 1} (marque non citée)` : f.nom)).filter(Boolean)
+        : undefined,
       batiments: mention && !enfants && libelles(ids).length ? libelles(ids) : undefined,
     });
     if (enfants) articles(l.children!, niveau + 1, noeud, l.batimentId ?? herite);

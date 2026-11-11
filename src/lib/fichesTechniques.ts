@@ -22,6 +22,15 @@ export function ajouterFiches(actuelles: FicheTechnique[] | undefined, nouvelles
   return out;
 }
 
+/** Active ou désactive l'anonymisation des marques d'une fiche ; les autres fiches sont rendues telles quelles. */
+export function basculerAnonymisation(fiches: FicheTechnique[] | undefined, id: string, anonymiser: boolean): FicheTechnique[] {
+  return (fiches ?? []).map(f => (f.id === id && !!f.anonymiser !== anonymiser ? { ...f, anonymiser: anonymiser || undefined } : f));
+}
+
+/** Pose l'anonymisation sur les fiches ajoutées (rien quand l'option d'import est décochée). */
+export const marquerAnonymisation = (fiches: FicheTechnique[], anonymiser: boolean): FicheTechnique[] =>
+  (anonymiser ? fiches.map(f => ({ ...f, anonymiser: true })) : fiches);
+
 export function retirerFiche(fiches: FicheTechnique[] | undefined, id: string): FicheTechnique[] {
   return (fiches ?? []).filter(f => f.id !== id);
 }
