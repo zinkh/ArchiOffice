@@ -142,9 +142,38 @@ vrai Postgres, ignoré sans `PGHOST`). Points à ne pas défaire :
 - **Mesuré en production avant d'écrire la migration** : 154 clés simples entre tables à
   `tenant_id`, 0 ligne qui croise deux cabinets.
 
-Pas encore fait : les autres parents (`proposals`, `tenders`, `marches_entreprises`,
-`documents`, `meetings`, etc.) et les clés vers `profiles`, dont le `tenant_id` n'est que le
-cabinet par défaut d'une personne.
+**Deuxième lot** (`supabase/migrate_zz_tenant_composite_fks_2.sql`, le même bloc avec une autre
+liste `v_parents`) : `proposals`, `tenders`, `marches_entreprises`, `documents`, `meetings`,
+`invoices`, `situations`, `reserves`, `receptions`, `plans`, `tasks`, `dpgfs`, `dpgf_items`,
+`cctps`, `project_lots`, `project_shares`, `project_share_comments`. Fichier à part : un poste
+local n'applique chaque fichier qu'une fois et la production a déjà reçu le premier. Mesuré en
+production avant de l'écrire : 40 parents restants, 84 clés simples, 0 ligne croisée ; ce lot en
+pose 46. À ne pas défaire :
+
+- **`site_reports` est EXCLU** tant qu'`observations.ts` le joint par indice de colonne
+  (`site_reports!created_report_id(...)`) : PostgREST n'accepte un indice de colonne que pour une
+  clé à UNE seule colonne, la jointure échouerait (PGRST200) sur une clé composite. Une jointure
+  SANS indice (`projects(name)`) reste valable.
+  `tests/compositeFkEmbedHints.test.ts` lit les `v_parents` des migrations et interdit tout indice
+  de colonne vers un parent converti : **ajouter un parent à une migration sans réécrire ses
+  jointures à indice fait échouer ce test**, avant la production.
+- **`marches_entreprises` a deux liens auto-référents en `RESTRICT`** (`parent_marche_id`,
+  `accord_cadre_groupe_id`) : leur clé composite n'est PAS différable et reste refusée même après
+  `SET CONSTRAINTS ALL DEFERRED`. La mise à niveau local vers cloud les traverse, car son `UPDATE`
+  touche le parent et l'enfant dans la même instruction.
+
+**Audit de routes (issue #245)** : `agentMissions.ts` (`agent_id`, `document_id` et `project_id`
+sont vérifiés par des requêtes en ligne limitées au cabinet, d'où l'absence d'`assertTenantEntity`),
+`marchesSubsequents.ts` (`groupe_avec` passe par `lireMarche(tenantId, ...)`, l'émission par une
+fonction SQL dont les paramètres viennent de lectures limitées au cabinet) et
+`accordCadreConsultations.ts` (tous les liens sont dérivés du marché de l'URL et de son groupe,
+limités au cabinet) sont conformes : aucun identifiant du corps n'atteint la base sans contrôle.
+
+Pas encore fait : `site_reports` (voir plus haut), les tables d'infrastructure et de messagerie
+(`agents`, `conversations`, `email_connections`, `calendar_*`, `external_storage_connections`,
+`support_tickets`, `webhooks`, `rag_documents`, `feed_posts`, `inspiration_*`,
+`custom_references`, `articles_type`, `document_templates`, `tender_rss_sources`), et les clés
+vers `profiles`, dont le `tenant_id` n'est que le cabinet par défaut d'une personne.
 
 ### Plusieurs cabinets pour une même personne
 
