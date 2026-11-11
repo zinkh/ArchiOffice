@@ -125,7 +125,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/calendar/accounts/:connectionId/refresh` | [server/routes/calendarAccounts.ts:32](../server/routes/calendarAccounts.ts#L32) |
 | PUT | `/api/calendar/calendars/:id` | [server/routes/calendarAccounts.ts:50](../server/routes/calendarAccounts.ts#L50) |
 | POST | `/api/calendar/calendars/:id/default` | [server/routes/calendarAccounts.ts:78](../server/routes/calendarAccounts.ts#L78) |
-| GET | `/api/cctp/generation-engines` | [server/routes/cctpGeneration.ts:267](../server/routes/cctpGeneration.ts#L267) |
+| GET | `/api/cctp/generation-engines` | [server/routes/cctpGeneration.ts:279](../server/routes/cctpGeneration.ts#L279) |
 | POST | `/api/chorus-pro/attach-etat-acompte/:situationId` | [server/routes/chorusPro.ts:365](../server/routes/chorusPro.ts#L365) |
 | DELETE | `/api/chorus-pro/disconnect` | [server/routes/chorusPro.ts:115](../server/routes/chorusPro.ts#L115) |
 | GET | `/api/chorus-pro/invoices` | [server/routes/chorusPro.ts:257](../server/routes/chorusPro.ts#L257) |
@@ -485,11 +485,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | DELETE | `/api/projects/:projectId/bpu/offres/:offreId` | [server/routes/bpu.ts:195](../server/routes/bpu.ts#L195) |
 | PUT | `/api/projects/:projectId/bpu/offres/:offreId` | [server/routes/bpu.ts:135](../server/routes/bpu.ts#L135) |
 | POST | `/api/projects/:projectId/bpu/offres/:offreId/vers-bibliotheque` | [server/routes/bpu.ts:175](../server/routes/bpu.ts#L175) |
-| POST | `/api/projects/:projectId/cctp/draft-poste` | [server/routes/cctpGeneration.ts:532](../server/routes/cctpGeneration.ts#L532) |
-| POST | `/api/projects/:projectId/cctp/generate` | [server/routes/cctpGeneration.ts:283](../server/routes/cctpGeneration.ts#L283) |
-| POST | `/api/projects/:projectId/cctp/generate-lot` | [server/routes/cctpGeneration.ts:505](../server/routes/cctpGeneration.ts#L505) |
-| POST | `/api/projects/:projectId/cctp/plan` | [server/routes/cctpGeneration.ts:486](../server/routes/cctpGeneration.ts#L486) |
-| POST | `/api/projects/:projectId/cctp/read-piece` | [server/routes/cctpGeneration.ts:472](../server/routes/cctpGeneration.ts#L472) |
+| POST | `/api/projects/:projectId/cctp/draft-poste` | [server/routes/cctpGeneration.ts:548](../server/routes/cctpGeneration.ts#L548) |
+| POST | `/api/projects/:projectId/cctp/generate` | [server/routes/cctpGeneration.ts:295](../server/routes/cctpGeneration.ts#L295) |
+| POST | `/api/projects/:projectId/cctp/generate-lot` | [server/routes/cctpGeneration.ts:521](../server/routes/cctpGeneration.ts#L521) |
+| POST | `/api/projects/:projectId/cctp/plan` | [server/routes/cctpGeneration.ts:502](../server/routes/cctpGeneration.ts#L502) |
+| POST | `/api/projects/:projectId/cctp/read-piece` | [server/routes/cctpGeneration.ts:488](../server/routes/cctpGeneration.ts#L488) |
 | POST | `/api/projects/:projectId/cctp/textes` | [server/routes/dpgf.ts:194](../server/routes/dpgf.ts#L194) |
 | GET | `/api/projects/:projectId/chantier-decoupage` | [server/routes/chantierDecoupage.ts:19](../server/routes/chantierDecoupage.ts#L19) |
 | PUT | `/api/projects/:projectId/chantier-decoupage` | [server/routes/chantierDecoupage.ts:34](../server/routes/chantierDecoupage.ts#L34) |
@@ -536,7 +536,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:100](../server/routes/planningChantier.ts#L100) |
 | PUT | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:122](../server/routes/planningChantier.ts#L122) |
 | POST | `/api/projects/:projectId/planning-chantier/generate` | [server/routes/planningChantier.ts:178](../server/routes/planningChantier.ts#L178) |
-| POST | `/api/projects/:projectId/pro/control/suggest` | [server/routes/cctpGeneration.ts:583](../server/routes/cctpGeneration.ts#L583) |
+| POST | `/api/projects/:projectId/pro/control/suggest` | [server/routes/cctpGeneration.ts:610](../server/routes/cctpGeneration.ts#L610) |
 | GET | `/api/projects/:projectId/reports` | [server/routes/siteReports.ts:25](../server/routes/siteReports.ts#L25) |
 | POST | `/api/projects/:projectId/reports` | [server/routes/siteReports.ts:48](../server/routes/siteReports.ts#L48) |
 | GET | `/api/projects/:projectId/reserve-exports` | [server/routes/reserveExports.ts:43](../server/routes/reserveExports.ts#L43) |

@@ -8,6 +8,7 @@
 // pagination « P1|2 », nuances de gris. jsPDF et docx sont chargés à la demande.
 import type { Batiment, DPGF, ImageArticle, Ligne } from '../types/dpgf';
 import { imagesDeLigne } from './cctpImages';
+import { estPhoto } from './fichePhoto';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
@@ -18,6 +19,12 @@ import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment
 import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
 import { ORIENTATION_CCTP, orientationPdf, suffixeLot, type Orientation } from './exportOrientation';
 import { mettreEnLignes, paragraphesRiches, type StyleRiche } from './cctpRichText';
+
+/** Fiches rappelées sous l'article : les photos (descriptions pour l'IA) n'en sont pas. */
+const fichesRappelees = (l: Ligne): string[] => (l.fichesTechniques ?? [])
+  .filter(f => !estPhoto(f.nom))
+  .map((f, i) => (f.anonymiser ? `Fiche technique ${i + 1} (marque non citée)` : f.nom))
+  .filter(Boolean);
 
 export interface CctpBloc {
   niveau: number;          // 1 lot, 2 chapitre, 3+ article et sous-articles
@@ -100,7 +107,8 @@ export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp
       niveau, numero: l.numero, titre: l.designation, texte: texte(l.cctpDescription, n),
       localisation: texte(l.localisation, n) || undefined,
       images: imagesDeLigne(l).length ? imagesDeLigne(l) : undefined,
-      fiches: (l.fichesTechniques ?? []).map(f => f.nom).filter(Boolean).length ? (l.fichesTechniques ?? []).map(f => f.nom).filter(Boolean) : undefined,
+      // Une fiche anonymisée ne donne pas son nom de fichier (il porte souvent la marque).
+      fiches: fichesRappelees(l).length ? fichesRappelees(l) : undefined,
       batiments: mention && !enfants && libelles(ids).length ? libelles(ids) : undefined,
     });
     if (enfants) articles(l.children!, niveau + 1, noeud, l.batimentId ?? herite);
