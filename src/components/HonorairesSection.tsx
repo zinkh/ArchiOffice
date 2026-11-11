@@ -19,10 +19,7 @@ import { MiqcpComplexityWizardModal } from './MiqcpComplexityWizardModal';
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
 import { DEFAULT_MISSIONS, calculateFeeRatios, defaultFeeDistribution, exportFeeDistributionToXlsx } from '../lib/feeDistribution';
 import { FeeDistributionGrid } from './FeeDistributionGrid';
-import {
-  ajouterTranche, activerTranches, desactiverTranches, lireDonnees, tranchesActives, totauxParTranche,
-  type DonneesTranches, type PerimetreContrat,
-} from '../lib/tranches';
+import { TranchesToolbar, TranchesSummary } from './TranchesControls';
 import { useSettings } from '../hooks/useSettings';
 
 export interface HonorairesSpecialty {
@@ -116,18 +113,6 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
       return { ...m, default_pct: guidePct, amount: Number((baseTotal * (guidePct / 100)).toFixed(precision)) };
     });
     onChange({ fee_distribution: JSON.stringify({ ...currentData, missions }) });
-  };
-
-  // Tranches fermes et conditionnelles : tout passe par le JSON fee_distribution.
-  const donneesTranches = React.useMemo<DonneesTranches>(
-    () => lireDonnees(doc.fee_distribution) ?? (defaultFeeDistribution() as DonneesTranches),
-    [doc.fee_distribution],
-  );
-  const tranchesOn = tranchesActives(donneesTranches);
-  const aUneConditionnelle = (donneesTranches.tranches ?? []).some(x => x.type === 'conditionnelle');
-  const totauxTranches = React.useMemo(() => totauxParTranche(donneesTranches), [donneesTranches]);
-  const appliquerTranches = (fn: (d: DonneesTranches) => DonneesTranches) => {
-    onChange({ fee_distribution: JSON.stringify(fn(donneesTranches)) });
   };
 
   const addMission = (category: 'Mission base' | 'Mission Exécution' | 'Missions complémentaires', defaultName: string) => {
@@ -331,26 +316,7 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
             >
               <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
             </button>
-            <label className="flex items-center gap-1.5 text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider cursor-pointer">
-              <input
-                type="checkbox"
-                checked={tranchesOn}
-                disabled={tranchesOn && aUneConditionnelle}
-                title={tranchesOn && aUneConditionnelle ? t('fee_tranches_cannot_disable') : undefined}
-                onChange={e => appliquerTranches(e.target.checked ? activerTranches : desactiverTranches)}
-              />
-              {t('fee_tranches_toggle')}
-            </label>
-            {tranchesOn && (
-              <>
-                <button type="button" onClick={() => appliquerTranches(d => ajouterTranche(d, 'ferme'))} className="text-[0.6875rem] flex items-center gap-1 text-zinc-700 dark:text-zinc-200 font-bold uppercase tracking-wider bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded">
-                  <IconPlus size={12} /> {t('fee_tranches_add_firm')}
-                </button>
-                <button type="button" onClick={() => appliquerTranches(d => ajouterTranche(d, 'conditionnelle'))} className="text-[0.6875rem] flex items-center gap-1 text-zinc-700 dark:text-zinc-200 font-bold uppercase tracking-wider bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded">
-                  <IconPlus size={12} /> {t('fee_tranches_add_cond')}
-                </button>
-              </>
-            )}
+            <TranchesToolbar feeDistribution={doc.fee_distribution} onChange={fd => onChange({ fee_distribution: fd })} />
             <button type="button" onClick={handleLoadMiqcpPhaseRepartition} className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
               {t('miqcp_wizard_load_phase_repartition_btn')}
             </button>
@@ -365,24 +331,7 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
             </button>
           </div>
         </div>
-        {tranchesOn && aUneConditionnelle && (
-          <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
-            {t('fee_tranches_contract_scope')}
-            <select
-              value={donneesTranches.contrat_tranches ?? 'toutes'}
-              onChange={e => appliquerTranches(d => ({ ...d, contrat_tranches: e.target.value as PerimetreContrat }))}
-              className="px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent text-xs"
-            >
-              <option value="toutes">{t('fee_tranches_contract_all')}</option>
-              <option value="ferme">{t('fee_tranches_contract_firm')}</option>
-            </select>
-          </label>
-        )}
-        {tranchesOn && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {t('fee_tranches_summary', { ferme: formatCurrency(totauxTranches.ferme), cond: formatCurrency(totauxTranches.conditionnel) })}
-          </p>
-        )}
+        <TranchesSummary feeDistribution={doc.fee_distribution} onChange={fd => onChange({ fee_distribution: fd })} />
         <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 bg-white dark:bg-zinc-900/50 min-h-[400px]">
           <FeeDistributionGrid
             doc={doc}
