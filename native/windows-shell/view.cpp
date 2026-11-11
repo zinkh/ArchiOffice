@@ -30,8 +30,8 @@ class View final:public IShellView,public IFolderView {
  HWND actionsPane=nullptr;int actionScroll=0;
  HWND actionsLabel=nullptr,phaseEdit=nullptr,typeEdit=nullptr,saveClass=nullptr,offline=nullptr,preserve=nullptr,restart=nullptr,retry=nullptr,recovery=nullptr;int classificationVersion=0;bool actionWritable=false;
  HWND window=nullptr,tree=nullptr,list=nullptr,details=nullptr,heading=nullptr,note=nullptr,refresh=nullptr,open=nullptr,document=nullptr,properties=nullptr,search=nullptr,projectFilter=nullptr,phaseFilter=nullptr,typeFilter=nullptr,statusFilter=nullptr,reset=nullptr,defaults=nullptr,tabs=nullptr,preview=nullptr,history=nullptr,previousPage=nullptr,nextPage=nullptr,pageLabel=nullptr;
- HFONT font=nullptr,titleFont=nullptr;UINT dpi=96;int left=230,right=290,drag=0,splitLeft=230,splitRight=0;bool catalogLoaded=false,busy=false,building=false,propertiesMode=false;std::set<std::wstring> collapsedProjects;std::wstring completion;std::wstring action=L"catalog",focusKey,scope;std::set<std::wstring> selectedKeys;bool selectionInitialized=false;Filter filter;Presentation presentation;std::set<ViewKind> collapsedRoots;wchar_t className[100]{};
- bool darkMode=false;COLORREF backgroundColor=0,textColor=0,lineColor=0;HBRUSH backgroundBrush=nullptr;HFONT iconFont=nullptr,bigIconFont=nullptr;
+ HFONT font=nullptr,titleFont=nullptr;UINT dpi=96;int dividerTop=88,left=230,right=290,drag=0,splitLeft=230,splitRight=0;bool catalogLoaded=false,catalogFailed=false,busy=false,building=false,propertiesMode=false;std::set<std::wstring> collapsedProjects;std::wstring completion;std::wstring action=L"catalog",focusKey,scope;std::set<std::wstring> selectedKeys;bool selectionInitialized=false;Filter filter;Presentation presentation;std::set<ViewKind> collapsedRoots;wchar_t className[100]{};
+ RECT emptyAction{};bool darkMode=false;COLORREF backgroundColor=0,textColor=0,lineColor=0;HBRUSH backgroundBrush=nullptr;HFONT iconFont=nullptr,bigIconFont=nullptr;
  std::vector<std::wstring> projectOptions,phaseOptions,typeOptions,statusOptions;
  std::vector<Project> projects;std::vector<Filter> filters;std::vector<std::pair<int,int>> visible;std::shared_ptr<Async> async,detailAsync;
  bool detailBusy=false;int detailTab=0,previewPage=0,previewPages=0,previewWidth=0,previewHeight=0;
@@ -65,15 +65,19 @@ class View final:public IShellView,public IFolderView {
   splitLeft=treeWidth;splitRight=detailWidth?width-detailWidth:0;
   place(heading,16,10,std::max(100,width-32),28);
   ShowWindow(properties,detailWidth?SW_HIDE:SW_SHOW);SetWindowTextW(properties,propertiesMode?L"Documents":L"Propriétés");
-  int x=16,y=46;struct Button{HWND window;int width;};
+  int x=16,y=42;struct Button{HWND window;int width;};
   for(auto button:{Button{refresh,110},Button{open,84},Button{document,196},Button{properties,112},Button{defaults,214}}){if(button.window==properties&&detailWidth)continue;if(x+button.width>width-16&&x>16){x=16;y+=36;}place(button.window,x,y,button.width,30);x+=button.width+6;}
-  int searchY=y+40;place(search,16,searchY,std::max(80,width-152),28);place(reset,std::max(104,width-126),searchY,110,28);
-  int columns=width>=1000?4:2,filterY=searchY+36,cell=(width-32-(columns-1)*8)/columns;
-  HWND choices[]={projectFilter,phaseFilter,typeFilter,statusFilter};for(int i=0;i<4;i++)place(choices[i],16+(i%columns)*(cell+8),filterY+(i/columns)*36,cell,210);
-  int top=filterY+((4+columns-1)/columns)*36+8,body=std::max(30,height-top-64),center=std::max(100,width-treeWidth-detailWidth-32);
+  // Recherche et filtres regroupés sur une seule ligne en fenêtre large, deux colonnes en fenêtre étroite.
+  int searchY=y+36,top=0;HWND choices[]={projectFilter,phaseFilter,typeFilter,statusFilter};
+  if(width>=1000){int gap=8,resetWidth=84,searchWidth=std::max(180,width*28/100),cell=(width-32-searchWidth-resetWidth-5*gap)/4;
+   place(search,16,searchY,searchWidth,28);for(int i=0;i<4;i++)place(choices[i],16+searchWidth+gap+i*(cell+gap),searchY,cell,210);place(reset,width-16-resetWidth,searchY,resetWidth,28);top=searchY+38;}
+  else{place(search,16,searchY,std::max(80,width-152),28);place(reset,std::max(104,width-126),searchY,110,28);
+   int filterY=searchY+34,cell=(width-32-8)/2;for(int i=0;i<4;i++)place(choices[i],16+(i%2)*(cell+8),filterY+(i/2)*34,cell,210);top=filterY+2*34+6;}
+  // Le bas du contenu s'arrête toujours au-dessus de la note : plus de chevauchement en fenêtre basse.
+  dividerTop=top;int noteY=std::max(top+90,height-54),body=std::max(30,noteY-8-top),center=std::max(100,width-treeWidth-detailWidth-32);
   place(tree,12,top,treeWidth-12,body);
   bool alternate=!detailWidth&&propertiesMode;ShowWindow(list,alternate?SW_HIDE:SW_SHOW);bool pane=detailWidth||alternate;
-  int paneX=detailWidth?width-detailWidth+4:treeWidth+10,paneWidth=detailWidth?detailWidth-18:center;
+  int paneX=detailWidth?width-detailWidth+10:treeWidth+10,paneWidth=detailWidth?detailWidth-26:center;
   ShowWindow(tabs,pane?SW_SHOW:SW_HIDE);place(tabs,paneX,top,paneWidth,30);
   ShowWindow(details,pane&&detailTab==0?SW_SHOW:SW_HIDE);ShowWindow(history,pane&&detailTab==2?SW_SHOW:SW_HIDE);
   ShowWindow(preview,pane&&detailTab==1?SW_SHOW:SW_HIDE);
@@ -81,7 +85,7 @@ class View final:public IShellView,public IFolderView {
   for(auto child:{previousPage,nextPage,pageLabel})ShowWindow(child,pane&&detailTab==1?SW_SHOW:SW_HIDE);
   place(list,treeWidth+10,top,center,body);place(details,paneX,top+36,paneWidth,std::max(30,body-36));place(history,paneX,top+36,paneWidth,std::max(30,body-36));
   place(preview,paneX,top+36,paneWidth,std::max(30,body-78));place(previousPage,paneX,top+body-32,72,28);place(nextPage,paneX+paneWidth-72,top+body-32,72,28);place(pageLabel,paneX+76,top+body-30,std::max(1,paneWidth-152),26);
-  place(note,16,std::max(110,height-54),std::max(100,width-32),46);InvalidateRect(window,nullptr,TRUE);
+  place(note,16,noteY,std::max(100,width-32),46);InvalidateRect(window,nullptr,TRUE);
  }
  void layoutActions(){if(!actionsPane)return;RECT pane{};GetClientRect(actionsPane,&pane);SCROLLINFO scroll{sizeof(scroll),SIF_RANGE|SIF_PAGE|SIF_POS};scroll.nMax=px(334)-1;scroll.nPage=std::max(1L,pane.bottom);scroll.nPos=actionScroll;SetScrollInfo(actionsPane,SB_VERT,&scroll,TRUE);scroll.fMask=SIF_POS;GetScrollInfo(actionsPane,SB_VERT,&scroll);actionScroll=scroll.nPos;
   auto position=[&](HWND child,int y,int height){MoveWindow(child,0,px(y)-actionScroll,std::max(1L,pane.right),px(height),TRUE);};position(actionsLabel,0,54);position(phaseEdit,56,28);position(typeEdit,92,28);int y=128;for(auto child:{saveClass,offline,preserve,restart,retry,recovery}){position(child,y,28);y+=34;}}
@@ -188,13 +192,24 @@ class View final:public IShellView,public IFolderView {
  void drawEmpty(HDC dc){
   RECT area{},header{};GetClientRect(list,&area);GetWindowRect(ListView_GetHeader(list),&header);area.top+=header.bottom-header.top;
   bool filtered=!filter.query.empty()||!filter.value.empty();
-  std::wstring text=!catalogLoaded?L"Chargement des documents…":filtered?L"Aucun document ne correspond aux critères.":L"Aucun document pour le moment.\nSynchronisez un projet ou déposez des fichiers dans ce dossier.";
-  SetBkMode(dc,TRANSPARENT);SetTextColor(dc,darkMode?RGB(150,150,150):RGB(110,110,110));
+  bool failed=catalogFailed&&!filtered;
+  std::wstring text=failed?L"Catalogue indisponible.\nVérifiez la connexion et vos droits, puis cliquez sur Actualiser.":!catalogLoaded?L"Chargement des documents…":filtered?L"Aucun document ne correspond aux critères.":L"Aucun document pour le moment.\nSynchronisez un projet ou déposez des fichiers dans ce dossier.";
+  SetBkMode(dc,TRANSPARENT);SetTextColor(dc,failed?(darkMode?RGB(255,153,164):RGB(196,43,28)):darkMode?RGB(150,150,150):RGB(110,110,110));
   auto previous=SelectObject(dc,font);
   int width=std::max(100,static_cast<int>(area.right-area.left)-px(48));RECT measure{0,0,width,0};DrawTextW(dc,text.c_str(),-1,&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_CENTER);
   int available=static_cast<int>(area.bottom-area.top),block=px(44)+px(10)+static_cast<int>(measure.bottom-measure.top),y=static_cast<int>(area.top)+std::max(px(12),(available-block)/2);
-  SelectObject(dc,bigIconFont);RECT icon{area.left,y,area.right,y+px(44)};DrawTextW(dc,L"\xE838",-1,&icon,DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_NOPREFIX);
+  SelectObject(dc,bigIconFont);RECT icon{area.left,y,area.right,y+px(44)};DrawTextW(dc,failed?L"\xE7BA":L"\xE838",-1,&icon,DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_NOPREFIX);
   SelectObject(dc,font);RECT message{area.left+px(24),y+px(54),area.right-px(24),area.bottom};DrawTextW(dc,text.c_str(),-1,&message,DT_WORDBREAK|DT_NOPREFIX|DT_CENTER);
+  // Commande Actualiser sous le message (clic géré par NM_CLICK sur emptyAction).
+  emptyAction={};
+  if(!filtered&&(catalogLoaded||catalogFailed)){
+   std::wstring label=L"Actualiser";RECT labelSize{0,0,0,0};DrawTextW(dc,label.c_str(),-1,&labelSize,DT_CALCRECT|DT_SINGLELINE|DT_NOPREFIX);
+   int total=px(22)+static_cast<int>(labelSize.right),x0=static_cast<int>(area.left+area.right-total)/2,y1=y+px(54)+static_cast<int>(measure.bottom-measure.top)+px(14);
+   COLORREF accent=darkMode?RGB(99,168,255):RGB(0,95,184);SetTextColor(dc,accent);
+   SelectObject(dc,iconFont);RECT glyph{x0,y1,x0+px(18),y1+px(22)};DrawTextW(dc,L"\xE72C",-1,&glyph,DT_SINGLELINE|DT_VCENTER|DT_LEFT|DT_NOPREFIX);
+   SelectObject(dc,font);RECT words{x0+px(22),y1,x0+total,y1+px(22)};DrawTextW(dc,label.c_str(),-1,&words,DT_SINGLELINE|DT_VCENTER|DT_LEFT|DT_NOPREFIX);
+   emptyAction={x0-px(8),y1-px(4),x0+total+px(8),y1+px(26)};
+  }
   SelectObject(dc,previous);
  }
  COLORREF stripeColor(size_t row)const{return row%2==1?(darkMode?RGB(40,40,40):RGB(248,248,248)):backgroundColor;}
@@ -303,13 +318,13 @@ class View final:public IShellView,public IFolderView {
    name(phaseEdit,L"Phase du document");name(typeEdit,L"Type documentaire");
    details=control(L"EDIT",L"Sélectionnez un document pour afficher ses propriétés.",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL|WS_TABSTOP,203);note=control(L"STATIC",L"",SS_LEFT);scale();name(previousPage,L"Page précédente");name(nextPage,L"Page suivante");name(tabs,L"Propriétés, aperçu, versions et actions");name(preview,L"Aperçu du document");name(history,L"Historique des versions, lecture seule");name(tree,L"Navigation documentaire");name(list,L"Documents du projet");name(details,L"Propriétés du document, lecture seule");name(search,L"Rechercher dans les documents montés");name(projectFilter,L"Filtrer par projet");name(phaseFilter,L"Filtrer par phase");name(typeFilter,L"Filtrer par type documentaire");name(statusFilter,L"Filtrer par statut");TreeView_SetExtendedStyle(tree,TVS_EX_DOUBLEBUFFER|TVS_EX_FADEINOUTEXPANDOS,TVS_EX_DOUBLEBUFFER|TVS_EX_FADEINOUTEXPANDOS);applyTheme();
    async=std::make_shared<Async>();async->window=window;async->serial=serial++;SetTimer(window,1,5000,nullptr);layout();rebuild();launch(L"catalog");return 0;}
-  case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{if(!backgroundBrush)break;auto dc=reinterpret_cast<HDC>(w);SetTextColor(dc,textColor);SetBkColor(dc,backgroundColor);return reinterpret_cast<LRESULT>(backgroundBrush);}
+  case WM_CTLCOLORSTATIC:case WM_CTLCOLOREDIT:case WM_CTLCOLORLISTBOX:{if(!backgroundBrush)break;auto dc=reinterpret_cast<HDC>(w);SetTextColor(dc,catalogFailed&&reinterpret_cast<HWND>(l)==note?(darkMode?RGB(255,153,164):RGB(196,43,28)):textColor);SetBkColor(dc,backgroundColor);return reinterpret_cast<LRESULT>(backgroundBrush);}
   case WM_ERASEBKGND:{if(!backgroundBrush)break;RECT area;GetClientRect(window,&area);FillRect(reinterpret_cast<HDC>(w),&area,backgroundBrush);return 1;}
   case WM_SETTINGCHANGE:case WM_THEMECHANGED:if(systemDark()!=darkMode)applyTheme();break;
   case WM_SIZE:layout();return 0;
   case WM_DPICHANGED:scale(HIWORD(w));layout();return 0;
   case WM_DPICHANGED_AFTERPARENT:scale();layout();return 0;
-  case WM_PAINT:{PAINTSTRUCT paint;HDC dc=BeginPaint(window,&paint);RECT r;GetClientRect(window,&r);auto pen=CreatePen(PS_SOLID,1,lineColor);auto old=SelectObject(dc,pen);for(int divider:{splitLeft,splitRight})if(divider){MoveToEx(dc,px(divider+4),px(88),nullptr);LineTo(dc,px(divider+4),r.bottom-px(42));}SelectObject(dc,old);DeleteObject(pen);EndPaint(window,&paint);return 0;}
+  case WM_PAINT:{PAINTSTRUCT paint;HDC dc=BeginPaint(window,&paint);RECT r;GetClientRect(window,&r);auto pen=CreatePen(PS_SOLID,1,lineColor);auto old=SelectObject(dc,pen);for(int divider:{splitLeft,splitRight})if(divider){MoveToEx(dc,px(divider+4),px(dividerTop),nullptr);LineTo(dc,px(divider+4),r.bottom-px(42));}SelectObject(dc,old);DeleteObject(pen);EndPaint(window,&paint);return 0;}
   case WM_SETCURSOR:if(LOWORD(l)==HTCLIENT){POINT point;GetCursorPos(&point);ScreenToClient(window,&point);int x=dip(point.x);if(abs(x-splitLeft-4)<6||(splitRight&&abs(x-splitRight-4)<6)){SetCursor(LoadCursorW(nullptr,IDC_SIZEWE));return TRUE;}}break;
   case WM_COMMAND:
    if(LOWORD(w)>=232&&LOWORD(w)<=237){auto commandControl=GetDlgItem(actionsPane,LOWORD(w));if(!IsWindowEnabled(commandControl)||HIWORD(w)!=BN_CLICKED)return 0;
@@ -332,18 +347,21 @@ class View final:public IShellView,public IFolderView {
    else{auto message=reply?reply->message:L"Document indisponible.";if(detailTab==1)clearPreview(message);else if(detailTab==3){actionWritable=false;SetWindowTextW(actionsLabel,message.c_str());}else SetWindowTextW(history,message.c_str());}pageButtons();buttons();return 0;}
   case PresentationMessage:capturePresentation();return 0;
   case WM_NOTIFY:{auto info=reinterpret_cast<NMHDR*>(l);
+   // En-têtes de colonnes : texte clair en thème sombre (le thème ItemsView sombre laisse sinon un texte quasi invisible).
+   if(darkMode&&info->code==NM_CUSTOMDRAW&&info->hwndFrom==ListView_GetHeader(list)){auto draw=reinterpret_cast<NMCUSTOMDRAW*>(l);if(draw->dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;if(draw->dwDrawStage==CDDS_ITEMPREPAINT)SetTextColor(draw->hdc,textColor);return CDRF_DODEFAULT;}
    if(info->hwndFrom==list&&info->code==NM_CUSTOMDRAW)return listDraw(reinterpret_cast<NMLVCUSTOMDRAW*>(l));
    if(info->hwndFrom==tabs&&info->code==TCN_SELCHANGE){detailTab=TabCtrl_GetCurSel(tabs);queueDetail();layout();return 0;}
    if((info->hwndFrom==ListView_GetHeader(list)||info->hwndFrom==list)&&(info->code==HDN_ENDTRACKW||info->code==HDN_ENDDRAG))PostMessageW(window,PresentationMessage,0,0);
    if(info->hwndFrom==list&&info->code==LVN_COLUMNCLICK&&!building){auto column=reinterpret_cast<NMLISTVIEW*>(l)->iSubItem;if(column>=0&&column<ColumnCount){if(presentation.sort==column)presentation.ascending=!presentation.ascending;else{presentation.sort=column;presentation.ascending=1;}fill(true);savePresentation(scope,presentation);}return 0;}
    if(info->hwndFrom==tree&&info->code==TVN_ITEMEXPANDEDW&&!building){auto n=reinterpret_cast<NMTREEVIEWW*>(l);auto index=static_cast<size_t>(n->itemNew.lParam);if(index<filters.size()){auto const& f=filters[index];bool collapsed=(n->itemNew.state&TVIS_EXPANDED)==0;if(f.value.empty()){if(collapsed)collapsedRoots.insert(f.kind);else collapsedRoots.erase(f.kind);}else if(f.kind==ViewKind::Project){if(collapsed)collapsedProjects.insert(f.value);else collapsedProjects.erase(f.value);}}}
    if(info->hwndFrom==tree&&info->code==TVN_SELCHANGEDW&&!building){auto n=reinterpret_cast<NMTREEVIEWW*>(l);auto index=static_cast<size_t>(n->itemNew.lParam);if(index<filters.size()){filter.kind=filters[index].kind;filter.value=filters[index].value;filter.scopeProject=filters[index].scopeProject;selectedKeys.clear();focusKey.clear();selectionInitialized=false;fill();}}
-   if(info->hwndFrom==list&&!building){if(info->code==LVN_ITEMCHANGED)selection();if(info->code==NM_DBLCLK)launch(L"open");if(info->code==LVN_KEYDOWN&&reinterpret_cast<NMLVKEYDOWN*>(l)->wVKey==VK_RETURN)launch(L"open");}return 0;}
+   if(info->hwndFrom==list&&!building){if(info->code==NM_CLICK&&ListView_GetItemCount(list)==0&&!IsRectEmpty(&emptyAction)){POINT point;GetCursorPos(&point);ScreenToClient(list,&point);if(PtInRect(&emptyAction,point)){launch(L"catalog");queueDetail();}}
+    if(info->code==LVN_ITEMCHANGED)selection();if(info->code==NM_DBLCLK)launch(L"open");if(info->code==LVN_KEYDOWN&&reinterpret_cast<NMLVKEYDOWN*>(l)->wVKey==VK_RETURN)launch(L"open");}return 0;}
   case WM_TIMER:
    if(w==1){launch(L"catalog");if(systemDark()!=darkMode)applyTheme();}if(w==3){KillTimer(window,3);launchDetail();return 0;}
    if(w==2){KillTimer(window,2);wchar_t query[257]{};GetWindowTextW(search,query,257);filter.query=query;fill();}return 0;
   case ResultMessage:{if(!async||w!=async->serial)return 0;std::optional<Reply> reply;{std::lock_guard lock(async->mutex);reply=std::move(async->reply);async->reply.reset();}busy=false;
-   if(reply){if(action!=L"catalog")completion=reply->message;SetWindowTextW(note,reply->message.c_str());if(action==L"catalog"&&(!catalogLoaded||projects!=reply->projects||scope!=reply->scope)){
+   if(reply){if(action==L"catalog"&&catalogFailed==reply->ok){catalogFailed=!reply->ok;InvalidateRect(list,nullptr,TRUE);InvalidateRect(note,nullptr,TRUE);}if(action!=L"catalog")completion=reply->message;SetWindowTextW(note,reply->message.c_str());if(action==L"catalog"&&(!catalogLoaded||projects!=reply->projects||scope!=reply->scope)){
     bool changedScope=scope!=reply->scope;scope=reply->scope;if(changedScope){presentation=loadPresentation(scope);left=presentation.left;right=presentation.right;applyPresentation();layout();}catalogLoaded=true;projects=std::move(reply->projects);
     if(changedScope||!reply->ok){filter={};selectedKeys.clear();focusKey.clear();selectionInitialized=false;collapsedRoots.clear();collapsedProjects.clear();building=true;SetWindowTextW(search,L"");building=false;}
     rebuild(true);if(!reply->ok)SetWindowTextW(note,reply->message.c_str());
@@ -368,7 +386,7 @@ public:
  HRESULT STDMETHODCALLTYPE CreateViewWindow(IShellView*,LPCFOLDERSETTINGS,IShellBrowser* host,RECT* rect,HWND* out)override{if(!host||!rect||!out)return E_POINTER;*out=nullptr;if(window)return E_UNEXPECTED;HWND parent;auto hr=host->GetWindow(&parent);if(FAILED(hr))return hr;browser=host;browser->AddRef();WNDCLASSW cls{};cls.lpfnWndProc=procedure;cls.hInstance=moduleInstance;cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);cls.hbrBackground=reinterpret_cast<HBRUSH>(COLOR_WINDOW+1);cls.lpszClassName=className;if(!RegisterClassW(&cls)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS){auto error=HRESULT_FROM_WIN32(GetLastError());DestroyViewWindow();return error;}
   *out=CreateWindowExW(WS_EX_CONTROLPARENT,className,L"ArchiOffice Drive",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,rect->left,rect->top,rect->right-rect->left,rect->bottom-rect->top,parent,nullptr,moduleInstance,this);if(!*out){auto error=HRESULT_FROM_WIN32(GetLastError());DestroyViewWindow();return error;}return S_OK;}
  HRESULT STDMETHODCALLTYPE DestroyViewWindow()override{capturePresentation();if(window)DestroyWindow(window);UnregisterClassW(className,moduleInstance);
-  busy=false;catalogLoaded=false;projects.clear();visible.clear();filters.clear();filter={};selectedKeys.clear();focusKey.clear();selectionInitialized=false;scope.clear();async.reset();detailAsync.reset();detailBusy=false;detailTab=0;detailProject.clear();detailKey.clear();detailRevision.clear();requestedDetail.clear();completion.clear();actionWritable=false;classificationVersion=0;actionScroll=0;previewPixels.clear();previewPages=previewPage=0;
+  busy=false;catalogLoaded=false;catalogFailed=false;projects.clear();visible.clear();filters.clear();filter={};selectedKeys.clear();focusKey.clear();selectionInitialized=false;scope.clear();async.reset();detailAsync.reset();detailBusy=false;detailTab=0;detailProject.clear();detailKey.clear();detailRevision.clear();requestedDetail.clear();completion.clear();actionWritable=false;classificationVersion=0;actionScroll=0;previewPixels.clear();previewPages=previewPage=0;
   tree=list=details=heading=note=refresh=open=document=properties=search=projectFilter=phaseFilter=typeFilter=statusFilter=reset=defaults=nullptr,tabs=nullptr,preview=nullptr,history=nullptr,previousPage=nullptr,nextPage=nullptr,pageLabel=nullptr;if(font){DeleteObject(font);font=nullptr;}if(titleFont){DeleteObject(titleFont);titleFont=nullptr;}if(backgroundBrush){DeleteObject(backgroundBrush);backgroundBrush=nullptr;}if(iconFont){DeleteObject(iconFont);iconFont=nullptr;}if(bigIconFont){DeleteObject(bigIconFont);bigIconFont=nullptr;}if(browser){browser->Release();browser=nullptr;}return S_OK;}
  HRESULT STDMETHODCALLTYPE GetCurrentInfo(LPFOLDERSETTINGS info)override{if(!info)return E_POINTER;info->ViewMode=FVM_DETAILS;info->fFlags=FWF_AUTOARRANGE;return S_OK;}
  HRESULT STDMETHODCALLTYPE AddPropertySheetPages(DWORD,LPFNSVADDPROPSHEETPAGE,LPARAM)override{return S_OK;}
