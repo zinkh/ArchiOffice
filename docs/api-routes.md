@@ -819,7 +819,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/cloud-link-retry-import` | [server/cloudLinkRoutes.ts:282](../server/cloudLinkRoutes.ts#L282) |
 | GET | `/cloud-link-status` | [server/cloudLinkRoutes.ts:73](../server/cloudLinkRoutes.ts#L73) |
 | POST | `/cloud-link-upgrade` | [server/localCloudUpgrade.ts:57](../server/localCloudUpgrade.ts#L57) |
-| GET | `/cloud-link-upgrade-export/:jobId` | [server/localCloudUpgrade.ts:276](../server/localCloudUpgrade.ts#L276) |
+| GET | `/cloud-link-upgrade-export/:jobId` | [server/localCloudUpgrade.ts:282](../server/localCloudUpgrade.ts#L282) |
 | POST | `/local-login` | [server/localAuthRoutes.ts:58](../server/localAuthRoutes.ts#L58) |
 | POST | `/local-setup` | [server/localAuthRoutes.ts:24](../server/localAuthRoutes.ts#L24) |
 | GET | `/local-status` | [server/localAuthRoutes.ts:20](../server/localAuthRoutes.ts#L20) |
