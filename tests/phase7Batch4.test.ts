@@ -96,6 +96,8 @@ describe('Contrats MOE', () => {
   it('creates, updates, and deletes a contrat MOE within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    // Le project_id d'un contrat doit désigner une affaire du cabinet (issue #245).
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId, name: 'Affaire p1' }]);
 
     const created = await request(app).post('/api/contrats_moe').set(authHeader(token)).send({ project_id: 'p1', montant_honoraires: 15000 });
     expect(created.status).toBe(201);
@@ -131,6 +133,8 @@ describe('Notes d\'honoraires', () => {
   it('creates a note with an auto-generated numero, lists, updates, and deletes it', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    // Le project_id d'une note doit désigner une affaire du cabinet (issue #245).
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId, name: 'Affaire p1' }]);
 
     const created = await request(app).post('/api/notes_honoraires').set(authHeader(token)).send({ project_id: 'p1', montant: 5000 });
     expect(created.status).toBe(201);

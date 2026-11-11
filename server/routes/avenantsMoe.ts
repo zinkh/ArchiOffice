@@ -5,6 +5,7 @@
 // supabase/migrate_avenants_moe.sql pour l'historique de la séparation.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { firstForeignRelation } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -38,6 +39,13 @@ export function registerAvenantsMoeRoutes(app: Express, { supabaseAdmin, getTena
         delai_execution, montant_devis_presente, montant_devis_accepte,
       } = req.body || {};
       if (!contrat_moe_id) return res.status(400).json({ error: "Un avenant doit être rattaché à un contrat MOE (contrat_moe_id)." });
+      // Le contrat et l'affaire sont fournis par le navigateur : ils doivent
+      // appartenir au cabinet (issue #245). Le PUT ne les accepte pas.
+      const foreign = await firstForeignRelation(supabaseAdmin, tenantId, [
+        { table: 'contrats_moe', id: contrat_moe_id, label: 'Contrat MOE' },
+        { table: 'projects', id: project_id, label: 'Projet' },
+      ]);
+      if (foreign) return res.status(400).json({ error: foreign });
       const id = crypto.randomUUID();
       const { data, error } = await supabaseAdmin.from('avenants_moe').insert({
         id, tenant_id: tenantId, project_id, contrat_moe_id, os_number, title,
