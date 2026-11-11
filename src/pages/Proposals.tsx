@@ -49,6 +49,7 @@ import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardM
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
 import { DEFAULT_MISSIONS, calculateFeeRatios, defaultFeeDistribution, exportFeeDistributionToXlsx } from '../lib/feeDistribution';
 import { FeeDistributionGrid } from '../components/FeeDistributionGrid';
+import { TranchesToolbar, TranchesSummary } from '../components/TranchesControls';
 import { computeFees, applyDiscountAndVat, scopeShare, roundFee, FEE_ROUNDING_OPTIONS, PC_SCOPE_DEFAULT_SHARE_PCT, PC_SCOPE_MISSION_IDS, type FeeRounding, type MissionScope } from '../lib/proposalFees';
 
 const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
@@ -1572,6 +1573,10 @@ export default function Proposals() {
                       >
                         <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
                       </button>
+                      <TranchesToolbar
+                        feeDistribution={newProposal.fee_distribution}
+                        onChange={(fd) => setNewProposal(prev => ({ ...prev, fee_distribution: fd }))}
+                      />
                       <button
                         type="button"
                         onClick={handleLoadMiqcpPhaseRepartition}
@@ -1617,6 +1622,10 @@ export default function Proposals() {
                       </button>
                     </div>
                   </div>
+                  <TranchesSummary
+                    feeDistribution={newProposal.fee_distribution}
+                    onChange={(fd) => setNewProposal(prev => ({ ...prev, fee_distribution: fd }))}
+                  />
                   <div className="overflow-x-auto border border-[var(--tblr-border)] rounded-lg p-2 bg-[var(--tblr-surface)] min-h-[400px]">
                     <FeeDistributionGrid
                       doc={newProposal}
