@@ -1127,6 +1127,22 @@ export interface ProposalSpecialty {
 }
 
 export interface Proposal {
+  sent_at?: string | null;
+  archived_at?: string | null;
+  archive_reason?: string | null;
+  last_response_at?: string | null;
+  last_reminder_at?: string | null;
+  next_follow_up_at?: string | null;
+  reminder_count?: number;
+  signature_provider?: 'firma' | 'docuseal' | 'zoho' | null;
+  signature_request_id?: string | null;
+  signature_status?: string | null;
+  signature_recipient_email?: string | null;
+  signature_recipient_name?: string | null;
+  signature_sent_at?: string | null;
+  signature_completed_at?: string | null;
+  signature_provider_region?: string | null;
+
   id: string;
   title: string;
   client_id: string;
