@@ -1,3 +1,6 @@
+import { registerProposalFollowUpRoutes } from './server/routes/proposalFollowUp';
+import { registerSignatureRoutes } from './server/routes/signatures';
+import { registerZohoSignRoutes } from './server/routes/zohoSign';
 import express from "express";
 import path from "path";
 import nodemailer from "nodemailer";
@@ -831,7 +834,7 @@ export async function createApp() {
     // navigation — they can't carry our app's JWT. These recover the
     // tenant (and, for Google Calendar, the user) from a one-time state
     // nonce instead (server/oauthState.ts), not from req.user.
-    "/api/zoho/callback", "/api/zoho-books/callback", "/api/google-calendar/callback", "/api/gmail/callback", "/api/outlook/callback",
+    "/api/zoho-sign/callback", "/api/zoho/callback", "/api/zoho-books/callback", "/api/google-calendar/callback", "/api/gmail/callback", "/api/outlook/callback",
     // Called by Ragic itself (external, no JWT) — authenticated via a
     // `secret` query param checked against the tenant's own ragic_api_key
     // inside the handler, not via our session auth. Was missing here, so
@@ -1231,6 +1234,9 @@ export async function createApp() {
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
   registerTenantMembershipRoutes(app, { supabaseAdmin, getTenantId });
+  registerProposalFollowUpRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerSignatureRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerZohoSignRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

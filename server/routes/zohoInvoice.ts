@@ -505,7 +505,23 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
           const resp = await axios.post(`${apiBase}/invoices`, payload, { headers, timeout: ZOHO_TIMEOUT_MS });
           const zohoId = resp.data?.invoice?.invoice_id;
           if (zohoId) {
-            await supabaseAdmin.from('invoices').update({ zoho_invoice_id: zohoId }).eq('id', inv.id).eq('tenant_id', tenantId);
+            // Zoho est l'autorité de numérotation quand la facture locale n'a
+            // pas encore de numéro (brouillon créé en mode connecteur, voir
+            // POST /api/invoices) : le numéro que Zoho vient d'attribuer
+            // devient le numéro légal local, sans renumérotation. Une facture
+            // déjà numérotée localement garde son numéro (envoyé à Zoho
+            // ci-dessus).
+            const zohoNumber = resp.data?.invoice?.invoice_number;
+            const patch: Record<string, unknown> = { zoho_invoice_id: zohoId };
+            if (!inv.invoice_number && zohoNumber) patch.invoice_number = zohoNumber;
+            const { error: persistErr } = await supabaseAdmin.from('invoices').update(patch).eq('id', inv.id).eq('tenant_id', tenantId);
+            if (persistErr && patch.invoice_number) {
+              // Numéro déjà pris localement (index unique tenant + numéro) :
+              // on garde au moins le lien Zoho pour ne pas renvoyer la facture.
+              console.error("[POST /api/zoho/sync] numéro Zoho non enregistré", persistErr);
+              errors.push(`Numéro Zoho ${zohoNumber} non enregistré (${inv.id}): ${persistErr.message}`);
+              await supabaseAdmin.from('invoices').update({ zoho_invoice_id: zohoId }).eq('id', inv.id).eq('tenant_id', tenantId);
+            }
             pushed++;
           }
         } catch (err: any) {

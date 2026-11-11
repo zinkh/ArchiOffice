@@ -52,11 +52,29 @@ export interface DemandeDossier {
   contexte?: ContexteCctp;
   /** Page de garde du CCTP et du DPGF (PDF, et Word pour le CCTP). */
   couverture?: CouvertureOptions;
+  /** CCTP : joint un dossier « Annexe - Fiches techniques » (fichiers d'origine et index PDF). Jamais par défaut. */
+  annexeFiches?: boolean;
+  /** Lecture d'un fichier de fiche par sa référence de stockage ; par défaut, URL signée du stockage de l'application. */
+  lireFichier?: (fileUrl: string) => Promise<Blob>;
 }
 
 export type Avertissement =
   | { code: 'vide'; document: DocumentDossier }
-  | { code: 'sans_batiment'; count: number };
+  | { code: 'sans_batiment'; count: number }
+  /** Annexe demandée mais aucun poste du CCTP exporté ne porte de fiche. */
+  | { code: 'annexe_vide' }
+  /** Fiches jointes dont le fichier d'origine porte des marques (fiches marquées « anonymes »). */
+  | { code: 'annexe_marques'; count: number }
+  /** Fiches listées à l'index mais dont le fichier n'a pas pu être lu. */
+  | { code: 'annexe_manquantes'; noms: string[] };
+
+/** Lit un fichier du stockage par URL signée (chargé à la demande : l'export sans annexe n'en a pas besoin). */
+async function lireFichierSigne(fileUrl: string): Promise<Blob> {
+  const { resolveSignedUrl } = await import('./signedStorageUrl');
+  const res = await fetch(await resolveSignedUrl(fileUrl));
+  if (!res.ok) throw new Error(`Lecture impossible (${res.status}).`);
+  return res.blob();
+}
 
 export interface ResultatDossier {
   fichiers: FichierExporte[];
@@ -126,6 +144,14 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
           };
           for (const f of fmts) await (f === 'pdf' ? exportCctpPdf(partie.doc, opts) : exportCctpDocx(partie.doc, opts));
         }
+      }
+      if (d.annexeFiches) {
+        const { produireAnnexe } = await import('./annexeFichesTechniques');
+        const annexe = await produireAnnexe(source, { settings, projet: etiquette, lireFichier: d.lireFichier ?? lireFichierSigne });
+        if (!annexe.entrees.length) avertissements.push({ code: 'annexe_vide' });
+        for (const f of annexe.fichiers) await sortie(f.nom, f.blob);
+        if (annexe.avecMarques) avertissements.push({ code: 'annexe_marques', count: annexe.avecMarques });
+        if (annexe.manquantes.length) avertissements.push({ code: 'annexe_manquantes', noms: annexe.manquantes });
       }
       continue;
     }

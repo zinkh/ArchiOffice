@@ -116,6 +116,8 @@ describe('Project Members', () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('tenant_memberships', [{ id: 'mem-u1', user_id: 'u1', tenant_id: tenantId, is_default: true }]);
+    // Le projet de l'URL doit être une affaire du cabinet (issue #245).
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId, name: 'Affaire p1' }]);
 
     const added = await request(app).post('/api/projects/p1/members').set(authHeader(token)).send({ user_id: 'u1', role: 'lead' });
     expect(added.status).toBe(201);

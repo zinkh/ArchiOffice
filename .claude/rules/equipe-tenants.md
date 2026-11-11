@@ -97,6 +97,55 @@ sont pas la même faille : c'est l'identifiant RÉFÉRENCÉ depuis le corps
 d'une requête qui manquait de contrôle, pas celui de la ressource visée par
 l'URL elle-même.
 
+**Complément (issue #245).** Ce balayage avait laissé quatre trous, fermés depuis :
+`contratsMoe.ts` (`project_id`, `client_id`, POST et PUT), `notesHonoraires.ts`
+(`project_id`, y compris pour les rôles que la visibilité ne restreint pas, et
+`contrat_id`, POST et PUT), `avenantsMoe.ts` (`project_id`, `contrat_moe_id`, POST ;
+le PUT ne les accepte pas) et `POST /api/projects/:id/members` (le projet de l'URL
+n'était pas contrôlé : « validé en amont » était faux pour cette route, seul le
+`user_id` l'était). `firstForeignRelation(supabaseAdmin, tenantId, [{ table, id, label }])`
+(`server/assertTenantEntity.ts`) valide PLUSIEURS relations d'un coup et rend le
+message de refus de la première qui n'est pas du cabinet, ou `null` : une relation
+absente, `null` ou vide est ignorée (on peut effacer un lien) et un identifiant qui
+n'est pas une chaîne (objet ou tableau glissé dans le JSON) est refusé sans atteindre la
+requête. Convention de réponse : un identifiant du CORPS → 400, un identifiant de l'URL →
+404, dans les deux cas « X introuvable pour ce cabinet. », **identique pour une ressource
+étrangère et pour une ressource inexistante** (rien ne révèle qu'un id existe chez un
+autre cabinet). Tests : `tests/crossTenantRelations.test.ts`. **Une nouvelle colonne qui
+référence une autre table est à ajouter à la route qui l'écrit.**
+
+**La base, dernière ligne de défense** (`supabase/migrate_zz_tenant_composite_fks.sql`,
+pilote pour `projects`, `contacts` et `contrats_moe`). Une clé simple ne garantit que
+l'EXISTENCE de l'id, pas son cabinet : la migration pose `UNIQUE (id, tenant_id)` sur ces
+trois parents et remplace chaque clé simple de leurs tables enfants par une clé composite
+`(colonne, tenant_id)`, de sorte que PostgreSQL refuse une ligne dont le parent est d'un
+autre cabinet même si une route oublie le contrôle (`tests/tenantCompositeFks.pg.test.ts`,
+vrai Postgres, ignoré sans `PGHOST`). Points à ne pas défaire :
+
+- **La règle de suppression d'origine est reprise** : `SET NULL` devient `SET NULL (colonne)`
+  (PostgreSQL 15+), qui n'efface QUE la colonne de liaison et jamais `tenant_id` ; la
+  migration ne fait rien sous PostgreSQL 15.
+- **La clé simple est SUPPRIMÉE, jamais conservée à côté** : deux relations entre les mêmes
+  tables rendraient les jointures PostgREST (`.select('*, projects(name)')`) ambiguës.
+- **Clés `DEFERRABLE INITIALLY IMMEDIATE`** : contrôlées à chaque instruction, sauf dans la
+  transaction de `server/localCloudUpgrade.ts` qui réécrit `tenant_id` table par table dans un
+  ordre quelconque et y demande `SET CONSTRAINTS ALL DEFERRED`. **Toute nouvelle réécriture en
+  masse de `tenant_id` doit faire pareil.**
+- **Découverte dynamique** des clés (pas de liste figée) : une table est ignorée avec un
+  avertissement, jamais en échec, si une ligne croise déjà deux cabinets, si son `tenant_id`
+  est nullable avec des NULL, ou si les types diffèrent. `project_members.tenant_id` est du
+  TEXTE alors que `projects.tenant_id` est un UUID : elle garde sa clé simple et son
+  contrôle reste celui de la route. Étendre à un autre parent = l'ajouter à `v_parents`.
+- **Limite sur un poste local neuf** : `electron/applySchema.cjs` rejoue après tous les fichiers
+  les instructions qui ont échoué au premier passage ; `avenants_moe.contrat_moe_id` y garde
+  donc sa clé simple (49 composites au lieu de 50). Pas de conséquence en production.
+- **Mesuré en production avant d'écrire la migration** : 154 clés simples entre tables à
+  `tenant_id`, 0 ligne qui croise deux cabinets.
+
+Pas encore fait : les autres parents (`proposals`, `tenders`, `marches_entreprises`,
+`documents`, `meetings`, etc.) et les clés vers `profiles`, dont le `tenant_id` n'est que le
+cabinet par défaut d'une personne.
+
 ### Plusieurs cabinets pour une même personne
 
 Un architecte exerce parfois dans deux structures (la sienne et une SCPA, un
