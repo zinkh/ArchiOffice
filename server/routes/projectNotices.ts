@@ -52,7 +52,7 @@ async function projectForTenant(supabaseAdmin: any, tenantId: string, projectId:
   return data;
 }
 
-async function extractProjectDocuments(supabaseAdmin: any, tenantId: string, projectId: string): Promise<string> {
+export async function extractProjectDocuments(supabaseAdmin: any, tenantId: string, projectId: string): Promise<string> {
   const { data: docs, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents')
     .select('name, file_url, mime_type').eq('project_id', projectId);
   if (error) throw error;
