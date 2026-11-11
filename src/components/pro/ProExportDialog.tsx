@@ -78,6 +78,8 @@ export const ProExportDialog: React.FC<Props> = ({
   const [avecPrix, setAvecPrix] = useState(false);
   const [avecTva, setAvecTva] = useState(false);
   const [cctpParBatiment, setCctpParBatiment] = useState(false);
+  // Annexe des fiches techniques : jamais jointe d'office, seulement sur coche explicite.
+  const [annexeFiches, setAnnexeFiches] = useState(false);
   const [parLot, setParLot] = useState(false);
   // Poste par poste ou récapitulatif par lot : le dernier choix est gardé d'une ouverture à l'autre.
   const [estimationDetaillee, setEstimationDetaillee] = useState(() => {
@@ -158,16 +160,21 @@ export const ProExportDialog: React.FC<Props> = ({
       const bpuPret = documents.bpu || documents.dqe ? prepareBpu() : null;
       const res = await produireDossier({
         dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment, parLot, orientations, estimationDetaillee,
+        annexeFiches: annexeFiches && !!documents.cctp,
         projectName, perimetre: perimetre(), settings, contexte,
         couverture: { imageUrl: projectImageUrl, adresse: contexte?.adresse, maitreOuvrage: contexte?.maitreOuvrage, reference: contexte?.reference },
       });
       for (const a of res.avertissements) {
-        notify?.(
-          a.code === 'vide'
-            ? t('pro_export_dialog_warn_empty', { doc: t(`pro_export_doc_${a.document}`) })
-            : t('pro_cctp_export_unassigned', { count: a.count }),
-          { type: 'error' },
-        );
+        const message = a.code === 'vide'
+          ? t('pro_export_dialog_warn_empty', { doc: t(`pro_export_doc_${a.document}`) })
+          : a.code === 'sans_batiment'
+            ? t('pro_cctp_export_unassigned', { count: a.count })
+            : a.code === 'annexe_vide'
+              ? t('pro_export_dialog_annex_empty', { defaultValue: "Annexe demandée : aucun poste du CCTP exporté ne porte de fiche technique." })
+              : a.code === 'annexe_marques'
+                ? t('pro_export_dialog_annex_brands', { count: a.count, defaultValue: '{{count}} fiche(s) marquée(s) « anonyme » sont jointes telles quelles : leur fichier contient les marques.' })
+                : t('pro_export_dialog_annex_missing', { names: a.noms.join(', '), defaultValue: 'Fiche(s) non jointe(s), fichier illisible : {{names}}' });
+        notify?.(message, { type: 'error' });
       }
       if (res.fichiers.length === 0) { setErreur(t('pro_export_dialog_nothing')); return; }
       await livrer(res.fichiers, `Dossier_PRO_${nomSur(projectName ?? dpgf.titre)}.zip`);
@@ -351,6 +358,17 @@ export const ProExportDialog: React.FC<Props> = ({
               <span>
                 <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_estimation_detail')}</span>
                 <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_estimation_detail_hint')}</span>
+              </span>
+            </label>
+          )}
+          {documents.cctp && (
+            <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[2.75rem] sm:min-h-0">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--tblr-primary)]" checked={annexeFiches} onChange={e => setAnnexeFiches(e.target.checked)} />
+              <span>
+                <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_annex', { defaultValue: "Joindre l'annexe des fiches techniques" })}</span>
+                <span className="block text-xs text-[var(--tblr-muted)]">
+                  {t('pro_export_dialog_annex_hint', { defaultValue: "Dossier « Annexe - Fiches techniques » dans l'archive : fichiers d'origine nommés par poste et index PDF. Les fiches marquées « anonyme » sont jointes telles quelles (elles contiennent les marques)." })}
+                </span>
               </span>
             </label>
           )}

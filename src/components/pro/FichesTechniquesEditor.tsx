@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { IconPaperclip, IconX, IconFileText } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
 import { openSignedUrl } from '../../lib/signedStorageUrl';
+import { estPhoto } from '../../lib/fichePhoto';
 import type { FicheTechnique } from '../../types/dpgf';
 import {
   ajouterFiches, basculerAnonymisation, envoyerFicheTechnique, marquerAnonymisation, retirerFiche, MAX_FICHES_PAR_POSTE,
@@ -71,7 +72,7 @@ export function FichesTechniquesEditor({ projectId, fiches, onChange }: FichesTe
         <span className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Fiches techniques</span>
         <label className={`inline-flex items-center gap-1.5 h-8 px-3 rounded border text-xs cursor-pointer hover:bg-[var(--tblr-surface-2)] ${envoi || complet ? 'opacity-60 pointer-events-none' : ''}`} style={{ borderColor: 'var(--tblr-border)' }}>
           <IconPaperclip size={14} aria-hidden />
-          {envoi ? 'Envoi…' : 'Joindre un fichier'}
+          {envoi ? 'Envoi…' : 'Joindre une fiche ou une photo'}
           <input type="file" multiple className="sr-only" onChange={e => { void deposer(e.target.files); e.target.value = ''; }} />
         </label>
       </div>
@@ -105,6 +106,7 @@ export function FichesTechniquesEditor({ projectId, fiches, onChange }: FichesTe
               <button type="button" onClick={() => { void openSignedUrl(f.fileUrl); }} className="min-w-0 flex-1 truncate text-left hover:underline" title={f.nom}>
                 {f.nom}
               </button>
+              {estPhoto(f.nom) && <span className="shrink-0 rounded border px-1 text-[0.6875rem]" style={{ borderColor: 'var(--tblr-border)' }}>Photo</span>}
               <label className="inline-flex shrink-0 items-center gap-1 text-[0.6875rem]" title="Les marques de cette fiche ne sont pas citées par l'IA ni dans l'export">
                 <input type="checkbox" checked={!!f.anonymiser} onChange={e => onChange(basculerAnonymisation(fiches, f.id, e.target.checked))} aria-label={`Anonymiser les marques de la fiche ${f.nom}`} />
                 Anonyme
@@ -116,7 +118,9 @@ export function FichesTechniquesEditor({ projectId, fiches, onChange }: FichesTe
           ))}
         </ul>
       ) : (
-        <p className="text-[0.6875rem] text-zinc-400">Fiche produit, avis technique ou PV d'essai du poste. Le fichier est rangé dans les documents de l'affaire.</p>
+        <p className="text-[0.6875rem] text-zinc-400">
+          Fiche produit, avis technique ou PV d'essai du poste, ou une photo (existant, produit posé, étiquette) que l'IA décrit pour alimenter le texte du poste avec « Rédiger avec l'IA ». Le fichier est rangé dans les documents de l'affaire ; une photo n'est jamais jointe à l'annexe des fiches techniques.
+        </p>
       )}
     </div>
   );

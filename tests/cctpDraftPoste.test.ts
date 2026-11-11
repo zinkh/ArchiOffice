@@ -65,6 +65,17 @@ describe('construireTachePoste', () => {
     expect(t).not.toContain('ANONYMISÉE');
   });
 
+  it('demande de décrire les photos jointes sans rien inventer, et interdit les logos si une photo est anonyme', () => {
+    const t = construireTachePoste({ ...base, photos: [{ nom: 'IMG_1.jpg' }, { nom: 'IMG_2.jpg', anonymiser: true }] });
+    expect(t).toContain('2 images');
+    expect(t).toContain('photo 1, photo 2');
+    expect(t).toContain('n\'affirme que ce qui est visible');
+    expect(t).toContain('aucun logo visible');
+    expect(t).not.toContain('IMG_');
+    expect(t).toContain('ne doit citer AUCUNE marque');
+    expect(construireTachePoste({ ...base, photos: [{ nom: 'x.jpg' }] })).not.toContain('logo');
+  });
+
   it('anonymise les marques : consigne par fiche, nom de fichier masqué et rappel en fin de tâche', () => {
     const t = construireTachePoste({ ...base, fiches: [{ nom: 'Fiche_Sika_Dalle.pdf', texte: 'Résistance 30 MPa', anonymiser: true }] });
     expect(t).not.toContain('Sika');

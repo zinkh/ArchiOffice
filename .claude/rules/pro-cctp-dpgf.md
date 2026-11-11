@@ -547,3 +547,20 @@ reçoit la fiche sous le nom « Fiche n (anonymisée) », avec la consigne `CONS
 n'imprime pas le nom de fichier (« Fiche technique n (marque non citée) »). **Limite assumée** : l'anonymisation repose sur la
 consigne donnée au modèle, il n'y a pas de détection automatique des marques : le texte proposé se relit avant d'être
 appliqué, comme toute rédaction IA. Le fichier lui-même, rangé dans les documents de l'affaire, n'est pas modifié.
+
+### Annexe des fiches techniques à l'export du CCTP, photos décrites par l'IA
+
+- **Annexe, jamais d'office** : la fenêtre « Exporter » a une case « Joindre l'annexe des fiches techniques » (CCTP coché, décochée par
+  défaut, `DemandeDossier.annexeFiches`). Forme retenue : un DOSSIER « Annexe - Fiches techniques » dans l'archive, avec les fichiers
+  d'origine nommés d'après leur poste (`<n°> <désignation> <fichier>`, un seul exemplaire par fichier cité par plusieurs postes) et un
+  index PDF à la charte (poste, désignation, fiche, observation). `src/lib/annexeFichesTechniques.ts` (`planAnnexe`, `produireAnnexe`,
+  `indexAnnexePdf`, testé), lecture par URL signée chargée à la demande (`lireFichierSigne`, remplaçable par `lireFichier` en test).
+  Périmètre = celui du CCTP exporté (lots, bâtiments filtrés). Avertissements : `annexe_vide`, `annexe_marques`, `annexe_manquantes`.
+- **Fiche anonyme dans l'annexe** (décision de l'architecte) : jointe TELLE QUELLE, avec avertissement et mention « Contient des
+  marques » à l'index : son fichier d'origine porte les marques, seul le texte du CCTP et l'IA les taisent.
+- **Photos** (`src/lib/fichePhoto.ts`, extension JPEG, PNG, WebP, HEIC) : on joint à un poste une fiche OU une photo. `draft-poste`
+  envoie les photos au modèle comme IMAGES (vision, 4 au plus, 5 Mo chacune, JPEG/PNG/WebP) pour qu'il les DÉCRIVE et alimente le texte
+  du poste (« n'affirme que ce qui est visible, le reste en [à vérifier] »), la case « Utiliser les fiches techniques et photos » du
+  dialogue les inclut, et une photo « anonyme » interdit aussi les logos visibles. Un fournisseur IA sans vision refuse (400) AVANT tout
+  débit de crédit. **Une photo n'est ni rappelée sous l'article à l'export, ni jointe à l'annexe** : elle sert à rédiger, pas à transmettre.
+  HEIC n'est pas lu côté serveur (signalé dans `fiches_ignorees`).

@@ -132,7 +132,7 @@ export const CctpDraftPosteDialog: React.FC<Props> = ({ projectId, poste, onClos
               <label className="flex items-start gap-2 text-sm">
                 <input type="checkbox" className="mt-1" checked={utiliserFiches} onChange={e => setUtiliserFiches(e.target.checked)} />
                 <span style={{ color: 'var(--tblr-text)' }}>
-                  {t('pro_cctp_draft_use_fiches', { count: fichesUtilisables.length, defaultValue: 'Utiliser les fiches techniques du poste ({{count}}) comme source' })}
+                  {t('pro_cctp_draft_use_fiches', { count: fichesUtilisables.length, defaultValue: 'Utiliser les fiches techniques et photos du poste ({{count}}) comme source (les photos sont décrites par l\'IA)' })}
                 </span>
               </label>
             )}
