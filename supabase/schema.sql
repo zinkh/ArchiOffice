@@ -413,6 +413,97 @@ CREATE TABLE IF NOT EXISTS invoices (
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_project ON invoices(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_client_id ON invoices(client_id);
+-- Deux factures d'un même cabinet ne portent jamais le même numéro. Index
+-- partiel : une facture en cours de synchronisation avec un connecteur
+-- comptable n'a pas encore de numéro (voir migrate_accounting_sync.sql).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_tenant_invoice_number
+  ON invoices(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL;
+
+-- ── Numérotation atomique des devis, notes d'honoraires et factures ─────────
+-- Reprise de supabase/migrate_atomic_document_numbering.sql (voir ce fichier
+-- pour le détail). Une série par cabinet ET par année ; l'incrément se fait
+-- dans un seul UPDATE ... RETURNING, sous verrou de ligne Postgres : deux
+-- créations simultanées ne reçoivent jamais la même valeur.
+-- Séries : 'invoice', 'proposal', 'note_honoraires', 'acompte:<projet>'.
+CREATE TABLE IF NOT EXISTS document_sequences (
+  tenant_id  UUID   NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  series     TEXT   NOT NULL,
+  year       INT    NOT NULL DEFAULT 0,
+  last_value BIGINT NOT NULL DEFAULT 0 CHECK (last_value >= 0),
+  PRIMARY KEY (tenant_id, series, year)
+);
+-- Table réservée au serveur (service role) : RLS activée sans aucune politique.
+ALTER TABLE document_sequences ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION document_sequence_seed(p_tenant_id UUID, p_series TEXT, p_year INT)
+RETURNS BIGINT LANGUAGE plpgsql AS $$
+DECLARE
+  v_max   BIGINT := 0;
+  v_count BIGINT := 0;
+  v_re    TEXT := '-' || p_year || '-(\d{1,9})\s*$';
+BEGIN
+  IF p_series = 'invoice' THEN
+    SELECT COALESCE(max((regexp_match(invoice_number, v_re))[1]::BIGINT), 0)
+      INTO v_max FROM invoices WHERE tenant_id = p_tenant_id;
+  ELSIF p_series = 'proposal' THEN
+    SELECT COALESCE(max((regexp_match(reference, v_re))[1]::BIGINT), 0)
+      INTO v_max FROM proposals WHERE tenant_id = p_tenant_id;
+  ELSIF p_series = 'note_honoraires' THEN
+    SELECT COALESCE(max((regexp_match(numero, v_re))[1]::BIGINT), 0)
+      INTO v_max FROM notes_honoraires WHERE tenant_id = p_tenant_id;
+  ELSIF p_series LIKE 'acompte:%' THEN
+    SELECT count(*) INTO v_count FROM invoices
+      WHERE tenant_id = p_tenant_id
+        AND project_id = substring(p_series FROM 9)::UUID
+        AND invoice_type = 'acompte';
+    RETURN v_count;
+  ELSE
+    RAISE EXCEPTION 'Série de numérotation inconnue : %', p_series;
+  END IF;
+  RETURN v_max;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION next_document_number(p_tenant_id UUID, p_series TEXT, p_year INT)
+RETURNS BIGINT LANGUAGE plpgsql AS $$
+DECLARE
+  v_next BIGINT;
+  v_year INT := CASE WHEN p_series LIKE 'acompte:%' THEN 0 ELSE p_year END;
+BEGIN
+  -- Amorçage à la première demande seulement (ON CONFLICT couvre deux
+  -- premiers appels simultanés).
+  IF NOT EXISTS (SELECT 1 FROM document_sequences WHERE tenant_id = p_tenant_id AND series = p_series AND year = v_year) THEN
+    INSERT INTO document_sequences (tenant_id, series, year, last_value)
+    VALUES (p_tenant_id, p_series, v_year, document_sequence_seed(p_tenant_id, p_series, v_year))
+    ON CONFLICT (tenant_id, series, year) DO NOTHING;
+  END IF;
+
+  UPDATE document_sequences SET last_value = last_value + 1
+  WHERE tenant_id = p_tenant_id AND series = p_series AND year = v_year
+  RETURNING last_value INTO v_next;
+
+  RETURN v_next;
+END;
+$$;
+
+-- Réservées au serveur : un compte connecté ne doit pas pouvoir faire avancer
+-- la séquence d'un autre cabinet par l'API REST.
+REVOKE ALL ON FUNCTION document_sequence_seed(UUID, TEXT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION next_document_number(UUID, TEXT, INT) FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON FUNCTION document_sequence_seed(UUID, TEXT, INT) FROM anon;
+    REVOKE ALL ON FUNCTION next_document_number(UUID, TEXT, INT) FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON FUNCTION document_sequence_seed(UUID, TEXT, INT) FROM authenticated;
+    REVOKE ALL ON FUNCTION next_document_number(UUID, TEXT, INT) FROM authenticated;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION document_sequence_seed(UUID, TEXT, INT) TO service_role;
+    GRANT EXECUTE ON FUNCTION next_document_number(UUID, TEXT, INT) TO service_role;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS invoice_items (
   id TEXT PRIMARY KEY,

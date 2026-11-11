@@ -4,7 +4,7 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-819 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+820 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
@@ -203,7 +203,8 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/external-storage/status` | [server/routes/externalStorage.ts:244](../server/routes/externalStorage.ts#L244) |
 | POST | `/api/external-storage/test` | [server/routes/externalStorage.ts:321](../server/routes/externalStorage.ts#L321) |
 | POST | `/api/external-storage/webdav` | [server/routes/externalStorage.ts:256](../server/routes/externalStorage.ts#L256) |
-| GET | `/api/feasibility/map-tile` | [server/routes/proposalFeasibility.ts:175](../server/routes/proposalFeasibility.ts#L175) |
+| GET | `/api/feasibility/map-tile` | [server/routes/proposalFeasibility.ts:238](../server/routes/proposalFeasibility.ts#L238) |
+| GET | `/api/feasibility/photo-from-url` | [server/routes/proposalFeasibility.ts:223](../server/routes/proposalFeasibility.ts#L223) |
 | GET | `/api/feed` | [server/routes/activityFeed.ts:71](../server/routes/activityFeed.ts#L71) |
 | POST | `/api/feed/activities/:id/like` | [server/routes/activityFeed.ts:246](../server/routes/activityFeed.ts#L246) |
 | POST | `/api/feed/posts` | [server/routes/activityFeed.ts:167](../server/routes/activityFeed.ts#L167) |
@@ -550,14 +551,14 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | DELETE | `/api/proposals/:id` | [server/routes/proposals.ts:228](../server/routes/proposals.ts#L228) |
 | PUT | `/api/proposals/:id` | [server/routes/proposals.ts:79](../server/routes/proposals.ts#L79) |
 | GET | `/api/proposals/:id/export` | [server/routes/proposals.ts:249](../server/routes/proposals.ts#L249) |
-| GET | `/api/proposals/:id/feasibility` | [server/routes/proposalFeasibility.ts:72](../server/routes/proposalFeasibility.ts#L72) |
-| POST | `/api/proposals/:id/feasibility` | [server/routes/proposalFeasibility.ts:82](../server/routes/proposalFeasibility.ts#L82) |
-| PUT | `/api/proposals/:id/feasibility-meta` | [server/routes/proposalFeasibility.ts:56](../server/routes/proposalFeasibility.ts#L56) |
-| GET | `/api/proposals/:id/feasibility-site-data` | [server/routes/proposalFeasibility.ts:163](../server/routes/proposalFeasibility.ts#L163) |
-| DELETE | `/api/proposals/:id/feasibility/:sectionId` | [server/routes/proposalFeasibility.ts:153](../server/routes/proposalFeasibility.ts#L153) |
-| PUT | `/api/proposals/:id/feasibility/:sectionId` | [server/routes/proposalFeasibility.ts:123](../server/routes/proposalFeasibility.ts#L123) |
+| GET | `/api/proposals/:id/feasibility` | [server/routes/proposalFeasibility.ts:118](../server/routes/proposalFeasibility.ts#L118) |
+| POST | `/api/proposals/:id/feasibility` | [server/routes/proposalFeasibility.ts:128](../server/routes/proposalFeasibility.ts#L128) |
+| PUT | `/api/proposals/:id/feasibility-meta` | [server/routes/proposalFeasibility.ts:102](../server/routes/proposalFeasibility.ts#L102) |
+| GET | `/api/proposals/:id/feasibility-site-data` | [server/routes/proposalFeasibility.ts:209](../server/routes/proposalFeasibility.ts#L209) |
+| DELETE | `/api/proposals/:id/feasibility/:sectionId` | [server/routes/proposalFeasibility.ts:199](../server/routes/proposalFeasibility.ts#L199) |
+| PUT | `/api/proposals/:id/feasibility/:sectionId` | [server/routes/proposalFeasibility.ts:169](../server/routes/proposalFeasibility.ts#L169) |
 | POST | `/api/proposals/:id/feasibility/:sectionId/draft-ai` | [server/routes/proposalFeasibilityAi.ts:149](../server/routes/proposalFeasibilityAi.ts#L149) |
-| PUT | `/api/proposals/:id/feasibility/order` | [server/routes/proposalFeasibility.ts:107](../server/routes/proposalFeasibility.ts#L107) |
+| PUT | `/api/proposals/:id/feasibility/order` | [server/routes/proposalFeasibility.ts:153](../server/routes/proposalFeasibility.ts#L153) |
 | POST | `/api/proposals/:id/feasibility/prefill-sections` | [server/routes/proposalFeasibilityAi.ts:86](../server/routes/proposalFeasibilityAi.ts#L86) |
 | PUT | `/api/proposals/:id/illustrations` | [server/routes/proposals.ts:214](../server/routes/proposals.ts#L214) |
 | POST | `/api/proposals/import` | [server/routes/proposals.ts:261](../server/routes/proposals.ts#L261) |
