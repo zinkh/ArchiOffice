@@ -123,6 +123,7 @@ import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 import { InspirationBoards } from '../components/projectDetail/InspirationBoards';
 import { StudyRequestTab } from '../components/projectDetail/StudyRequestTab';
+import { DiagTab } from '../components/projectDetail/DiagTab';
 import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
 import { attribuerNumeros, cleEntrepriseLot, entreprisesDistinctes, formatNumeroOs, numeroHeriteOs, resumeNumeros } from '../lib/numerotationEntreprise';
 import TravauxModificatifsTab from '../components/chantier/TravauxModificatifsTab';
@@ -3439,7 +3440,7 @@ export default function ProjectDetail() {
               </div>
             )}
             {activeTab === 'INSPIRATION' && <InspirationBoards projectId={id!} projectName={project?.name} projectCode={project?.project_code || project?.reference || undefined} />}
-            {activeTab === 'DIAG' && project && <StudyRequestTab kind="geotechnique" project={project} />}
+            {activeTab === 'DIAG' && project && <DiagTab project={project} />}
             {activeTab === 'CT' && project && <StudyRequestTab kind="controle_technique" project={project} />}
             {activeTab === 'CSPS' && project && <StudyRequestTab kind="csps" project={project} />}
             {activeTab === 'PRO' && <div className="pt-4 lg:h-full"><ProTab projectId={id!} projectName={project?.name} projectImageUrl={project?.image_url} contexte={project ? {

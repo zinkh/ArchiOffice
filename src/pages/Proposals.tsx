@@ -1843,6 +1843,7 @@ export default function Proposals() {
             if (exportIntent === 'sign') { void fetchProposals(); return; }
             void updateProposalFollowUp(exportProposal.id, 'sent').then(mergeFollowUp).catch(e => alert(e.message));
           }}
+          onEdit={() => { const p = exportProposal; setExportProposal(null); handleEditClick(p); }}
           onClose={() => setExportProposal(null)}
         />
       )}

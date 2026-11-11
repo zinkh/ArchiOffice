@@ -38,6 +38,7 @@ import { registerProjectArchiveRoutes } from "./server/routes/projectArchive";
 import { archivedProjectGuard } from "./server/archivedProjectGuard";
 import { registerChantierDecoupageRoutes } from "./server/routes/chantierDecoupage";
 import { registerProjectNoticeRoutes } from "./server/routes/projectNotices";
+import { registerDiagReportRoutes } from "./server/routes/diagReports";
 import { registerMailAiRoutes } from "./server/routes/mailAi";
 import { registerProjectStakeholdersRoutes } from "./server/routes/projectStakeholders";
 import { registerGlobalSearchRoutes } from "./server/routes/globalSearch";
@@ -1163,6 +1164,7 @@ export async function createApp() {
   registerProjectArchiveRoutes(app, { supabaseAdmin, getTenantId, getUserName, requireRole, storeBusinessFile, checkQuota });
   registerChantierDecoupageRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectNoticeRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerDiagReportRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerMailAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerProjectStakeholdersRoutes(app, { supabaseAdmin, getTenantId });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
