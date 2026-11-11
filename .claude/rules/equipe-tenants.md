@@ -97,6 +97,31 @@ sont pas la même faille : c'est l'identifiant RÉFÉRENCÉ depuis le corps
 d'une requête qui manquait de contrôle, pas celui de la ressource visée par
 l'URL elle-même.
 
+**Complément (issue #245).** Ce balayage avait laissé quatre trous, fermés depuis :
+`contratsMoe.ts` (`project_id`, `client_id`, POST et PUT), `notesHonoraires.ts`
+(`project_id`, y compris pour les rôles que la visibilité ne restreint pas, et
+`contrat_id`, POST et PUT), `avenantsMoe.ts` (`project_id`, `contrat_moe_id`, POST ;
+le PUT ne les accepte pas) et `POST /api/projects/:id/members` (le projet de l'URL
+n'était pas contrôlé : « validé en amont » était faux pour cette route, seul le
+`user_id` l'était). `firstForeignRelation(supabaseAdmin, tenantId, [{ table, id, label }])`
+(`server/assertTenantEntity.ts`) valide PLUSIEURS relations d'un coup et rend le
+message de refus de la première qui n'est pas du cabinet, ou `null` : une relation
+absente, `null` ou vide est ignorée (on peut effacer un lien) et un identifiant qui
+n'est pas une chaîne (objet ou tableau glissé dans le JSON) est refusé sans atteindre la
+requête. Convention de réponse : un identifiant du CORPS → 400, un identifiant de l'URL →
+404, dans les deux cas « X introuvable pour ce cabinet. », **identique pour une ressource
+étrangère et pour une ressource inexistante** (rien ne révèle qu'un id existe chez un
+autre cabinet). Tests : `tests/crossTenantRelations.test.ts`. **Une nouvelle colonne qui
+référence une autre table est à ajouter à la route qui l'écrit.**
+
+**Pas encore fait : la couche base de données** (contraintes `(id, tenant_id)` uniques
+sur les tables parentes et clés étrangères composites, pour que PostgreSQL soit la
+dernière ligne de défense même si une route oublie un contrôle). Les clés étrangères
+actuelles ne garantissent que l'existence de l'id, pas son cabinet. Ce chantier touche
+des dizaines de tables, impose de vérifier d'abord qu'aucune donnée existante ne croise
+deux cabinets, et exige PostgreSQL 15+ pour un `ON DELETE SET NULL (colonne)` sur une clé
+composite.
+
 ### Plusieurs cabinets pour une même personne
 
 Un architecte exerce parfois dans deux structures (la sienne et une SCPA, un

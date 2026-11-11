@@ -1,6 +1,7 @@
 // Phase 7 extraction — moved out of server.ts's "── Contrats MOE ──" section.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { firstForeignRelation } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -32,6 +33,13 @@ export function registerContratsMoeRoutes(app: Express, { supabaseAdmin, getTena
     try {
       const tenantId = await getTenantId(req.user.id);
       const body = req.body;
+      // Le client et l'affaire sont des identifiants fournis par le navigateur :
+      // ils doivent appartenir au cabinet (issue #245).
+      const foreign = await firstForeignRelation(supabaseAdmin, tenantId, [
+        { table: 'projects', id: body.project_id, label: 'Projet' },
+        { table: 'contacts', id: body.client_id, label: 'Contact' },
+      ]);
+      if (foreign) return res.status(400).json({ error: foreign });
       const id = body.id || crypto.randomUUID();
       const { client_name: _cn, project_name: _pn, ...insertData } = body;
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contrats_moe')
@@ -55,6 +63,11 @@ export function registerContratsMoeRoutes(app: Express, { supabaseAdmin, getTena
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { client_name: _cn, project_name: _pn, id: _id, tenant_id: _tid, created_at: _ca, ...updateData } = req.body;
+      const foreign = await firstForeignRelation(supabaseAdmin, tenantId, [
+        { table: 'projects', id: updateData.project_id, label: 'Projet' },
+        { table: 'contacts', id: updateData.client_id, label: 'Contact' },
+      ]);
+      if (foreign) return res.status(400).json({ error: foreign });
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contrats_moe')
         .update({ ...updateData, updated_at: new Date().toISOString() })
         .eq('id', id);
