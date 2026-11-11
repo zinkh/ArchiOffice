@@ -6,7 +6,7 @@
 // (PUT /api/proposals/:id/illustrations), sans attendre l'enregistrement du formulaire.
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconMap2, IconPhoto, IconLoader2, IconX } from '@tabler/icons-react';
+import { IconMap2, IconPhoto, IconLink, IconLoader2, IconX } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
 import { getAccessToken } from '../../lib/authToken';
 import { PHOTO_MAX_INPUT_BYTES, photoLabel, photoToJpeg } from '../../lib/feasibilityPhoto';
@@ -15,6 +15,7 @@ import { MAX_PROPOSAL_ILLUSTRATIONS, type ProposalIllustration } from '../../lib
 import { SignedImage } from '../SignedImage';
 import { FeasibilityMapDialog } from './FeasibilityMapDialog';
 import { FeasibilityPhotoDialog, type PhotoWithCaption } from './FeasibilityPhotoDialog';
+import { PhotoUrlDialog } from './PhotoUrlDialog';
 
 const inputStyle: React.CSSProperties = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 const softButton: React.CSSProperties = { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' };
@@ -37,6 +38,7 @@ export function ProposalIllustrations({ proposalId, value, onChange, parcelGeome
   const [mapOpen, setMapOpen] = useState(false);
   const [pendingPhotos, setPendingPhotos] = useState<File[] | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [urlOpen, setUrlOpen] = useState(false);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   // Dernière liste connue : les envois de photos sont asynchrones, la liste a pu changer entre-temps.
   const valueRef = useRef(value);
@@ -169,6 +171,12 @@ export function ProposalIllustrations({ proposalId, value, onChange, parcelGeome
           className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60" style={softButton}>
           {uploading ? <IconLoader2 size={12} className="animate-spin" /> : <IconPhoto size={12} />} {t('feas_photo')}
         </button>
+        <button type="button" disabled={uploading}
+          onClick={() => (limitReached ? setError(limitMessage) : setUrlOpen(true))}
+          title={t('feas_photo_url_title') as string}
+          className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60" style={softButton}>
+          <IconLink size={12} /> {t('feas_photo_url')}
+        </button>
       </div>
 
       <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" aria-label={t('feas_photo') as string}
@@ -177,6 +185,13 @@ export function ProposalIllustrations({ proposalId, value, onChange, parcelGeome
           e.target.value = '';
           if (files.length) setPendingPhotos(files);
         }} />
+
+      {urlOpen && (
+        <PhotoUrlDialog
+          onFile={file => { setPendingPhotos([file]); setUrlOpen(false); }}
+          onClose={() => setUrlOpen(false)}
+        />
+      )}
 
       {pendingPhotos && (
         <FeasibilityPhotoDialog
