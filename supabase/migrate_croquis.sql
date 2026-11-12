@@ -36,6 +36,20 @@ CREATE TABLE IF NOT EXISTS croquis (
   CONSTRAINT croquis_one_parent CHECK (meeting_id IS NULL OR site_report_id IS NULL)
 );
 
+-- Sur un poste local neuf, `schema.sql` (rejoué en premier) a déjà créé la table, sans la clé
+-- vers `meetings` : elle est posée ici, une fois `meetings` présente. Sur une base où la
+-- table a été créée par ce fichier, la clé existe déjà et rien ne change.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'croquis_meeting_id_fkey' AND conrelid = 'public.croquis'::regclass
+  ) THEN
+    ALTER TABLE croquis
+      ADD CONSTRAINT croquis_meeting_id_fkey FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE;
+  END IF;
+END
+$$;
+
 CREATE INDEX IF NOT EXISTS idx_croquis_tenant_meeting
   ON croquis(tenant_id, meeting_id) WHERE meeting_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_croquis_tenant_site_report
