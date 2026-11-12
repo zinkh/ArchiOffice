@@ -5747,4 +5747,10 @@ export default {
   "croquis_not_image": "This file is not an image. Export the plan as JPG or PNG.",
   "croquis_image_unreadable": "Unable to read this image. Try a JPG or a PNG.",
   "croquis_export_failed": "The image could not be generated.",
+  "croquis_default_title": "Sketch",
+  "croquis_status_pending": "Changes pending…",
+  "croquis_status_saving": "Saving…",
+  "croquis_status_saved": "Saved",
+  "croquis_status_queued": "Offline: waiting to be sent",
+  "croquis_status_error": "Could not save",
 };

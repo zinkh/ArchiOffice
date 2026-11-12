@@ -5748,4 +5748,10 @@ export default {
   "croquis_not_image": "Ce fichier n'est pas une image. Exportez le plan en JPG ou PNG.",
   "croquis_image_unreadable": "Impossible de lire cette image. Essayez un JPG ou un PNG.",
   "croquis_export_failed": "L'image n'a pas pu être générée.",
+  "croquis_default_title": "Croquis",
+  "croquis_status_pending": "Modifications en attente…",
+  "croquis_status_saving": "Enregistrement…",
+  "croquis_status_saved": "Enregistré",
+  "croquis_status_queued": "Hors ligne : en attente d'envoi",
+  "croquis_status_error": "Enregistrement impossible",
 };

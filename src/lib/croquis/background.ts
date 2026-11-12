@@ -45,6 +45,24 @@ function canvasToJpeg(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
+/**
+ * Refait le fond d'un croquis à partir d'une image déjà réduite (celle gardée sur l'appareil ou lue sur le
+ * serveur) : les dimensions sont celles de l'image. Lève si elle est illisible.
+ */
+export async function backgroundFromBlob(blob: Blob): Promise<CroquisBackground> {
+  if (typeof createImageBitmap === 'function') {
+    const bitmap = await createImageBitmap(blob);
+    return { image: bitmap, width: bitmap.width, height: bitmap.height };
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await decodeImage(url);
+    return { image: img, width: img.naturalWidth, height: img.naturalHeight };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 /** Lit un fichier image, le réduit et l'aplatit sur blanc. */
 export async function loadBackgroundFromFile(file: File): Promise<LoadedBackground> {
   if (!/^image\//.test(file.type)) throw new BackgroundLoadError('not_image');

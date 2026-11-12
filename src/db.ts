@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import type { SiteReport, SiteReportNote } from './types';
+import type { Croquis, SiteReport, SiteReportNote } from './types';
 import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile, Meeting, MeetingAttendee, Reserve, GpaReserve, Observation, PhoneCall } from './types';
 
 /**
@@ -21,11 +21,26 @@ export interface PendingWrite {
   blobFieldName?: string;
   blobFilename?: string;
   extraFields?: Record<string, string>;
-  entity: 'siteReportNote' | 'chantierDecoupage' | 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'siteReportNotePhoto' | 'project' | 'siteReport' | 'proposal' | 'tender' | 'inspirationBoard' | 'inspirationItem' | 'inspirationBoardItem' | 'meetingAttendee' | 'phoneCall';
+  entity: 'siteReportNote' | 'chantierDecoupage' | 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'siteReportNotePhoto' | 'project' | 'siteReport' | 'proposal' | 'tender' | 'inspirationBoard' | 'inspirationItem' | 'inspirationBoardItem' | 'meetingAttendee' | 'phoneCall' | 'croquis' | 'croquisFile';
   status: 'pending' | 'error';
   attempts: number;
   lastError?: string;
   createdAt: number;
+}
+
+/**
+ * Image d'un croquis gardée sur l'appareil : son fond (`<id>:bg`) ou son aperçu
+ * (`<id>:preview`). `path` est la référence serveur que ce fichier reproduit ;
+ * `null` tant que l'envoi n'a pas eu lieu (image importée ou dessinée hors ligne).
+ */
+export interface CroquisFile {
+  id: string;
+  croquisId: string;
+  path: string | null;
+  blob: Blob;
+  width?: number;
+  height?: number;
+  savedAt: number;
 }
 
 export class AppDatabase extends Dexie {
@@ -48,6 +63,10 @@ export class AppDatabase extends Dexie {
   meetingsCache!: Table<Meeting>;
   meetingAttendeesCache!: Table<MeetingAttendee>;
   phoneCallsCache!: Table<PhoneCall>;
+  // Croquis de réunion et de compte-rendu et leurs images, lisibles hors ligne
+  // (voir src/lib/croquisSync.ts).
+  croquisCache!: Table<Croquis>;
+  croquisFiles!: Table<CroquisFile>;
   reservesCache!: Table<Reserve>;
   gpaReservesCache!: Table<GpaReserve>;
   observationsCache!: Table<Observation>;
@@ -134,6 +153,12 @@ export class AppDatabase extends Dexie {
     // src/hooks/usePhoneCalls.ts).
     this.version(10).stores({
       phoneCallsCache: 'id, assignee_id, project_id',
+    });
+    // v11 : croquis de réunion et de compte-rendu, et leurs images (fond, aperçu)
+    // gardées sur l'appareil pour s'afficher et s'exporter sans réseau.
+    this.version(11).stores({
+      croquisCache: 'id, meeting_id, site_report_id',
+      croquisFiles: 'id, croquisId',
     });
   }
 }
