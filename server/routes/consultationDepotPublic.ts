@@ -31,6 +31,7 @@ import { signExternalTicket } from '../externalStorage/externalTicket';
 import { getConnectionById } from '../externalStorage/externalConnection';
 import { parseStorageRef } from '../storagePaths';
 import { loadSuspendedTenants } from '../tenantSuspension';
+import { piecesDeEntreprise } from '../../src/lib/dceIndices';
 import {
   DEPOT_EXTENSIONS, DEPOT_FORMAT_LABELS, DEPOT_KINDS_FICHIER, DEPOT_TABLEURS,
   MAX_DEPOT_OCTETS, MAX_FICHIER_OCTETS, MAX_FICHIERS_PAR_DEPOT,
@@ -112,6 +113,51 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
     return (data as any[]) || [];
   };
 
+  /**
+   * Pièces du DCE qui concernent cette entreprise : celles de tous les lots, ou
+   * d'un lot qui lui est confié (même règle que le message d'envoi du DCE,
+   * `piecesDeEntreprise`). Lues dans la consultation de l'affaire ; seuls les
+   * fichiers qui existent encore dans l'affaire sont rendus. Meilleur effort :
+   * une consultation illisible donne une liste vide, jamais une erreur.
+   */
+  const dceDeLinvitation = async (inv: InvitationDepot, lots: any[]) => {
+    const { data: act } = await supabaseAdmin
+      .from('act_data').select('consultation')
+      .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).maybeSingle();
+    const brutes = (act as any)?.consultation?.dce_documents;
+    if (!Array.isArray(brutes)) return [];
+    const pieces = piecesDeEntreprise(
+      brutes.filter((p: any) => p && typeof p === 'object')
+        .map((p: any) => ({
+          id: String(p.id), nom: String(p.nom || ''), type_doc: String(p.type_doc || ''),
+          tous_lots: !!p.tous_lots,
+          lots_ids: Array.isArray(p.lots_ids) ? p.lots_ids.map(String) : [],
+          document_ids: Array.isArray(p.document_ids) ? p.document_ids.map(String) : [],
+        })),
+      inv.lots_ids,
+    ).filter(p => p.document_ids.length > 0);
+    const ids = [...new Set(pieces.flatMap(p => p.document_ids))];
+    if (!ids.length) return [];
+    const { data: docs } = await supabaseAdmin
+      .from('documents').select('id, name, size_bytes')
+      .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).in('id', ids);
+    const parId = new Map(((docs as any[]) || []).map(d => [d.id, d]));
+    const libelleLot = (id: string) => {
+      const l = lots.find(x => x.id === id);
+      return l ? `Lot ${l.lot_number} ${l.lot_title}` : null;
+    };
+    return pieces.flatMap(p => {
+      const fichiers = p.document_ids.map(id => parId.get(id)).filter(Boolean)
+        .map((d: any) => ({ id: d.id as string, nom: d.name as string, taille: (d.size_bytes ?? null) as number | null }));
+      if (!fichiers.length) return [];
+      return [{
+        id: p.id, nom: p.nom, type_doc: p.type_doc,
+        lots: p.tous_lots ? null : p.lots_ids.filter(id => inv.lots_ids.includes(id)).map(libelleLot).filter((x): x is string => !!x),
+        fichiers,
+      }];
+    });
+  };
+
   // ── Contexte du portail ────────────────────────────────────────────────────
   app.get('/api/public/depot/:token', depotReadLimiter, garde, async (req: any, res: any) => {
     try {
@@ -127,6 +173,7 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
           .eq('tenant_id', tenantId).eq('project_id', inv.project_id).in('id', publies);
         pieces = (data as any[]) || [];
       }
+      const dce = await dceDeLinvitation(inv, lots).catch(() => []);
 
       const { data: mesDepots } = await supabaseAdmin
         .from('consultation_depots')
@@ -158,6 +205,7 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
         en_retard: estHorsDelai(new Date(), reglages.deadline_at),
         instructions: reglages.instructions || null,
         pieces: pieces.map(p => ({ id: p.id, nom: p.name, taille: p.size_bytes ?? null })),
+        dce,
         depots: ((mesDepots as any[]) || []).filter(d => d.status !== 'retire').map(d => ({
           id: d.id, lot_id: d.lot_id, kind: d.kind, version: d.version, nom: d.file_name,
           taille: d.size_bytes ?? null, hors_delai: !!d.hors_delai, recu_le: d.received_at,
@@ -182,7 +230,12 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
     try {
       const { invitation: inv, reglages } = req.depot as ContexteDepot;
       const publies: string[] = Array.isArray(reglages.published_document_ids) ? reglages.published_document_ids : [];
-      if (!publies.includes(req.params.docId)) return res.status(404).json({ error: 'Pièce introuvable.' });
+      if (!publies.includes(req.params.docId)) {
+        // Hors liste cochée : seule une pièce du DCE de CETTE entreprise reste téléchargeable.
+        const lots = await lotsDeLinvitation(inv);
+        const dce = await dceDeLinvitation(inv, lots).catch(() => []);
+        if (!dce.some(p => p.fichiers.some(f => f.id === req.params.docId))) return res.status(404).json({ error: 'Pièce introuvable.' });
+      }
 
       const { data: doc } = await supabaseAdmin
         .from('documents').select('id, name, file_url')

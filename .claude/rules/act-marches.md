@@ -283,8 +283,13 @@ restent lisibles par le cabinet.
   d'un devis est à la fin). Une SUGGESTION confirmée d'un clic, jamais appliquée seule.
 - **Limiteurs** (`rateLimit.ts`) : `depotReadLimiter` / `depotWriteLimiter` par IP, réglables par
   `DEPOT_READ_LIMIT` / `DEPOT_WRITE_LIMIT` (les tests les relèvent).
-- **Pièces du DCE** : la consultation ne porte que des intitulés ; seules les pièces cochées dans
-  les réglages (`published_document_ids`, documents de l'affaire) sont téléchargeables depuis le lien.
+- **Pièces du DCE** : le portail propose d'office à chaque entreprise les pièces de
+  `consultation.dce_documents` qui la concernent (`tous_lots` ou l'un de SES lots, même règle
+  `piecesDeEntreprise` que le message d'envoi du DCE) avec les fichiers de l'affaire rattachés
+  (`GET /api/public/depot/:token`, champ `dce`, section « Dossier de consultation (DCE) » de la page).
+  Aucune migration, rien à cocher. Le téléchargement (`.../pieces/:docId`) n'accepte qu'un fichier de
+  ces pièces ou une pièce complémentaire cochée dans les réglages (`published_document_ids`, visible
+  par toutes les entreprises) : un fichier du DCE d'un autre lot est refusé (404).
 
 ### Documents du marché (ACT, phase Critères)
 

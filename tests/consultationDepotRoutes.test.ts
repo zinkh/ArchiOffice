@@ -402,6 +402,40 @@ describe('réglages et pièces publiées', () => {
     expect((await request(app).get(`/api/public/depot/${jeton}/pieces/${etranger}`)).status).toBe(404);
   });
 
+  it("n'offre à l'entreprise que les pièces du DCE de ses lots, sans cocher quoi que ce soit", async () => {
+    const c = cabinet();
+    const conn = fakeSupabaseAdmin.getTable('external_storage_connections').find(x => x.tenant_id === c.tenantId)!;
+    const { buildExternalRef } = await import('../server/externalStorage/externalRef');
+    const ref = (nom: string) => buildExternalRef({ provider: 'webdav', connectionId: conn.id, externalId: `ArchiOffice/${nom}`, fileName: nom });
+    const rc = uid('doc'); const cctpA = uid('doc'); const cctpB = uid('doc'); const sansFichier = uid('doc');
+    fakeSupabaseAdmin.seed('documents', [
+      { id: rc, tenant_id: c.tenantId, project_id: c.projectId, name: 'RC.pdf', file_url: ref('RC.pdf'), size_bytes: 100 },
+      { id: cctpA, tenant_id: c.tenantId, project_id: c.projectId, name: 'CCTP lot 02.pdf', file_url: ref('CCTP02.pdf') },
+      { id: cctpB, tenant_id: c.tenantId, project_id: c.projectId, name: 'CCTP lot 03.pdf', file_url: ref('CCTP03.pdf') },
+    ]);
+    fakeSupabaseAdmin.seed('act_data', [{
+      id: uid('act'), tenant_id: c.tenantId, project_id: c.projectId,
+      consultation: {
+        dce_documents: [
+          { id: 'p1', nom: 'Règlement de consultation', type_doc: 'RC', tous_lots: true, lots_ids: [], document_ids: [rc] },
+          { id: 'p2', nom: 'CCTP Charpente', type_doc: 'CCTP', tous_lots: false, lots_ids: [c.lotA], document_ids: [cctpA] },
+          { id: 'p3', nom: 'CCTP Couverture', type_doc: 'CCTP', tous_lots: false, lots_ids: [c.lotB], document_ids: [cctpB] },
+          { id: 'p4', nom: 'Pièce sans fichier', type_doc: 'Autre', tous_lots: true, lots_ids: [], document_ids: [sansFichier] },
+        ],
+      },
+    }]);
+    const { jeton } = await inviter(c); // lot A seulement
+    const ctx = await request(app).get(`/api/public/depot/${jeton}`);
+    expect(ctx.body.pieces).toEqual([]); // rien n'est coché dans les réglages
+    expect(ctx.body.dce.map((p: any) => p.nom)).toEqual(['Règlement de consultation', 'CCTP Charpente']);
+    expect(ctx.body.dce[0]).toMatchObject({ lots: null, fichiers: [{ id: rc, nom: 'RC.pdf', taille: 100 }] });
+    expect(ctx.body.dce[1].lots).toEqual(['Lot 02 Charpente']);
+    // Téléchargement : ses pièces oui, celles d'un autre lot non.
+    expect((await request(app).get(`/api/public/depot/${jeton}/pieces/${cctpA}`).redirects(0)).status).toBe(302);
+    expect((await request(app).get(`/api/public/depot/${jeton}/pieces/${rc}`).redirects(0)).status).toBe(302);
+    expect((await request(app).get(`/api/public/depot/${jeton}/pieces/${cctpB}`)).status).toBe(404);
+  });
+
   it('sert une pièce du DCE hébergée sur le drive par un jeton à courte durée', async () => {
     const c = cabinet();
     const conn = fakeSupabaseAdmin.getTable('external_storage_connections').find(x => x.tenant_id === c.tenantId)!;

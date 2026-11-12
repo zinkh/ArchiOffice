@@ -575,11 +575,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/proposals/:id/signature/sync` | [server/routes/signatures.ts:110](../server/routes/signatures.ts#L110) |
 | POST | `/api/proposals/import` | [server/routes/proposals.ts:270](../server/routes/proposals.ts#L270) |
 | GET | `/api/public/chantier/:token` | [server/routes/panneaux.ts:179](../server/routes/panneaux.ts#L179) |
-| GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:116](../server/routes/consultationDepotPublic.ts#L116) |
-| DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:384](../server/routes/consultationDepotPublic.ts#L384) |
-| POST | `/api/public/depot/:token/fichiers` | [server/routes/consultationDepotPublic.ts:247](../server/routes/consultationDepotPublic.ts#L247) |
-| GET | `/api/public/depot/:token/pieces/:docId` | [server/routes/consultationDepotPublic.ts:181](../server/routes/consultationDepotPublic.ts#L181) |
-| POST | `/api/public/depot/:token/saisie` | [server/routes/consultationDepotPublic.ts:345](../server/routes/consultationDepotPublic.ts#L345) |
+| GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:162](../server/routes/consultationDepotPublic.ts#L162) |
+| DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:437](../server/routes/consultationDepotPublic.ts#L437) |
+| POST | `/api/public/depot/:token/fichiers` | [server/routes/consultationDepotPublic.ts:300](../server/routes/consultationDepotPublic.ts#L300) |
+| GET | `/api/public/depot/:token/pieces/:docId` | [server/routes/consultationDepotPublic.ts:229](../server/routes/consultationDepotPublic.ts#L229) |
+| POST | `/api/public/depot/:token/saisie` | [server/routes/consultationDepotPublic.ts:398](../server/routes/consultationDepotPublic.ts#L398) |
 | GET | `/api/public/doe/:token` | [server/routes/doeAtelierPublic.ts:94](../server/routes/doeAtelierPublic.ts#L94) |
 | DELETE | `/api/public/doe/:token/documents/:id` | [server/routes/doeAtelierPublic.ts:243](../server/routes/doeAtelierPublic.ts#L243) |
 | POST | `/api/public/doe/:token/fichiers` | [server/routes/doeAtelierPublic.ts:144](../server/routes/doeAtelierPublic.ts#L144) |
