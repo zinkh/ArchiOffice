@@ -19,6 +19,7 @@ import { resumeQualifications, type Qualification } from '../lib/qualifications'
 import MailComposeModal from './MailComposeModal';
 import { documentToFile } from '../lib/emailAttachments';
 import { apiFetch } from '../lib/api';
+import type { PieceMarcheGeneree } from '../lib/marchePieces';
 import { formaterDateHeure } from '../lib/depotAffichage';
 import { documentsAJoindre, lignesIndices, piecesDeEntreprise, type DocumentDce } from '../lib/dceIndices';
 import { genererTableauIndicesPdf } from '../lib/dceIndicesPdf';
@@ -31,6 +32,7 @@ export interface PieceDce {
   tous_lots: boolean;
   lots_ids: string[];
   document_ids?: string[];
+  type_doc?: string;
 }
 
 interface Props {
@@ -55,6 +57,8 @@ interface Props {
   projectId?: string;
   /** Date limite de remise des offres, rappelée dans le mail avec le lien de dépôt. */
   depotDeadlineAt?: string | null;
+  /** Génère le RC, le CCAP et le formulaire d'acte d'engagement, joints d'office au mail d'invitation. */
+  genererPiecesMarche?: () => Promise<PieceMarcheGeneree[]>;
   /** Dernière remise à traiter, par identifiant d'entreprise (voir useConsultationDepot). */
   depotRecuLe?: Record<string, string>;
   onInviterDepot?: (entreprise: EntrepriseRow) => void;
@@ -90,10 +94,12 @@ const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('fr-FR
 // ── Envoi du DCE par mail ────────────────────────────────────────────────────
 // Les comptes mail ne sont lus qu'à l'ouverture, pas à chaque affichage du tableau.
 
-function DceMailDialog({ projectId, depotActif, deadlineAt, projectName, entreprise, lots, pieces, documents, onSent, onClose }: {
+function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPiecesMarche, deadlineAt, projectName, entreprise, lots, pieces, documents, onSent, onClose }: {
   projectId?: string;
   /** Espace de dépôt utilisable : un lien personnel est alors créé et cité dans le message. */
   depotActif: boolean;
+  depotIndisponible?: string;
+  genererPiecesMarche?: () => Promise<PieceMarcheGeneree[]>;
   deadlineAt: string | null;
   projectName: string;
   entreprise: EntrepriseRow;
@@ -112,7 +118,7 @@ function DceMailDialog({ projectId, depotActif, deadlineAt, projectName, entrepr
 
   // Les fichiers du DCE et le tableau d'indices sont joints d'office ; la personne
   // peut en retirer. Un document illisible n'empêche pas le message : il est signalé.
-  const [pretes, setPretes] = useState<{ fichiers: File[]; echecs: string[]; lienDepot?: string; echecDepot?: boolean } | null>(null);
+  const [pretes, setPretes] = useState<{ fichiers: File[]; echecs: string[]; piecesMarche: string[]; lienDepot?: string; echecDepot?: boolean } | null>(null);
   useEffect(() => {
     let vivant = true;
     (async () => {
@@ -123,6 +129,23 @@ function DceMailDialog({ projectId, depotActif, deadlineAt, projectName, entrepr
       if (lignes.length > 0) {
         try { fichiers.unshift(await genererTableauIndicesPdf({ projectName, lignes, lots: lotsCourts || undefined })); }
         catch { echecs.push('Tableau d\'indices'); }
+      }
+      // Pièces du marché (RC, CCAP, acte d'engagement), générées à l'envoi d'après les réglages
+      // actuels. Une pièce déjà versée au DCE part avec le DCE : on ne la joint pas deux fois.
+      const piecesMarche: string[] = [];
+      if (genererPiecesMarche) {
+        const versees = new Set<string>();
+        for (const p of piecesEntreprise) {
+          if (!(p.document_ids ?? []).some(id => documents.some(d => d.id === id))) continue;
+          if (p.type_doc === 'RC') versees.add('RC');
+          else if (p.type_doc === 'CCAP') versees.add('CCAP');
+          else if (/acte d.engagement/i.test(p.libelle)) versees.add('ACTE');
+        }
+        try {
+          const generees = (await genererPiecesMarche()).filter(g => !versees.has(g.type));
+          fichiers.unshift(...generees.map(g => g.fichier));
+          piecesMarche.push(...generees.map(g => g.libelle));
+        } catch { echecs.push('Pièces du marché (RC, CCAP, acte d\'engagement)'); }
       }
       // Lien de dépôt personnel : créé à l'ouverture du message (un lien précédent de
       // cette entreprise est alors révoqué, le jeton n'étant jamais conservé en clair).
@@ -139,7 +162,7 @@ function DceMailDialog({ projectId, depotActif, deadlineAt, projectName, entrepr
           lienDepot = r.url;
         } catch { echecDepot = true; }
       }
-      if (vivant) setPretes({ fichiers, echecs, lienDepot, echecDepot });
+      if (vivant) setPretes({ fichiers, echecs, piecesMarche, lienDepot, echecDepot });
     })();
     return () => { vivant = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,6 +174,10 @@ function DceMailDialog({ projectId, depotActif, deadlineAt, projectName, entrepr
     'Bonjour,',
     '',
     `Dans le cadre de la consultation des entreprises pour l'opération « ${projectName} », nous vous transmettons le dossier de consultation (DCE)${libelleLots.length ? ` relatif à :\n${libelleLots.map(l => `- ${l}`).join('\n')}` : '.'}`,
+    ...(pretes.piecesMarche.length
+      ? ['', 'Pièces du marché jointes :', ...pretes.piecesMarche.map(l => `- ${l}`),
+         ...(pretes.piecesMarche.some(l => /acte/i.test(l)) ? ['L\'acte d\'engagement est à compléter, signer et remettre avec votre offre.'] : [])]
+      : []),
     ...(lignes.length
       ? ['', 'Pièces du dossier (indice de révision) :', ...lignes.map(l => `- ${l.designation}${l.fichier ? ` : ${l.fichier}` : ''}${l.indice ? ` (indice ${l.indice})` : ''}`),
          '', 'Le tableau des indices est joint à ce message.']
@@ -160,6 +187,7 @@ function DceMailDialog({ projectId, depotActif, deadlineAt, projectName, entrepr
          ...(deadlineAt ? [`Date limite de remise : ${formaterDateHeure(deadlineAt)}.`] : []),
          'Ce lien vous est personnel : merci de ne pas le transmettre.']
       : []),
+    ...(!depotActif && depotIndisponible ? ['', `[Lien de dépôt non proposé : ${depotIndisponible}]`] : []),
     ...(pretes.echecDepot ? ['', '[Lien de dépôt non créé : à créer depuis la ligne de l\'entreprise (icône lien)]'] : []),
     ...(pretes.echecs.length ? ['', `[À joindre manuellement, téléchargement impossible : ${pretes.echecs.join(', ')}]`] : []),
     '',
@@ -188,7 +216,7 @@ export default function ACTEntreprisesTable({
   projectName, lots, entreprises, onChange, dcePieces, documentsAffaire = [], entrepriseContacts,
   corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact,
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
-  depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null,
+  depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null, genererPiecesMarche,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -701,7 +729,7 @@ export default function ACTEntreprisesTable({
 
       {entrepriseMail && (
         <DceMailDialog
-          projectId={projectId} depotActif={!!depot?.actif} deadlineAt={depotDeadlineAt}
+          projectId={projectId} depotActif={!!depot?.actif} depotIndisponible={depot?.indisponible} genererPiecesMarche={genererPiecesMarche} deadlineAt={depotDeadlineAt}
           projectName={projectName} entreprise={entrepriseMail} lots={lots} pieces={dcePieces} documents={documentsAffaire}
           onClose={() => setMailPour(null)}
           onSent={() => patch(entrepriseMail.id, {
