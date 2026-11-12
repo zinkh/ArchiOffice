@@ -867,6 +867,7 @@ export default function Contacts() {
       {view === 'detail' && (
         <ContactsDetailView
           contacts={filteredAndSortedContacts}
+          allContacts={contacts}
           projects={projects}
           canSelect={canMerge}
           selectedIds={selectedIds}

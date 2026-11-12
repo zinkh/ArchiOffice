@@ -15,6 +15,8 @@ const TABS: Tab[] = ['overview', 'projects', 'billing', 'exchanges'];
 
 interface Props {
   contacts: Contact[];
+  /** Tous les contacts du cabinet, hors filtres : sert à choisir la société de rattachement. */
+  allContacts?: Contact[];
   projects: Pick<Project, 'id' | 'name' | 'client_id'>[];
   canSelect: boolean;
   selectedIds: string[];
@@ -38,7 +40,12 @@ function Row({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-export function ContactsDetailView({ contacts, projects, canSelect, selectedIds, onToggleSelected, onEdit, onChanged }: Props) {
+// Nom de la personne ; contactName() donne la priorité à la société, ce qui masquait l'interlocuteur.
+const personName = (c: Contact) => [c.first_name, c.last_name].map(s => (s || '').trim()).filter(Boolean).join(' ');
+const displayName = (c: Contact) => personName(c) || contactName(c);
+const isCompanyFiche = (c: Contact) => !!c.company_name && !personName(c);
+
+export function ContactsDetailView({ contacts, allContacts, projects, canSelect, selectedIds, onToggleSelected, onEdit, onChanged }: Props) {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mobileFiche, setMobileFiche] = useState(false);
@@ -78,9 +85,24 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
     );
   }
 
-  const company = active.company_contact_id ? contacts.find(c => c.id === active.company_contact_id) : undefined;
-  const people = contacts.filter(c => c.company_contact_id === active.id);
-  const companyChoices = contacts.filter(c => c.id !== active.id && !c.company_contact_id && c.company_name && !c.first_name && !c.last_name);
+  const pool = allContacts && allContacts.length ? allContacts : contacts;
+  const company = active.company_contact_id ? pool.find(c => c.id === active.company_contact_id) : undefined;
+  const people = pool.filter(c => c.company_contact_id === active.id);
+  const companyChoices = pool.filter(c => c.id !== active.id && !c.company_contact_id && isCompanyFiche(c));
+  const sameNameKey = (active.company_name || '').trim().toLowerCase();
+  const matchingCompany = sameNameKey ? companyChoices.find(c => (c.company_name || '').trim().toLowerCase() === sameNameKey) : undefined;
+  const canCreateCompany = !!sameNameKey && !matchingCompany && !!personName(active) && !active.company_contact_id;
+  const createAndLinkCompany = async () => {
+    setSaveError('');
+    try {
+      const id = crypto.randomUUID();
+      await fetchJson('/api/contacts', { method: 'POST', body: JSON.stringify({ id, company_name: active.company_name, first_name: '', last_name: '', category: 'Entreprise', siret: active.siret || '', address: active.address || '', zip: active.zip || '', city: active.city || '' }) });
+      await fetchJson(`/api/contacts/${active.id}`, { method: 'PUT', body: JSON.stringify({ company_contact_id: id }) });
+      onChanged();
+    } catch (e: any) {
+      setSaveError(e?.message || t('contacts_relation_save_failed'));
+    }
+  };
   const reminderDue = !!active.relation_reminder_on && active.relation_reminder_on <= new Date().toISOString().slice(0, 10);
   const linkedProjects = projects.filter(p => p.client_id === active.id);
   const linkedInvoices = (invoices || []).filter(i => i.client_id === active.id);
@@ -99,9 +121,9 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
             )}
             <button type="button" className="flex-1 min-w-0 text-left pointer-coarse:min-h-11"
               onClick={() => { setActiveId(c.id); setTab('overview'); setMobileFiche(true); }}>
-              <div className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{contactName(c)}</div>
+              <div className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{displayName(c)}</div>
               <div className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>
-                {c.company_name && (c.first_name || c.last_name) ? c.company_name : c.category || c.email || ''}
+                {c.company_name && personName(c) ? c.company_name : c.category || c.email || ''}
               </div>
             </button>
           </li>
@@ -115,10 +137,12 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
           </button>
           <div className="min-w-0 flex-1">
             <h3 className="text-base font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
-              {active.company_name && <IconBuilding size={16} className="inline mr-1.5" style={{ color: 'var(--tblr-muted)' }} />}
-              {contactName(active)}
+              {isCompanyFiche(active)
+                ? <IconBuilding size={16} className="inline mr-1.5" style={{ color: 'var(--tblr-muted)' }} />
+                : <IconUser size={16} className="inline mr-1.5" style={{ color: 'var(--tblr-muted)' }} />}
+              {displayName(active)}
             </h3>
-            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{[active.job_title, active.category].filter(Boolean).join(' · ')}</p>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{[personName(active) ? active.company_name : '', active.job_title, active.category].filter(Boolean).join(' · ')}</p>
           </div>
           <button type="button" onClick={() => onEdit(active)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
@@ -140,7 +164,10 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
           {tab === 'overview' && (
             <div className="space-y-5">
             <section aria-label={t('contacts_relation_title')} className="rounded-md p-3 space-y-3" style={{ border: '1px solid var(--tblr-border)' }}>
-              <h4 className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_relation_title')}</h4>
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_relation_title')}</h4>
+                {active.category && <span className="text-xs px-2 py-0.5 rounded-full" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>{active.category}</span>}
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="text-xs space-y-1 block" style={{ color: 'var(--tblr-muted)' }}>
                   {t('contacts_relation_status')}
@@ -172,7 +199,7 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
                   <ul className="space-y-1">
                     {people.map(c => (
                       <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
-                        <button type="button" className="hover:underline text-left" style={{ color: 'var(--tblr-primary)' }} onClick={() => { setActiveId(c.id); setTab('overview'); }}>{contactName(c)}{c.job_title ? ` · ${c.job_title}` : ''}</button>
+                        <button type="button" className="hover:underline text-left" style={{ color: 'var(--tblr-primary)' }} onClick={() => { setActiveId(c.id); setTab('overview'); }}>{displayName(c)}{c.job_title ? ` · ${c.job_title}` : ''}</button>
                         <button type="button" className="text-xs" style={{ color: 'var(--tblr-muted)' }} onClick={() => saveRelation(c.id, { company_contact_id: null })}>{t('contacts_company_detach')}</button>
                       </li>
                     ))}
@@ -187,6 +214,11 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
                     <option value="">{t('contacts_company_none')}</option>
                     {companyChoices.map(c => <option key={c.id} value={c.id}>{contactName(c)}</option>)}
                   </select>
+                  {canCreateCompany && (
+                    <button type="button" className="text-xs underline mt-1" style={{ color: 'var(--tblr-primary)' }} onClick={createAndLinkCompany}>
+                      {t('contacts_company_create', { name: active.company_name })}
+                    </button>
+                  )}
                 </label>
               )}
             </section>
