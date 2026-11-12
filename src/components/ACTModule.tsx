@@ -52,6 +52,8 @@ import {
 import type { Lot as LotDocument, OffreDocument } from '../types/dpgf';
 import { lignesIndices, type DocumentDce } from '../lib/dceIndices';
 import DceFichiersPicker from './act/DceFichiersPicker';
+import DceVersementPro from './act/DceVersementPro';
+import { rattacherPieces, type SpecPieceDce } from '../lib/dceVersement';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -544,14 +546,9 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     return () => { vivant = false; };
   }, [projectId, docsVersion]);
 
-  /** Rattache un document versé (RC, CCAP) à la pièce du DCE de même type, créée si elle manque. */
-  const verserPieceAuDce = (typeDoc: 'RC' | 'CCAP', documentId: string) => {
-    const existants = consultation.dce_documents;
-    const i = existants.findIndex(d => d.type_doc === typeDoc);
-    const dce: DCEDocument[] = i >= 0
-      ? existants.map((d, j) => (j === i ? { ...d, document_ids: [...new Set([...(d.document_ids ?? []), documentId])] } : d))
-      : [...existants, { id: crypto.randomUUID(), nom: TYPE_DOC_LABELS[typeDoc] || typeDoc, type_doc: typeDoc, tous_lots: true, lots_ids: [], document_ids: [documentId] }];
-    update({ ...consultation, dce_documents: dce });
+  /** Rattache les documents versés au DCE à leur pièce (créée si besoin) et rafraîchit la liste des documents. */
+  const verserAuDce = (versements: Array<{ spec: SpecPieceDce; documentId: string }>) => {
+    update({ ...consultation, dce_documents: rattacherPieces(consultation.dce_documents, versements) });
     setDocsVersion(v => v + 1);
   };
 
@@ -851,6 +848,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               </button>
               </div>
             </div>
+            <DceVersementPro projectId={projectId} projectName={projectName} lots={lots} dce={consultation.dce_documents}
+              documentsAffaire={documentsAffaire} onVerser={verserAuDce} />
             <div className="p-5 space-y-3">
               {consultation.dce_documents.length === 0 && (
                 <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun document DCE. Cliquez sur "Ajouter" pour commencer.</p>
@@ -1107,7 +1106,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               onChange={marche => update({ ...consultation, marche })}
               projectId={projectId}
               documentsAffaire={documentsAffaire}
-              onVerserAuDce={verserPieceAuDce}
+              onVerserAuDce={verserAuDce}
               onImporterOffres={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
             />
           </div>

@@ -6,6 +6,7 @@
 // page et pagination « P1|2 » du cabinet (pdfLetterhead.ts), présentation en
 // nuances de gris — le statut est le seul élément mis en évidence.
 import type { AgencySettings } from './proposalExport';
+import { verifierAnnulation } from './annulation';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import { renderPlanWithMarkers, renderPlanExcerpt, loadPhotoDataUrl } from './planRender';
 import type { Reserve, GpaReserve, Plan, ReservePhoto } from '../types';
@@ -55,6 +56,8 @@ export interface ReservesExportOptions {
    * Sans elle, les couleurs sont attribuées sur les seules réserves imprimées.
    */
   couleurs?: Map<string, string>;
+  /** Annulation demandée : l'export s'arrête à la fiche ou au plan suivant et lève `ExportAnnule`. */
+  signal?: AbortSignal;
 }
 
 /** Nom du fichier PDF : titre, code et nom de l'opération, puis le suffixe (entreprise, lot...). */
@@ -135,6 +138,7 @@ export async function exportReservesToPDF(
   const couleursTable = opts.couleurs ?? couleursParCle(construireLegende(reserves));
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  verifierAnnulation(opts.signal);
   const logo = await loadLogoDataUrl(settings.logoUrl);
   const letterhead = {
     title: `Liste de ${opts.title.toLowerCase()}`,
@@ -274,6 +278,7 @@ export async function exportReservesToPDF(
 
   let currentGroup = '';
   for (let i = 0; content.details && i < sorted.length; i++) {
+    verifierAnnulation(opts.signal);
     const r = sorted[i];
     progress(`Fiche ${i + 1} / ${sorted.length}…`);
 
@@ -419,6 +424,7 @@ export async function exportReservesToPDF(
     const planIds = [...new Set(sorted.filter(r => r.plan_id && r.x != null && r.y != null).map(r => r.plan_id as string))]
       .filter(id => planById.has(id));
     for (const planId of planIds) {
+      verifierAnnulation(opts.signal);
       const plan = planById.get(planId)!;
       progress(`Rendu du plan ${plan.name}…`);
       const markers = sorted
@@ -453,6 +459,7 @@ export async function exportReservesToPDF(
 
   progress('Finalisation…');
   drawAgencyFooters(doc, settings, letterhead);
+  verifierAnnulation(opts.signal);
   const blob = doc.output('blob') as Blob;
   if (opts.output !== 'blob') doc.save(reservesPdfFilename(opts.title, project));
   return blob;

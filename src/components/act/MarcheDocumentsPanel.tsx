@@ -8,8 +8,8 @@ import {
   type ContexteMarche, type DocModele, type ParametresMarche,
 } from '../../lib/actMarche';
 import { exporterMarcheDocx, exporterMarchePdf } from '../../lib/actMarcheExport';
-import { getAccessToken } from '../../lib/authToken';
 import type { DocumentDce } from '../../lib/dceIndices';
+import { deposerFichierDce, documentDejaVerse, type SpecPieceDce } from '../../lib/dceVersement';
 import { genererActeFormulaire, type ActeRempli } from '../../lib/actEngagementForm';
 import { FormulaireNonReconnuError } from '../../lib/actEngagementImport';
 import { lireActeDepuisBuffer } from '../../lib/actEngagementRead';
@@ -18,7 +18,7 @@ import { PARAMETRES_DEFAUT, parametresDe, piecesOffreDe, type DonneesNegociation
 
 interface ConsultationLue extends DonneesNegociation {
   marche?: ParametresMarche;
-  dce_documents: { nom: string; type_doc: string; document_ids?: string[] }[];
+  dce_documents: { id: string; nom: string; type_doc: string; tous_lots: boolean; lots_ids: string[]; document_ids?: string[] }[];
   criteres: { nom: string; poids: number }[];
   entreprises: EntrepriseOffre[];
   offres: OffreImportee[];
@@ -46,7 +46,7 @@ interface Props {
   /** Documents de l'affaire : un RC ou un CCAP déjà versé au DCE reçoit alors une nouvelle version (indice suivant). */
   documentsAffaire: DocumentDce[];
   /** Rattache le document versé à la pièce du DCE correspondante (créée si besoin). */
-  onVerserAuDce: (typeDoc: 'RC' | 'CCAP', documentId: string) => void;
+  onVerserAuDce: (versements: Array<{ spec: SpecPieceDce; documentId: string }>) => void;
 }
 
 type DocId = 'rc' | 'ccap' | 'acte';
@@ -193,6 +193,16 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
    * « DCE ») rattaché à la pièce RC ou CCAP du DCE, donc joint au mail d'invitation et
    * listé dans le tableau d'indices. Déjà versé : nouvelle version, indice suivant.
    */
+  /** Dépose un PDF généré et le rattache à sa pièce du DCE (nouvelle version s'il y est déjà). */
+  const verserPdf = async (spec: SpecPieceDce, nomFichier: string, blob: Blob) => {
+    const existant = documentDejaVerse(consultation.dce_documents, documentsAffaire, spec, nomFichier);
+    const documentId = await deposerFichierDce({ projectId, nomFichier, blob, existantId: existant?.id });
+    onVerserAuDce([{ spec, documentId }]);
+    setInfoDce(existant
+      ? `${nomFichier} : nouvelle version versée au DCE (indice suivant).`
+      : `${nomFichier} versé au DCE : il sera joint aux invitations et listé dans le tableau d'indices.`);
+  };
+
   const verserAuDce = async (id: 'rc' | 'ccap') => {
     setErreur(null); setInfoDce(null);
     setEnCours(`${id}-dce`);
@@ -203,27 +213,26 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
       await exporterMarchePdf(docs, settings, `${id === 'rc' ? 'Reglement_consultation' : 'CCAP'}_${nomFichierBase}`, (nom, blob) => { fichier = { nom, blob }; });
       if (!fichier) throw new Error('PDF non généré');
       const { nom, blob } = fichier as { nom: string; blob: Blob };
-      const typeDoc = id === 'rc' ? 'RC' : 'CCAP';
-      const liesIds = consultation.dce_documents.filter(d => d.type_doc === typeDoc).flatMap(d => d.document_ids ?? []);
-      const existant = documentsAffaire.find(d => liesIds.includes(d.id) && d.name === nom);
+      await verserPdf({ typeDoc: id === 'rc' ? 'RC' : 'CCAP', nom: id === 'rc' ? 'Règlement de la Consultation' : 'CCAP', unique: true }, nom, blob);
+    } catch (e: any) {
+      console.error(e);
+      setErreur(e?.message || 'Le versement au DCE a échoué.');
+    } finally { setEnCours(null); }
+  };
 
-      const form = new FormData();
-      form.append('file', new File([blob], nom, { type: 'application/pdf' }));
-      form.append('name', nom);
-      form.append('category', 'DCE');
-      form.append('phase', 'ACT');
-      form.append('description', existant ? 'Nouvelle version versée depuis la consultation' : 'Pièce du DCE générée depuis la consultation');
-      if (!existant) { form.append('project_id', projectId); form.append('uploaded_by', 'ACT'); }
-      const token = await getAccessToken();
-      const r = await fetch(existant ? `/api/documents/${encodeURIComponent(existant.id)}` : '/api/documents', {
-        method: existant ? 'PUT' : 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form,
-      });
-      const doc = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(doc?.error || 'Le dépôt du document a échoué.');
-      onVerserAuDce(typeDoc, existant?.id ?? doc.id);
-      setInfoDce(existant
-        ? `${nom} : nouvelle version versée au DCE (indice suivant).`
-        : `${nom} versé au DCE : il sera joint aux invitations et listé dans le tableau d'indices.`);
+  /** Formulaire d'acte d'engagement vierge, versé au DCE : les entreprises le reçoivent avec l'invitation. */
+  const verserFormulaireAuDce = async () => {
+    setErreur(null); setInfoDce(null);
+    setEnCours('acte-dce');
+    try {
+      const settings = await fetchAgencySettings();
+      const data = await genererActeFormulaire(
+        { ...contexte, agence: { nom: settings.agencyName, adresse: settings.address } },
+        lots.map(l => ({ numero: l.lot_number, titre: l.lot_title })),
+        tvaPct, settings,
+      );
+      await verserPdf({ typeDoc: 'Autre', nom: "Acte d'engagement (formulaire)", unique: false },
+        `Acte_engagement_formulaire_${nomFichierBase.replace(/[^\p{L}\p{N}]+/gu, '_')}.pdf`, new Blob([data], { type: 'application/pdf' }));
     } catch (e: any) {
       console.error(e);
       setErreur(e?.message || 'Le versement au DCE a échoué.');
@@ -362,6 +371,11 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
             <button type="button" className={BOUTON} disabled={!!enCours} onClick={genererFormulaire}>
               <IconDownload size={13} /> {enCours === 'acte-pdf' ? 'Génération…' : 'Générer le formulaire (PDF à remplir)'}
             </button>
+            <button type="button" className={BOUTON} disabled={!!enCours} onClick={verserFormulaireAuDce}
+              title="Génère le formulaire et le rattache au DCE (joint aux invitations)">
+              <IconFolderPlus size={13} /> {enCours === 'acte-dce' ? 'Versement…' : 'Verser au DCE'}
+            </button>
+            {infoDce && <p role="status" className="basis-full text-xs text-green-600 dark:text-green-400 font-bold">{infoDce}</p>}
             <button type="button" className={BOUTON} disabled={!!enCours} onClick={() => champFichier.current?.click()}>
               <IconUpload size={13} /> {enCours === 'acte-lecture' ? 'Lecture…' : 'Lire un formulaire rempli'}
             </button>

@@ -1,4 +1,4 @@
-import React, { useId, useMemo, useState } from 'react';
+import React, { useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconFileZip } from '@tabler/icons-react';
 import type { DPGF } from '../../types/dpgf';
@@ -12,6 +12,7 @@ import {
   DOCUMENTS_DOSSIER, compterFichiers, produireDossier, type DocumentDossier, type FormatChoisi,
 } from '../../lib/exportDossier';
 import { livrer, nomSur } from '../../lib/exportSortie';
+import { estAnnulation, verifierAnnulation } from '../../lib/annulation';
 import { ORIENTATION_CCTP, ORIENTATION_DPGF, type Orientation } from '../../lib/exportOrientation';
 import { DialogShell, boutonPrincipal, boutonSecondaire } from '../projectDetail/situations/DialogShell';
 
@@ -93,6 +94,7 @@ export const ProExportDialog: React.FC<Props> = ({
     cctp: ORIENTATION_CCTP, dpgf: ORIENTATION_DPGF,
   });
   const [busy, setBusy] = useState(false);
+  const annulation = useRef<AbortController | null>(null);
   const [erreur, setErreur] = useState('');
 
   const bpuVide = !bpu || bpu.lots.length === 0;
@@ -156,12 +158,14 @@ export const ProExportDialog: React.FC<Props> = ({
   const lancer = async () => {
     setBusy(true);
     setErreur('');
+    const controleur = new AbortController();
+    annulation.current = controleur;
     try {
       const bpuPret = documents.bpu || documents.dqe ? prepareBpu() : null;
       const res = await produireDossier({
         dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment, parLot, orientations, estimationDetaillee,
         annexeFiches: annexeFiches && !!documents.cctp,
-        projectName, perimetre: perimetre(), settings, contexte,
+        projectName, perimetre: perimetre(), settings, contexte, signal: controleur.signal,
         couverture: { imageUrl: projectImageUrl, adresse: contexte?.adresse, maitreOuvrage: contexte?.maitreOuvrage, reference: contexte?.reference },
       });
       for (const a of res.avertissements) {
@@ -177,11 +181,14 @@ export const ProExportDialog: React.FC<Props> = ({
         notify?.(message, { type: 'error' });
       }
       if (res.fichiers.length === 0) { setErreur(t('pro_export_dialog_nothing')); return; }
+      verifierAnnulation(controleur.signal);
       await livrer(res.fichiers, `Dossier_PRO_${nomSur(projectName ?? dpgf.titre)}.zip`);
       onClose();
     } catch (e) {
+      if (estAnnulation(e)) { notify?.(t('pro_export_dialog_cancelled', { defaultValue: 'Export annulé : aucun fichier n\'a été produit.' })); return; }
       setErreur(t('pro_export_dialog_error', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
+      annulation.current = null;
       setBusy(false);
     }
   };
@@ -271,7 +278,9 @@ export const ProExportDialog: React.FC<Props> = ({
             {nbFichiers > 1 && <IconFileZip size={14} aria-hidden />}
             {nbFichiers === 0 ? t('pro_export_dialog_none') : nbFichiers === 1 ? t('pro_export_dialog_one_file') : t('pro_export_dialog_zip', { count: nbFichiers })}
           </span>
-          <button type="button" className={boutonSecondaire} onClick={onClose} disabled={busy}>{t('pro_versions_close')}</button>
+          {busy
+            ? <button type="button" className={boutonSecondaire} onClick={() => annulation.current?.abort()}>{t('pro_export_dialog_cancel', { defaultValue: 'Annuler l\'export' })}</button>
+            : <button type="button" className={boutonSecondaire} onClick={onClose}>{t('pro_versions_close')}</button>}
           <button type="button" className={boutonPrincipal} disabled={nbFichiers === 0 || busy} onClick={() => { void lancer(); }}>
             {busy ? t('pro_export_dialog_running') : t('pro_export')}
           </button>
