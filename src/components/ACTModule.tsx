@@ -50,6 +50,8 @@ import {
   type EntrepriseComparee, type ModeSaisie,
 } from '../lib/comparatifPrix';
 import type { Lot as LotDocument, OffreDocument } from '../types/dpgf';
+import { lignesIndices, type DocumentDce } from '../lib/dceIndices';
+import DceFichiersPicker from './act/DceFichiersPicker';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -59,6 +61,8 @@ interface DCEDocument {
   type_doc: 'RC' | 'CCAP' | 'CCTP' | 'DPGF' | 'BPU' | 'DQE' | 'Plans' | 'Autre';
   tous_lots: boolean;
   lots_ids: string[];
+  /** Documents de l'affaire joints à cette pièce (indice lu sur leur fiche). */
+  document_ids?: string[];
 }
 
 interface EntrepriseConsultee {
@@ -522,9 +526,31 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
       libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
       tous_lots: d.tous_lots,
       lots_ids: d.lots_ids,
+      document_ids: d.document_ids ?? [],
     })),
     [consultation.dce_documents],
   );
+
+  // Documents de l'affaire proposés pour composer le DCE. Un échec de lecture
+  // laisse la liste vide : les pièces restent des intitulés, comme avant.
+  const [documentsAffaire, setDocumentsAffaire] = useState<DocumentDce[]>([]);
+  useEffect(() => {
+    let vivant = true;
+    apiFetch<DocumentDce[]>(`/api/documents?project_id=${encodeURIComponent(projectId)}`)
+      .then(d => { if (vivant) setDocumentsAffaire(Array.isArray(d) ? d : []); })
+      .catch(() => {});
+    return () => { vivant = false; };
+  }, [projectId]);
+
+  const telechargerTableauIndices = async () => {
+    const { genererTableauIndicesPdf } = await import('../lib/dceIndicesPdf');
+    const fichier = await genererTableauIndicesPdf({ projectName, lignes: lignesIndices(dcePieces, documentsAffaire) });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(fichier);
+    a.download = fichier.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
 
   // ── Offres poste par poste (document de référence : DPGF ou bordereau) ─────
   // Les offres des entreprises restent dans leur colonne séparée du document ;
@@ -795,14 +821,22 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconFileText size={15} /> Dossier de Consultation des Entreprises (DCE)
                 </h3>
-                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Listez les documents du DCE et précisez leur disponibilité par lot</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Listez les pièces du DCE, joignez-y les documents de l'affaire et précisez leur disponibilité par lot. Les fichiers et le tableau d'indices partent avec le mail d'invitation.</p>
               </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+              {consultation.dce_documents.length > 0 && (
+                <button onClick={telechargerTableauIndices}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition">
+                  <IconFileText size={13} /> Tableau d'indices (PDF)
+                </button>
+              )}
               <button onClick={() => {
                 const newDoc: DCEDocument = { id: crypto.randomUUID(), nom: '', type_doc: 'RC', tous_lots: true, lots_ids: [] };
                 update({ ...consultation, dce_documents: [...consultation.dce_documents, newDoc] });
               }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition">
                 <IconPlus size={13} /> Ajouter
               </button>
+              </div>
             </div>
             <div className="p-5 space-y-3">
               {consultation.dce_documents.length === 0 && (
@@ -856,6 +890,14 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                           Lot {lot.lot_number}
                         </label>
                       ))}
+                    </div>
+                    <div className="sm:col-span-3">
+                      <DceFichiersPicker documents={documentsAffaire} value={doc.document_ids ?? []} label={`Documents joints à ${doc.nom || 'la pièce'}`}
+                        onChange={ids => {
+                          const docs = [...consultation.dce_documents];
+                          docs[idx] = { ...doc, document_ids: ids };
+                          update({ ...consultation, dce_documents: docs });
+                        }} />
                     </div>
                   </div>
                   <button onClick={() => update({ ...consultation, dce_documents: consultation.dce_documents.filter(d => d.id !== doc.id) })} className="p-1 text-zinc-300 hover:text-red-500 transition-colors flex-shrink-0 mt-1"><IconTrash size={13} /></button>
@@ -933,6 +975,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               entreprises={consultation.entreprises}
               onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
               dcePieces={dcePieces}
+              documentsAffaire={documentsAffaire}
               entrepriseContacts={entrepriseContacts}
               corpsEtatOptions={corpsEtatOptions}
               lotOptions={lotOptions}

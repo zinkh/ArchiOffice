@@ -18,6 +18,9 @@ import { MultiSelectDropdown, type MultiSelectOption } from './MultiSelectDropdo
 import { QualificationBadge } from './QualificationBadge';
 import { resumeQualifications, type Qualification } from '../lib/qualifications';
 import MailComposeModal from './MailComposeModal';
+import { documentToFile } from '../lib/emailAttachments';
+import { documentsAJoindre, lignesIndices, piecesDeEntreprise, type DocumentDce } from '../lib/dceIndices';
+import { genererTableauIndicesPdf } from '../lib/dceIndicesPdf';
 
 export type EntrepriseRow = EntrepriseSuivi & { corps_etat_codes?: string[] };
 
@@ -26,6 +29,7 @@ export interface PieceDce {
   libelle: string;
   tous_lots: boolean;
   lots_ids: string[];
+  document_ids?: string[];
 }
 
 interface Props {
@@ -34,6 +38,8 @@ interface Props {
   entreprises: EntrepriseRow[];
   onChange: (next: EntrepriseRow[]) => void;
   dcePieces: PieceDce[];
+  /** Documents de l'affaire (fichiers et indices des pièces du DCE). */
+  documentsAffaire?: DocumentDce[];
   entrepriseContacts: Contact[];
   corpsEtatOptions: MultiSelectOption[];
   lotOptions: MultiSelectOption[];
@@ -80,35 +86,62 @@ const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('fr-FR
 // ── Envoi du DCE par mail ────────────────────────────────────────────────────
 // Les comptes mail ne sont lus qu'à l'ouverture, pas à chaque affichage du tableau.
 
-function DceMailDialog({ projectName, entreprise, lots, pieces, onSent, onClose }: {
+function DceMailDialog({ projectName, entreprise, lots, pieces, documents, onSent, onClose }: {
   projectName: string;
   entreprise: EntrepriseRow;
   lots: ProjectLot[];
   pieces: PieceDce[];
+  documents: DocumentDce[];
   onSent: () => void;
   onClose: () => void;
 }) {
   const { accounts, loading } = useMailAccounts();
-  if (loading) return null;
-
   const lotsEntreprise = lots.filter(l => entreprise.lots_ids.includes(l.id));
-  const piecesEntreprise = pieces.filter(p => p.tous_lots || p.lots_ids.some(id => entreprise.lots_ids.includes(id)));
+  const piecesEntreprise = piecesDeEntreprise(pieces, entreprise.lots_ids);
+  const lignes = lignesIndices(piecesEntreprise, documents);
+  const aJoindre = documentsAJoindre(piecesEntreprise, documents);
+  const lotsCourts = lotsEntreprise.map(l => `Lot ${l.lot_number}`).join(', ');
+
+  // Les fichiers du DCE et le tableau d'indices sont joints d'office ; la personne
+  // peut en retirer. Un document illisible n'empêche pas le message : il est signalé.
+  const [pretes, setPretes] = useState<{ fichiers: File[]; echecs: string[] } | null>(null);
+  useEffect(() => {
+    let vivant = true;
+    (async () => {
+      const resultats = await Promise.allSettled(aJoindre.map(documentToFile));
+      const fichiers: File[] = [];
+      const echecs: string[] = [];
+      resultats.forEach((r, i) => { if (r.status === 'fulfilled') fichiers.push(r.value); else echecs.push(aJoindre[i].name); });
+      if (lignes.length > 0) {
+        try { fichiers.unshift(await genererTableauIndicesPdf({ projectName, lignes, lots: lotsCourts || undefined })); }
+        catch { echecs.push('Tableau d\'indices'); }
+      }
+      if (vivant) setPretes({ fichiers, echecs });
+    })();
+    return () => { vivant = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (loading || !pretes) return null;
+
   const libelleLots = lotsEntreprise.map(l => `Lot ${l.lot_number} — ${l.lot_title}`);
   const body = [
     'Bonjour,',
     '',
     `Dans le cadre de la consultation des entreprises pour l'opération « ${projectName} », nous vous transmettons le dossier de consultation (DCE)${libelleLots.length ? ` relatif à :\n${libelleLots.map(l => `- ${l}`).join('\n')}` : '.'}`,
-    ...(piecesEntreprise.length ? ['', 'Pièces du dossier :', ...piecesEntreprise.map(p => `- ${p.libelle}`)] : []),
+    ...(lignes.length
+      ? ['', 'Pièces du dossier (indice de révision) :', ...lignes.map(l => `- ${l.designation}${l.fichier ? ` : ${l.fichier}` : ''}${l.indice ? ` (indice ${l.indice})` : ''}`),
+         '', 'Le tableau des indices est joint à ce message.']
+      : []),
+    ...(pretes.echecs.length ? ['', `[À joindre manuellement, téléchargement impossible : ${pretes.echecs.join(', ')}]`] : []),
     '',
     'Nous restons à votre disposition pour toute précision.',
     '',
     'Cordialement,',
   ].join('\n');
-  const lotsCourts = lotsEntreprise.map(l => `Lot ${l.lot_number}`).join(', ');
-
   return (
     <MailComposeModal
       accounts={accounts}
+      initialFiles={pretes.fichiers}
       initial={{
         to: entreprise.email || '',
         subject: `Consultation des entreprises — ${projectName}${lotsCourts ? ` — ${lotsCourts}` : ''}`,
@@ -123,7 +156,7 @@ function DceMailDialog({ projectName, entreprise, lots, pieces, onSent, onClose 
 // ── Tableau ──────────────────────────────────────────────────────────────────
 
 export default function ACTEntreprisesTable({
-  projectName, lots, entreprises, onChange, dcePieces, entrepriseContacts,
+  projectName, lots, entreprises, onChange, dcePieces, documentsAffaire = [], entrepriseContacts,
   corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact,
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
   depot, depotRecuLe, onInviterDepot,
@@ -627,7 +660,7 @@ export default function ACTEntreprisesTable({
 
       {entrepriseMail && (
         <DceMailDialog
-          projectName={projectName} entreprise={entrepriseMail} lots={lots} pieces={dcePieces}
+          projectName={projectName} entreprise={entrepriseMail} lots={lots} pieces={dcePieces} documents={documentsAffaire}
           onClose={() => setMailPour(null)}
           onSent={() => patch(entrepriseMail.id, {
             dce_transmis_le: entrepriseMail.dce_transmis_le || today, envoyer_dce: true, ne_repond_pas: false,
