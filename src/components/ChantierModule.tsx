@@ -122,6 +122,17 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   };
   // Création d'un intervenant depuis le champ « Société » d'une rubrique.
   const [newIntervenant, setNewIntervenant] = useState<{ query: string; noteId: string } | null>(null);
+  // Classement de la présence des intervenants : ordre de la fiche, par entité (groupé), par rôle ou par nom.
+  const [intervenantSort, setIntervenantSort] = useState<'liste' | 'entite' | 'role' | 'nom'>(() => {
+    try {
+      const v = localStorage.getItem('chantier.intervenantSort');
+      return v === 'entite' || v === 'role' || v === 'nom' ? v : 'liste';
+    } catch { return 'liste'; }
+  });
+  const changeIntervenantSort = (v: 'liste' | 'entite' | 'role' | 'nom') => {
+    setIntervenantSort(v);
+    try { localStorage.setItem('chantier.intervenantSort', v); } catch { /* préférence non conservée */ }
+  };
 
   const [reports, setReports] = useState<SiteReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -1350,7 +1361,24 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   </div>
 
                   {/* Présence des intervenants (page de garde du CR) */}
-                  <Section id="intervenants" title="Présence des intervenants" icon={IconUsers}>
+                  <Section id="intervenants" title="Présence des intervenants" icon={IconUsers}
+                    action={(project.stakeholders_list || []).length > 1 ? (
+                      <label className="flex items-center gap-2 text-xs text-[var(--tblr-muted)]">
+                        <span className="font-bold uppercase tracking-wider text-[0.6875rem]">Classer par</span>
+                        <select
+                          aria-label="Classement des intervenants"
+                          className="p-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent text-xs text-[var(--tblr-text)]"
+                          value={intervenantSort}
+                          onChange={e => changeIntervenantSort(e.target.value as 'liste' | 'entite' | 'role' | 'nom')}
+                        >
+                          <option value="liste">Ordre de la fiche</option>
+                          <option value="entite">Entité (regroupé)</option>
+                          <option value="role">Rôle</option>
+                          <option value="nom">Nom</option>
+                        </select>
+                      </label>
+                    ) : undefined}
+                  >
                     {(project.stakeholders_list || []).length === 0 && (
                       <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">
                         Aucun intervenant renseigné — ajoutez le groupement (MOA, AMO, MOE, CT, CSPS...) depuis l'onglet Infos de l'affaire.
@@ -1359,13 +1387,38 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-sm">
                         <tbody>
-                          {(project.stakeholders_list || []).map(s => {
+                          {(() => {
+                            // Entité : société du contact, à défaut la mention entre parenthèses du rôle.
+                            const entiteDe = (s: ProjectStakeholder) => {
+                              const contact = s.contact_id ? contacts.find(c => c.id === s.contact_id) : undefined;
+                              return (contact?.company_name || s.role.match(/\(([^)]+)\)\s*$/)?.[1] || '').trim();
+                            };
+                            const cmp = (a: string, b: string) => a.localeCompare(b, 'fr', { sensitivity: 'base' });
+                            const base = (project.stakeholders_list || []).map(s => ({ s, entite: entiteDe(s) }));
+                            const tries = intervenantSort === 'liste' ? base : [...base].sort((x, y) => {
+                              if (intervenantSort === 'nom') return cmp(x.s.name, y.s.name);
+                              if (intervenantSort === 'role') return cmp(x.s.role, y.s.role) || cmp(x.s.name, y.s.name);
+                              // Entité : les sans entité en dernier, puis rôle et nom à l'intérieur du groupe.
+                              if (!x.entite !== !y.entite) return x.entite ? -1 : 1;
+                              return cmp(x.entite, y.entite) || cmp(x.s.role, y.s.role) || cmp(x.s.name, y.s.name);
+                            });
+                            return tries.map(({ s, entite }, i) => {
                             const idx = stakeholderAttendanceIndex(s);
                             const row = idx >= 0 ? selectedReport.attendance![idx] : undefined;
                             const contact = s.contact_id ? contacts.find(c => c.id === s.contact_id) : undefined;
+                            const nouveauGroupe = intervenantSort === 'entite' && (i === 0 || tries[i - 1].entite !== entite);
+                            const taille = nouveauGroupe ? tries.filter(t => t.entite === entite).length : 0;
                             const status: PresenceStatus = row ? (row.status || (row.present ? 'P' : row.excused ? 'AE' : 'ANE')) : 'P';
                             return (
-                              <tr key={s.id} className="border-b border-[var(--tblr-border)] last:border-0">
+                              <React.Fragment key={s.id}>
+                              {nouveauGroupe && (
+                                <tr>
+                                  <th colSpan={2} className="pt-4 pb-1 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] border-b border-[var(--tblr-border)]">
+                                    {entite || 'Sans entité'} <span className="font-normal normal-case tracking-normal">({taille})</span>
+                                  </th>
+                                </tr>
+                              )}
+                              <tr className="border-b border-[var(--tblr-border)] last:border-0">
                                 <td className="py-2 pr-2">
                                   <div className="font-semibold text-[var(--tblr-text)]">{s.role}</div>
                                   <div className="text-xs text-[var(--tblr-muted)]">
@@ -1396,8 +1449,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                   </label>
                                 </td>
                               </tr>
+                              </React.Fragment>
                             );
-                          })}
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>
