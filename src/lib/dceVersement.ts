@@ -4,7 +4,6 @@
 // pièce du DCE. Les pièces cochées pour les lots d'une entreprise partent alors
 // d'office avec son mail d'invitation. Déjà versé : nouvelle version du même
 // document (indice suivant), jamais un doublon.
-import { getAccessToken } from './authToken';
 import type { DocumentDce } from './dceIndices';
 
 export type TypePieceDce = 'RC' | 'CCAP' | 'CCTP' | 'DPGF' | 'Autre';
@@ -70,6 +69,8 @@ export async function deposerFichierDce(opts: {
   form.append('phase', 'ACT');
   form.append('description', opts.existantId ? 'Nouvelle version versée depuis la consultation' : 'Pièce du DCE générée depuis la consultation');
   if (!opts.existantId) { form.append('project_id', opts.projectId); form.append('uploaded_by', 'ACT'); }
+  // Chargé à la demande : les fonctions pures de ce module ne doivent pas tirer le client Supabase.
+  const { getAccessToken } = await import('./authToken');
   const token = await getAccessToken();
   const r = await fetch(opts.existantId ? `/api/documents/${encodeURIComponent(opts.existantId)}` : '/api/documents', {
     method: opts.existantId ? 'PUT' : 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form,
