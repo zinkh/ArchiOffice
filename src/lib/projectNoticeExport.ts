@@ -3,7 +3,7 @@ import type { AgencySettings } from './proposalExport';
 import type { ProjectNotice } from './projectNotices';
 import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 import { projectNoticeTitle } from './projectNotices';
-import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
+import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
 
 const TEXT: [number, number, number] = [17, 24, 39];
 const MUTED: [number, number, number] = [107, 114, 128];
@@ -120,12 +120,13 @@ export async function exportProjectNoticeDocx(
   } = await import('docx');
 
   const title = projectNoticeTitle(notice.kind, notice.phase);
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
   const firstHeader = [
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 20, color: '111827' })] }),
+    new Paragraph({ children: [new TextRun({ text: cab.agencyName || '', bold: true, size: 20, color: '111827' })] }),
     new Paragraph({
       border: { bottom: { style: BorderStyle.SINGLE, size: 5, color: 'D1D5DB' } },
       children: [new TextRun({
-        text: [settings.address, settings.phone, settings.email].filter(Boolean).join(' · '),
+        text: [cab.address, cab.phone, cab.email].filter(Boolean).join(' · '),
         size: 15, color: '6B7280',
       })],
     }),
@@ -195,7 +196,7 @@ export async function exportProjectNoticeDocx(
   const doc = new Document({
     styles: STYLES_WORD_ARIAL,
     sections: [{
-      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: title, firstHeader, footer: footerChildren }),
+      ...await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: title, firstHeader, footer: footerChildren }),
       children: body,
     }],
   });

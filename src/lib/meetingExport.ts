@@ -6,7 +6,7 @@ import type { Meeting, MeetingAttendee } from '../types';
 import { compressImage, type CompressedImage } from './imageCompression';
 import { resolveSignedUrl } from './signedStorageUrl';
 import type { AgencySettings as BaseAgencySettings } from './proposalExport';
-import { drawAgencyFooters, drawPartnerLogos } from './pdfLetterhead';
+import { drawAgencyFooters, drawPartnerLogos, logosDuBandeau, reglagesEntete } from './pdfLetterhead';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 
@@ -73,12 +73,13 @@ export async function exportMeetingToPDF(
   };
 
   // ── Header ─────────────────────────────────────────────────────────────────
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
   let headerH = 20;
   let logoW = 0;
 
-  if (settings.logoUrl) {
+  if (cab.logoUrl) {
     // PNG : un JPEG n'a pas de transparence, le logo sortirait avec un fond noir.
-    const logo = await compressImage(settings.logoUrl, 400, 400, 0.92, 'image/png');
+    const logo = await compressImage(cab.logoUrl, 400, 400, 0.92, 'image/png');
     if (logo) {
       const lH = 18;
       logoW = Math.round((logo.w / logo.h) * lH);
@@ -88,12 +89,12 @@ export async function exportMeetingToPDF(
 
   const textX = margin + (logoW > 0 ? logoW + 6 : 0);
   applyFont('bold', 12);
-  pdf.text(settings.agencyName || 'Mon Agence', textX, y + 5);
+  pdf.text(cab.agencyName || 'Mon Agence', textX, y + 5);
   applyFont('normal', 8, '#6b7280');
   let infoY = y + 10;
-  if (settings.address) { pdf.text(settings.address, textX, infoY); infoY += 4; }
-  if (settings.phone) { pdf.text(`Tél : ${settings.phone}`, textX, infoY); infoY += 4; }
-  if (settings.email) { pdf.text(settings.email, textX, infoY); infoY += 4; }
+  if (cab.address) { pdf.text(cab.address, textX, infoY); infoY += 4; }
+  if (cab.phone) { pdf.text(`Tél : ${cab.phone}`, textX, infoY); infoY += 4; }
+  if (cab.email) { pdf.text(cab.email, textX, infoY); infoY += 4; }
   headerH = Math.max(headerH, infoY - y + 2);
 
   y += headerH;
@@ -104,7 +105,7 @@ export async function exportMeetingToPDF(
   pdf.line(margin, y, pageW - margin, y);
   y += 7;
   // Logos du groupement, sous le filet.
-  const bandeauBas = drawPartnerLogos(pdf, undefined, margin, y - 4);
+  const bandeauBas = drawPartnerLogos(pdf, logosDuBandeau(), margin, y - 4);
   if (bandeauBas !== null) y = bandeauBas + 5;
 
   // ── Meeting title & meta ───────────────────────────────────────────────────
@@ -275,9 +276,10 @@ export async function exportMeetingToDocx(
   const typeLabel = meetingTypeLabel(meeting);
 
   // ── Logo ─────────────────────────────────────────────────────────────────
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
   const logoChildren: (TextRun | ImageRun)[] = [];
-  if (settings.logoUrl) {
-    const logo = await compressImage(settings.logoUrl, 400, 400, 0.92, 'image/png');
+  if (cab.logoUrl) {
+    const logo = await compressImage(cab.logoUrl, 400, 400, 0.92, 'image/png');
     if (logo) {
       const targetH = 40; // px
       const targetW = Math.round((logo.w / logo.h) * targetH);
@@ -289,7 +291,7 @@ export async function exportMeetingToDocx(
     }
   }
   if (logoChildren.length === 0) {
-    logoChildren.push(new TextRun({ text: settings.agencyName || 'Agence', bold: true, size: 28 }));
+    logoChildren.push(new TextRun({ text: cab.agencyName || 'Agence', bold: true, size: 28 }));
   }
 
   const bandeauLogos = await partnerLogosParagraph();
@@ -297,17 +299,17 @@ export async function exportMeetingToDocx(
   // ── Agency info paragraphs ───────────────────────────────────────────────
   const agencyParagraphs: Paragraph[] = [
     new Paragraph({ children: logoChildren }),
-    ...(settings.agencyName
-      ? [new Paragraph({ children: [new TextRun({ text: settings.agencyName, bold: true, size: 24 })] })]
+    ...(cab.agencyName
+      ? [new Paragraph({ children: [new TextRun({ text: cab.agencyName, bold: true, size: 24 })] })]
       : []),
-    ...(settings.address
-      ? [new Paragraph({ children: [new TextRun({ text: settings.address, size: 18, color: '6B7280' })] })]
+    ...(cab.address
+      ? [new Paragraph({ children: [new TextRun({ text: cab.address, size: 18, color: '6B7280' })] })]
       : []),
-    ...(settings.phone
-      ? [new Paragraph({ children: [new TextRun({ text: `Tél : ${settings.phone}`, size: 18, color: '6B7280' })] })]
+    ...(cab.phone
+      ? [new Paragraph({ children: [new TextRun({ text: `Tél : ${cab.phone}`, size: 18, color: '6B7280' })] })]
       : []),
-    ...(settings.email
-      ? [new Paragraph({ children: [new TextRun({ text: settings.email, size: 18, color: '6B7280' })] })]
+    ...(cab.email
+      ? [new Paragraph({ children: [new TextRun({ text: cab.email, size: 18, color: '6B7280' })] })]
       : []),
     ...(bandeauLogos ? [bandeauLogos] : []),
   ];
@@ -437,7 +439,7 @@ export async function exportMeetingToDocx(
     styles: STYLES_WORD_ARIAL,
     sections: [{
       // L'en-tête du corps ne sert que la première page ; les suivantes portent une ligne.
-      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: meeting.title }),
+      ...await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: meeting.title }),
       children: [
         // Agency header
         ...agencyParagraphs,

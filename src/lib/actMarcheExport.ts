@@ -2,7 +2,7 @@
 // Charte du cabinet : en-tête (logo, coordonnées), nuances de gris, pied de page
 // avec l'adresse et pagination « P1|2 ». Le contenu vient de `actMarche.ts`.
 import type { AgencySettings } from './proposalExport';
-import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
+import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 import type { Bloc, DocModele } from './actMarche';
@@ -130,7 +130,8 @@ export async function exporterMarcheDocx(docs: DocModele[], settings: AgencySett
   } = await import('docx');
   type Para = InstanceType<typeof Paragraph>;
 
-  const logo = await loadLogoDataUrl(settings.logoUrl);
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
+  const logo = await loadLogoDataUrl(cab.logoUrl);
   const entete: Para[] = [];
   if (logo) {
     const h = 40;
@@ -138,11 +139,11 @@ export async function exporterMarcheDocx(docs: DocModele[], settings: AgencySett
     entete.push(new Paragraph({ children: [new ImageRun({ type: 'png', data, transformation: { width: Math.round((logo.width / logo.height) * h), height: h } })] }));
   }
   entete.push(
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 20, color: '111827' })] }),
+    new Paragraph({ children: [new TextRun({ text: cab.agencyName || '', bold: true, size: 20, color: '111827' })] }),
     new Paragraph({
       border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'D1D5DB' } },
       spacing: { after: 120 },
-      children: [new TextRun({ text: [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
+      children: [new TextRun({ text: [cab.address, cab.phone ? `Tél : ${cab.phone}` : '', cab.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
     }),
   );
   const bandeau = await partnerLogosParagraph();
@@ -185,7 +186,7 @@ export async function exporterMarcheDocx(docs: DocModele[], settings: AgencySett
   };
 
   const sections = await Promise.all(docs.map(async doc => ({
-    ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: doc.titre, firstHeader: entete, footer: pied }),
+    ...await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: doc.titre, firstHeader: entete, footer: pied }),
     children: [
       new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 200, after: 60 }, children: [new TextRun({ text: doc.titre, bold: true, size: 30, color: '111827' })] }),
       ...(doc.sousTitre ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: doc.sousTitre, size: 21, color: '6B7280' })] })] : []),

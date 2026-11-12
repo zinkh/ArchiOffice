@@ -57,9 +57,32 @@ export function setActiveGroupementLogos(logos: LogoImage[]): void {
 // Mandataire du groupement actif, quand c'est un cotraitant (voir
 // useActiveGroupement) : même principe que les logos, lu par chaque en-tête.
 let mandataireActif: CotraitantIdentity | null = null;
+// Logo du cabinet, gardé avec le mandataire : il rejoint alors le bandeau « En
+// groupement avec » des documents Word et Excel, qui ne reçoivent pas de logo.
+let logoCabinetActif: LogoImage | null = null;
 
-export function setActiveMandataire(mandataire: CotraitantIdentity | null): void {
+export function setActiveMandataire(mandataire: CotraitantIdentity | null, logoCabinet: LogoImage | null = null): void {
   mandataireActif = mandataire;
+  logoCabinetActif = mandataire ? logoCabinet : null;
+}
+
+/** Mandataire du groupement actif (cotraitant), ou null quand c'est le cabinet. */
+export function getActiveMandataire(): { mandataire: CotraitantIdentity; logoCabinet: LogoImage | null } | null {
+  return mandataireActif ? { mandataire: mandataireActif, logoCabinet: logoCabinetActif } : null;
+}
+
+/**
+ * Réglages à imprimer dans l'en-tête principal d'un document Word : ceux du
+ * cabinet, ou ceux du cotraitant mandataire (nom, adresse, contact, logo). Le
+ * pied de page garde les réglages d'origine.
+ */
+export function reglagesEntete(settings: AgencySettings): AgencySettings {
+  const m = mandataireActif;
+  if (!m) return settings;
+  return {
+    ...settings, agencyName: m.titre, address: m.adresse, phone: m.telephone, email: m.email,
+    logoUrl: m.logo?.dataUrl ?? '',
+  };
 }
 
 /**
@@ -67,7 +90,7 @@ export function setActiveMandataire(mandataire: CotraitantIdentity | null): void
  * mandataire (logo et coordonnées), le cabinet rejoignant alors le bandeau des
  * partenaires. Le pied de page reste celui du cabinet.
  */
-function enteteDe(
+export function enteteDe(
   settings: AgencySettings, opts: Pick<LetterheadOptions, 'logo' | 'partnerLogos' | 'mandataire'>,
 ): { settings: AgencySettings; logo: LogoImage | null; partners: LogoImage[] } {
   const partners = resolvePartnerLogos(opts.partnerLogos);
@@ -76,8 +99,14 @@ function enteteDe(
   return {
     settings: { ...settings, agencyName: m.titre, address: m.adresse, phone: m.telephone, email: m.email },
     logo: m.logo,
-    partners: [...(opts.logo ? [opts.logo] : []), ...partners],
+    partners: [...((opts.logo ?? (opts.mandataire === undefined ? logoCabinetActif : null)) ? [(opts.logo ?? logoCabinetActif) as LogoImage] : []), ...partners],
   };
+}
+
+/** Logos du bandeau « En groupement avec » : le cabinet s'y ajoute quand un cotraitant est mandataire. */
+export function logosDuBandeau(explicit?: LogoImage[]): LogoImage[] {
+  const cabinet = explicit === undefined && mandataireActif && logoCabinetActif ? [logoCabinetActif] : [];
+  return [...cabinet, ...resolvePartnerLogos(explicit)];
 }
 
 /** Logos à imprimer : ceux passés explicitement, à défaut ceux du groupement actif. */

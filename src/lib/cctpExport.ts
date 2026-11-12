@@ -13,7 +13,7 @@ import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { docxSectionChrome } from './docxRunningHeader';
-import { agencyFooterLine, drawAgencyFooters, ENTETE_REDUIT_BAS, loadLogoDataUrl } from './pdfLetterhead';
+import { agencyFooterLine, drawAgencyFooters, ENTETE_REDUIT_BAS, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
 import { chargerPhotoCouverture, donneesPageDeGarde, drawPageDeGardePdf, pageDeGardeDocx, type CouvertureOptions } from './pageDeGarde';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
@@ -290,9 +290,10 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   } = await import('docx');
   const { compressImage } = await import('./imageCompression');
   const { settings } = opts;
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
 
   const headerChildren: InstanceType<typeof Paragraph>[] = [];
-  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 0.92, 'image/png').catch(() => null) : null;
+  const logo = cab.logoUrl ? await compressImage(cab.logoUrl, 400, 400, 0.92, 'image/png').catch(() => null) : null;
   if (logo) {
     const h = 40;
     headerChildren.push(new Paragraph({
@@ -300,11 +301,11 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     }));
   }
   headerChildren.push(
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 20, color: '111827' })] }),
+    new Paragraph({ children: [new TextRun({ text: cab.agencyName || '', bold: true, size: 20, color: '111827' })] }),
     new Paragraph({
       border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'D1D5DB' } },
       spacing: { after: 120 },
-      children: [new TextRun({ text: [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
+      children: [new TextRun({ text: [cab.address, cab.phone ? `Tél : ${cab.phone}` : '', cab.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
     }),
   );
   const bandeau = await partnerLogosParagraph();
@@ -381,7 +382,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   }
 
   const paysage = (opts.orientation ?? ORIENTATION_CCTP) === 'paysage';
-  const chrome = await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, orientation: opts.orientation ?? ORIENTATION_CCTP });
+  const chrome = await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, orientation: opts.orientation ?? ORIENTATION_CCTP });
   const document_ = new Document({
     // Sans style par défaut, Word retombe sur Times New Roman : la charte est en Arial.
     styles: {

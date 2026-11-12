@@ -70,6 +70,7 @@ interface EntrepriseConsultee {
   contact_id?: string;
   nom: string;
   email?: string;
+  emails_supplementaires?: string;
   lots_ids: string[];
   envoyer_dce: boolean;
   /** Codes de la nomenclature FFB (ref_corps_etat, Bibliothèque d'ouvrages) — une entreprise en couvre souvent plusieurs. */
@@ -976,6 +977,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
               dcePieces={dcePieces}
               documentsAffaire={documentsAffaire}
+              projectId={projectId}
+              depotDeadlineAt={depot.deadlineAt}
               entrepriseContacts={entrepriseContacts}
               corpsEtatOptions={corpsEtatOptions}
               lotOptions={lotOptions}
@@ -1872,7 +1875,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
         return e ? (
           <InviterDepotDialog
             projectId={projectId} projectName={projectName} lots={lots}
-            entreprise={{ id: e.id, nom: e.nom, email: e.email, contact_id: e.contact_id, lots_ids: e.lots_ids }}
+            entreprise={{ id: e.id, nom: e.nom, email: e.email, emails_supplementaires: e.emails_supplementaires, contact_id: e.contact_id, lots_ids: e.lots_ids }}
             deadlineAt={depot.deadlineAt}
             onOpenSettings={() => { setInviterPour(null); setReglagesDepotOuverts(true); }}
             onClose={() => setInviterPour(null)}

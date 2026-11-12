@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  loadGroupementHeader, setActiveGroupementLogos, setActiveMandataire, type GroupementMemberMandataire,
+  fetchAgencySettings, loadGroupementHeader, loadLogoDataUrl, setActiveGroupementLogos, setActiveMandataire, type GroupementMemberMandataire,
 } from '../lib/pdfLetterhead';
 
 /**
@@ -21,10 +21,12 @@ export function useActiveGroupement(members: GroupementMemberMandataire[] | null
     reinitialiser();
     if (key) {
       loadGroupementHeader(key.split(',').map(k => ({ contact_id: k.replace('*', ''), mandataire: k.endsWith('*') })))
-        .then(({ mandataire, partnerLogos }) => {
+        .then(async ({ mandataire, partnerLogos }) => {
+          // Le cabinet passe dans le bandeau quand un cotraitant est mandataire.
+          const logoCabinet = mandataire ? await loadLogoDataUrl((await fetchAgencySettings()).logoUrl) : null;
           if (!vivant) return;
           setActiveGroupementLogos(partnerLogos);
-          setActiveMandataire(mandataire);
+          setActiveMandataire(mandataire, logoCabinet);
         });
     }
     return () => { vivant = false; reinitialiser(); };

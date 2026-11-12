@@ -7,6 +7,8 @@ export interface EntrepriseSuivi {
   contact_id?: string;
   nom: string;
   email?: string;
+  /** Autres adresses de destination (séparées par des virgules ou des points-virgules), en plus de l'e-mail du contact. */
+  emails_supplementaires?: string;
   lots_ids: string[];
   envoyer_dce: boolean;
   dce_transmis_le?: string;
@@ -250,4 +252,15 @@ export function listeAPlat<T extends EntrepriseSuivi>(
       if (!a.nom.trim() !== !b.nom.trim()) return a.nom.trim() ? -1 : 1;
       return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
     });
+}
+
+/**
+ * Destinataires d'un message à l'entreprise : l'e-mail du contact d'abord, puis
+ * les adresses supplémentaires saisies sur la ligne, sans doublon (casse ignorée).
+ */
+export function destinatairesEntreprise(e: Pick<EntrepriseSuivi, 'email' | 'emails_supplementaires'>): string[] {
+  const vus = new Set<string>();
+  return [e.email ?? '', ...(e.emails_supplementaires ?? '').split(/[;,\s]+/)]
+    .map(a => a.trim())
+    .filter(a => a.includes('@') && !vus.has(a.toLowerCase()) && !!vus.add(a.toLowerCase()));
 }

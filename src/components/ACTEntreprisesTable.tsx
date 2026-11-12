@@ -8,8 +8,7 @@ import {
   type EntrepriseSuivi, type StatutEntreprise, type FiltresEntreprises,
   STATUT_LABELS, STATUT_ORDER, SANS_LOT, MIN_ENTREPRISES_PAR_LOT, FILTRES_VIDES,
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  filtresActifs, nomContact, todayIso, listeAPlat, type Regroupement,
-} from '../lib/actEntreprises';
+  filtresActifs, nomContact, todayIso, listeAPlat, type Regroupement, destinatairesEntreprise } from '../lib/actEntreprises';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useMailAccounts } from '../hooks/useMailAccounts';
 import type { Contact, ProjectLot } from '../types';
@@ -19,6 +18,8 @@ import { QualificationBadge } from './QualificationBadge';
 import { resumeQualifications, type Qualification } from '../lib/qualifications';
 import MailComposeModal from './MailComposeModal';
 import { documentToFile } from '../lib/emailAttachments';
+import { apiFetch } from '../lib/api';
+import { formaterDateHeure } from '../lib/depotAffichage';
 import { documentsAJoindre, lignesIndices, piecesDeEntreprise, type DocumentDce } from '../lib/dceIndices';
 import { genererTableauIndicesPdf } from '../lib/dceIndicesPdf';
 
@@ -51,6 +52,9 @@ interface Props {
   qualifications?: Record<string, Qualification[]>;
   /** Espace de dépôt des offres : actif (plan, marché privé, stockage externe) ou la raison de son indisponibilité. */
   depot?: { actif: boolean; indisponible?: string };
+  projectId?: string;
+  /** Date limite de remise des offres, rappelée dans le mail avec le lien de dépôt. */
+  depotDeadlineAt?: string | null;
   /** Dernière remise à traiter, par identifiant d'entreprise (voir useConsultationDepot). */
   depotRecuLe?: Record<string, string>;
   onInviterDepot?: (entreprise: EntrepriseRow) => void;
@@ -86,7 +90,11 @@ const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('fr-FR
 // ── Envoi du DCE par mail ────────────────────────────────────────────────────
 // Les comptes mail ne sont lus qu'à l'ouverture, pas à chaque affichage du tableau.
 
-function DceMailDialog({ projectName, entreprise, lots, pieces, documents, onSent, onClose }: {
+function DceMailDialog({ projectId, depotActif, deadlineAt, projectName, entreprise, lots, pieces, documents, onSent, onClose }: {
+  projectId?: string;
+  /** Espace de dépôt utilisable : un lien personnel est alors créé et cité dans le message. */
+  depotActif: boolean;
+  deadlineAt: string | null;
   projectName: string;
   entreprise: EntrepriseRow;
   lots: ProjectLot[];
@@ -104,7 +112,7 @@ function DceMailDialog({ projectName, entreprise, lots, pieces, documents, onSen
 
   // Les fichiers du DCE et le tableau d'indices sont joints d'office ; la personne
   // peut en retirer. Un document illisible n'empêche pas le message : il est signalé.
-  const [pretes, setPretes] = useState<{ fichiers: File[]; echecs: string[] } | null>(null);
+  const [pretes, setPretes] = useState<{ fichiers: File[]; echecs: string[]; lienDepot?: string; echecDepot?: boolean } | null>(null);
   useEffect(() => {
     let vivant = true;
     (async () => {
@@ -116,7 +124,22 @@ function DceMailDialog({ projectName, entreprise, lots, pieces, documents, onSen
         try { fichiers.unshift(await genererTableauIndicesPdf({ projectName, lignes, lots: lotsCourts || undefined })); }
         catch { echecs.push('Tableau d\'indices'); }
       }
-      if (vivant) setPretes({ fichiers, echecs });
+      // Lien de dépôt personnel : créé à l'ouverture du message (un lien précédent de
+      // cette entreprise est alors révoqué, le jeton n'étant jamais conservé en clair).
+      let lienDepot: string | undefined; let echecDepot = false;
+      if (depotActif && projectId) {
+        try {
+          const r = await apiFetch<{ url: string }>(`/api/projects/${projectId}/depot/invites`, {
+            method: 'POST',
+            body: JSON.stringify({
+              entreprise_id: entreprise.id, entreprise_nom: entreprise.nom, email: entreprise.email || undefined,
+              contact_id: entreprise.contact_id || undefined, lots_ids: entreprise.lots_ids,
+            }),
+          });
+          lienDepot = r.url;
+        } catch { echecDepot = true; }
+      }
+      if (vivant) setPretes({ fichiers, echecs, lienDepot, echecDepot });
     })();
     return () => { vivant = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -132,6 +155,12 @@ function DceMailDialog({ projectName, entreprise, lots, pieces, documents, onSen
       ? ['', 'Pièces du dossier (indice de révision) :', ...lignes.map(l => `- ${l.designation}${l.fichier ? ` : ${l.fichier}` : ''}${l.indice ? ` (indice ${l.indice})` : ''}`),
          '', 'Le tableau des indices est joint à ce message.']
       : []),
+    ...(pretes.lienDepot
+      ? ['', 'Vous pouvez remettre votre offre en ligne sur votre espace de dépôt personnel (saisie de l\'offre ou dépôt de vos documents) :', pretes.lienDepot,
+         ...(deadlineAt ? [`Date limite de remise : ${formaterDateHeure(deadlineAt)}.`] : []),
+         'Ce lien vous est personnel : merci de ne pas le transmettre.']
+      : []),
+    ...(pretes.echecDepot ? ['', '[Lien de dépôt non créé : à créer depuis la ligne de l\'entreprise (icône lien)]'] : []),
     ...(pretes.echecs.length ? ['', `[À joindre manuellement, téléchargement impossible : ${pretes.echecs.join(', ')}]`] : []),
     '',
     'Nous restons à votre disposition pour toute précision.',
@@ -143,7 +172,7 @@ function DceMailDialog({ projectName, entreprise, lots, pieces, documents, onSen
       accounts={accounts}
       initialFiles={pretes.fichiers}
       initial={{
-        to: entreprise.email || '',
+        to: destinatairesEntreprise(entreprise).join(', '),
         subject: `Consultation des entreprises — ${projectName}${lotsCourts ? ` — ${lotsCourts}` : ''}`,
         body,
       }}
@@ -159,7 +188,7 @@ export default function ACTEntreprisesTable({
   projectName, lots, entreprises, onChange, dcePieces, documentsAffaire = [], entrepriseContacts,
   corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact,
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
-  depot, depotRecuLe, onInviterDepot,
+  depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -274,6 +303,18 @@ export default function ACTEntreprisesTable({
         placeholder="email@entreprise.fr" value={e.email || ''}
         onChange={ev => patch(e.id, { email: ev.target.value })}
       />
+      <input
+        className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
+        type="text" aria-label="Autres adresses e-mail de l'entreprise"
+        placeholder="Autres adresses (séparées par une virgule)" value={e.emails_supplementaires || ''}
+        onChange={ev => patch(e.id, { emails_supplementaires: ev.target.value })}
+      />
+      {e.contact_id && (
+        <a href={`/contacts?open=${encodeURIComponent(e.contact_id)}`} target="_blank" rel="noopener noreferrer"
+          className="mt-1 inline-block px-1 text-[0.6875rem] underline text-[var(--tblr-muted)] hover:text-[var(--tblr-primary)]">
+          Modifier la fiche contact
+        </a>
+      )}
       {e.contact_id && (
         <div className="mt-1 px-1">
           <QualificationBadge
@@ -350,8 +391,8 @@ export default function ACTEntreprisesTable({
         ><IconLink size={14} /></button>
       )}
       <button
-        type="button" onClick={() => setMailPour(e.id)} disabled={!(e.email || '').trim()}
-        title={(e.email || '').trim() ? 'Envoyer le DCE par mail' : "Renseignez l'email pour envoyer le DCE"}
+        type="button" onClick={() => setMailPour(e.id)} disabled={destinatairesEntreprise(e).length === 0}
+        title={destinatairesEntreprise(e).length > 0 ? 'Envoyer le DCE par mail' : "Renseignez l'email pour envoyer le DCE"}
         aria-label={`Envoyer le DCE à ${e.nom || "l'entreprise"}`}
         className="p-1.5 rounded-md text-zinc-400 hover:text-blue-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:text-zinc-400 disabled:hover:bg-transparent"
       ><IconSend size={14} /></button>
@@ -660,6 +701,7 @@ export default function ACTEntreprisesTable({
 
       {entrepriseMail && (
         <DceMailDialog
+          projectId={projectId} depotActif={!!depot?.actif} deadlineAt={depotDeadlineAt}
           projectName={projectName} entreprise={entrepriseMail} lots={lots} pieces={dcePieces} documents={documentsAffaire}
           onClose={() => setMailPour(null)}
           onSent={() => patch(entrepriseMail.id, {

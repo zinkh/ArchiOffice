@@ -2,7 +2,7 @@
 // below) — same lazy-loading convention as meetingExport.ts.
 import type { DocumentTemplateVariable } from '../types';
 import type { AgencySettings as BaseAgencySettings } from './proposalExport';
-import { drawAgencyFooters, drawPartnerLogos } from './pdfLetterhead';
+import { drawAgencyFooters, drawPartnerLogos, logosDuBandeau, reglagesEntete } from './pdfLetterhead';
 import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 
 export type AgencySettings = BaseAgencySettings;
@@ -74,14 +74,15 @@ export async function exportTemplatePdf(
     pdf.setTextColor(r, g, b);
   };
 
-  // Header banner (agency letterhead)
+  // Header banner (agency letterhead, ou cotraitant mandataire)
+  const cab = reglagesEntete(settings);
   applyFont('bold', 12);
-  pdf.text(settings.agencyName || 'Mon Agence', margin, y + 5);
+  pdf.text(cab.agencyName || 'Mon Agence', margin, y + 5);
   applyFont('normal', 8, '#6b7280');
   let infoY = y + 10;
-  if (settings.address) { pdf.text(settings.address, margin, infoY); infoY += 4; }
-  if (settings.phone) { pdf.text(`Tél : ${settings.phone}`, margin, infoY); infoY += 4; }
-  if (settings.email) { pdf.text(settings.email, margin, infoY); infoY += 4; }
+  if (cab.address) { pdf.text(cab.address, margin, infoY); infoY += 4; }
+  if (cab.phone) { pdf.text(`Tél : ${cab.phone}`, margin, infoY); infoY += 4; }
+  if (cab.email) { pdf.text(cab.email, margin, infoY); infoY += 4; }
   y = infoY + 2;
 
   pdf.setDrawColor(209, 213, 219);
@@ -89,7 +90,7 @@ export async function exportTemplatePdf(
   pdf.line(margin, y, pageW - margin, y);
   y += 9;
   // Logos du groupement, sous le filet.
-  const bandeauBas = drawPartnerLogos(pdf, undefined, margin, y - 6);
+  const bandeauBas = drawPartnerLogos(pdf, logosDuBandeau(), margin, y - 6);
   if (bandeauBas !== null) y = bandeauBas + 6;
 
   applyFont('bold', 15);
@@ -149,11 +150,12 @@ export async function exportTemplateDocx(
 ): Promise<Blob> {
   const { Document, Packer, Paragraph, TextRun, BorderStyle } = await import('docx');
 
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
   const agencyParagraphs: InstanceType<typeof Paragraph>[] = [
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || 'Agence', bold: true, size: 24 })] }),
-    ...(settings.address ? [new Paragraph({ children: [new TextRun({ text: settings.address, size: 18, color: '6B7280' })] })] : []),
-    ...(settings.phone ? [new Paragraph({ children: [new TextRun({ text: `Tél : ${settings.phone}`, size: 18, color: '6B7280' })] })] : []),
-    ...(settings.email ? [new Paragraph({ children: [new TextRun({ text: settings.email, size: 18, color: '6B7280' })] })] : []),
+    new Paragraph({ children: [new TextRun({ text: cab.agencyName || 'Agence', bold: true, size: 24 })] }),
+    ...(cab.address ? [new Paragraph({ children: [new TextRun({ text: cab.address, size: 18, color: '6B7280' })] })] : []),
+    ...(cab.phone ? [new Paragraph({ children: [new TextRun({ text: `Tél : ${cab.phone}`, size: 18, color: '6B7280' })] })] : []),
+    ...(cab.email ? [new Paragraph({ children: [new TextRun({ text: cab.email, size: 18, color: '6B7280' })] })] : []),
   ];
 
   const bodyParagraphs = parseLines(filledContent).map(line => {
@@ -167,7 +169,7 @@ export async function exportTemplateDocx(
   const doc = new Document({
     styles: STYLES_WORD_ARIAL,
     sections: [{
-      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: title }),
+      ...await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: title }),
       children: [
         ...agencyParagraphs,
         new Paragraph({
