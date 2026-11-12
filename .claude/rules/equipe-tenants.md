@@ -178,11 +178,29 @@ fonction SQL dont les paramètres viennent de lectures limitées au cabinet) et
 `accordCadreConsultations.ts` (tous les liens sont dérivés du marché de l'URL et de son groupe,
 limités au cabinet) sont conformes : aucun identifiant du corps n'atteint la base sans contrôle.
 
-Pas encore fait : les tables d'infrastructure et de messagerie
-(`agents`, `conversations`, `email_connections`, `calendar_*`, `external_storage_connections`,
-`support_tickets`, `webhooks`, `rag_documents`, `feed_posts`, `inspiration_*`,
-`custom_references`, `articles_type`, `document_templates`, `tender_rss_sources`), et les clés
-vers `profiles`, dont le `tenant_id` n'est que le cabinet par défaut d'une personne.
+**Quatrième lot : infrastructure et messagerie** (`supabase/migrate_zz_tenant_composite_fks_4.sql`,
+21 parents : `agents`, `conversations`, `custom_references`, `email_connections`,
+`agent_conversations`, `agent_missions`, `agent_recurring_tasks`, `agent_schedules`,
+`articles_type`, `calendar_calendars`, `calendar_connections`, `consultation_depot_invites`,
+`document_templates`, `external_storage_connections`, `feed_posts`, `inspiration_boards`,
+`inspiration_items`, `rag_documents`, `support_tickets`, `tender_rss_sources`, `webhooks`). Mesuré en
+production : 36 clés, 0 ligne croisée, la plus grosse table enfant a 28 lignes. Vérifié dans le code
+qu'aucun flux légitime ne croise deux cabinets sur ces liens (réponse de la plateforme à un ticket :
+cabinet du ticket ; duplication d'un modèle : source lue par `tenantScopedFrom` ; segments RAG : cabinet de
+leur document ; connexions de messagerie lues par cabinet). **Un nouveau parent s'ajoute seulement
+après cette vérification** : une clé composite refuserait un flux qui croise volontairement deux
+cabinets (une ressource partagée ou de la plateforme), même si les données d'aujourd'hui sont propres.
+Différence avec les lots précédents, à ne pas défaire : **un `RESTRICT` ENTRE DEUX TABLES**
+(`agent_missions.coordinator_agent_id` vers `agents`) devient `NO ACTION` différable, car un `RESTRICT`
+n'est pas différable et ferait échouer la mise à niveau local vers cloud quel que soit l'ordre des
+réécritures de `tenant_id` ; la suppression d'un coordinateur encore référencé reste refusée sur-le-champ.
+Un lien AUTO-RÉFÉRENT reste un vrai `RESTRICT` (parent et enfant sont réécrits dans la même instruction).
+
+Pas encore fait : `project_members` (son `tenant_id` est du TEXTE alors que celui de `projects` est un
+UUID : il faudrait d'abord changer ce type, avec ses politiques RLS et ses index, pour un gain faible
+puisque la route contrôle déjà le projet) et les clés vers `profiles`, dont le `tenant_id` n'est que le
+cabinet par défaut d'une personne. Hors de ces deux cas, toutes les clés entre tables à `tenant_id`
+sont couvertes.
 
 ### Plusieurs cabinets pour une même personne
 
