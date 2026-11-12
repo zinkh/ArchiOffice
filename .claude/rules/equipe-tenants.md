@@ -150,13 +150,22 @@ local n'applique chaque fichier qu'une fois et la production a déjà reçu le p
 production avant de l'écrire : 40 parents restants, 84 clés simples, 0 ligne croisée ; ce lot en
 pose 46. À ne pas défaire :
 
-- **`site_reports` est EXCLU** tant qu'`observations.ts` le joint par indice de colonne
-  (`site_reports!created_report_id(...)`) : PostgREST n'accepte un indice de colonne que pour une
-  clé à UNE seule colonne, la jointure échouerait (PGRST200) sur une clé composite. Une jointure
-  SANS indice (`projects(name)`) reste valable.
+- **Pas de jointure PostgREST à indice de colonne vers un parent converti** (le nom de la colonne
+  après un point d'exclamation) : PostgREST n'accepte un indice de colonne que pour une clé à UNE
+  seule colonne, la jointure échouerait (PGRST200) sur une clé composite. Une jointure SANS indice
+  (`projects(name)`) reste valable, et c'est ce que fait le code partout.
   `tests/compositeFkEmbedHints.test.ts` lit les `v_parents` des migrations et interdit tout indice
   de colonne vers un parent converti : **ajouter un parent à une migration sans réécrire ses
-  jointures à indice fait échouer ce test**, avant la production.
+  jointures à indice fait échouer ce test**, avant la production. Pour lire un champ d'une table liée
+  par PLUSIEURS clés vers la même table (deux liens vers `site_reports`), faire UNE lecture groupée
+  limitée au cabinet plutôt qu'une jointure : voir `withReportNumbers` (`server/routes/observations.ts`).
+- **Troisième lot : `site_reports`** (`supabase/migrate_zz_tenant_composite_fks_3.sql`, 3 clés :
+  `observations.created_report_id` et `resolved_report_id` en SET NULL, `site_report_notes.report_id`
+  en CASCADE). `observations.ts` le joignait par indice de colonne ; ces jointures sont réécrites en une
+  lecture groupée et la forme de la réponse (`created_report`, `resolved_report`, `created_report_number`,
+  `resolved_report_number`) est inchangée (`tests/observationReportNumbers.test.ts`). **À appliquer en
+  production APRÈS le déploiement de ce code** : appliquée avant, les listes d'observations échoueraient
+  tant que l'ancien serveur tourne.
 - **`marches_entreprises` a deux liens auto-référents en `RESTRICT`** (`parent_marche_id`,
   `accord_cadre_groupe_id`) : leur clé composite n'est PAS différable et reste refusée même après
   `SET CONSTRAINTS ALL DEFERRED`. La mise à niveau local vers cloud les traverse, car son `UPDATE`
@@ -169,7 +178,7 @@ fonction SQL dont les paramètres viennent de lectures limitées au cabinet) et
 `accordCadreConsultations.ts` (tous les liens sont dérivés du marché de l'URL et de son groupe,
 limités au cabinet) sont conformes : aucun identifiant du corps n'atteint la base sans contrôle.
 
-Pas encore fait : `site_reports` (voir plus haut), les tables d'infrastructure et de messagerie
+Pas encore fait : les tables d'infrastructure et de messagerie
 (`agents`, `conversations`, `email_connections`, `calendar_*`, `external_storage_connections`,
 `support_tickets`, `webhooks`, `rag_documents`, `feed_posts`, `inspiration_*`,
 `custom_references`, `articles_type`, `document_templates`, `tender_rss_sources`), et les clés
