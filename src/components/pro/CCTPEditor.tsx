@@ -224,28 +224,14 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   };
 
   // ── Bibliothèque d'ouvrages ───────────────────────────────────────────────
-  // La description technique de l'article de bibliothèque devient le texte du
-  // CCTP : c'est précisément ce qu'on vient y chercher. La désignation, l'unité
-  // et le prix suivent, pour que le même article serve aussi au DPGF sans
-  // ressaisie, et `articleTypeId` garde le lien vers la bibliothèque.
+  // Insérer un article de la bibliothèque CRÉE un nouvel article du CCTP, du
+  // même titre, à l'endroit visé : juste après l'article sélectionné (comme
+  // frère), ou à la fin du chapitre sélectionné. La description technique
+  // devient le texte du CCTP ; l'unité et le prix suivent pour que le même
+  // article serve aussi au DPGF, et `articleTypeId` garde le lien. Une clause
+  // générale devient elle aussi un article (titre + texte), réservé au CCTP
+  // puisqu'elle n'a ni unité ni prix.
   const insererDepuisBibliotheque = (articles: ArticleBibliotheque[]): boolean | void => {
-    // Une clause générale n'est pas un article : son texte s'ajoute à la
-    // description de l'élément sélectionné (lot, chapitre ou article).
-    const clauses = articles.filter(estClause);
-    articles = articles.filter(a => !estClause(a));
-    if (clauses.length) {
-      if (!selection || !selData) return false;
-      let texte = selData.description;
-      let nb = 0;
-      for (const c of clauses) {
-        const r = ajouterClause(texte, c.description ?? '');
-        texte = r.texte;
-        if (r.ajoute) nb++;
-      }
-      if (nb) updateDescription(texte);
-      notify?.(nb ? t('pro_cctp_clause_added', { count: nb, cible: selData.name }) : t('pro_cctp_clause_present', { cible: selData.name }),
-        { type: nb ? 'success' : 'error' });
-    }
     if (!articles.length) return;
     if (!chapitreVise) {
       notify?.(t('pro_cctp_library_need_chapter'), { type: 'error' });
@@ -253,24 +239,41 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     }
     const { lotIdx, chapIdx } = chapitreVise;
     const chap = dpgf.lots[lotIdx].chapitres[chapIdx];
-    const base = chap.lignes.length;
-    const nouvelles: Ligne[] = articles.map((a, i) => ({
-      id: uid(),
-      numero: a.code || `${chap.numero}.${base + i + 1}`,
-      designation: a.designation,
-      unite: a.unite || '',
-      quantite: 0,
-      prixUnitaire: Number(a.prix_unitaire) || 0,
-      prixTotal: 0,
-      type: 'ouvrage',
-      cctpOnly: false,
-      cctpDescription: a.description ?? '',
-      children: [],
-      articleTypeId: a.id,
-    }));
-    mutateDPGF(d => { d.lots[lotIdx].chapitres[chapIdx].lignes.push(...nouvelles); });
+    const apres = selection?.kind === 'ligne' ? selection.lignePath : null;
+    const nouvelles: Ligne[] = articles.map((a, i) => {
+      const clause = estClause(a);
+      return {
+        id: uid(),
+        numero: a.code || `${chap.numero}.${chap.lignes.length + i + 1}`,
+        designation: a.designation,
+        unite: clause ? '' : (a.unite || ''),
+        quantite: 0,
+        prixUnitaire: clause ? 0 : Number(a.prix_unitaire) || 0,
+        prixTotal: 0,
+        type: 'ouvrage',
+        cctpOnly: clause,
+        cctpDescription: a.description ?? '',
+        children: [],
+        ...(clause ? {} : { articleTypeId: a.id }),
+      };
+    });
+    mutateDPGF(d => {
+      const cible = d.lots[lotIdx].chapitres[chapIdx];
+      if (!apres) {
+        cible.lignes.push(...nouvelles);
+        return;
+      }
+      // Frères de l'article sélectionné : on insère juste après lui, puis le
+      // chapitre est renuméroté comme après un déplacement.
+      const parentPath = apres.slice(0, -1);
+      let index = apres[apres.length - 1] + 1;
+      let lignes = cible.lignes;
+      for (const n of nouvelles) lignes = insertLigneAtPath(lignes, parentPath, index++, n);
+      cible.lignes = renumeroterLignes(lignes, String(cible.numero || chapIdx + 1));
+    });
     setExpandedChaps(prev => new Set([...prev, chap.id]));
-    setSelection({ kind: 'ligne', lotIdx, chapIdx, lignePath: [base] });
+    const premier = apres ? [...apres.slice(0, -1), apres[apres.length - 1] + 1] : [chap.lignes.length];
+    setSelection({ kind: 'ligne', lotIdx, chapIdx, lignePath: premier });
   };
 
   // ── Génération par IA ─────────────────────────────────────────────────────
