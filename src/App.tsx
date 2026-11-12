@@ -29,6 +29,7 @@ import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
 import { Sidebar, SidebarNav, NAV_ITEMS } from './components/Sidebar';
 import { MobileShortcutBar } from './components/MobileShortcutBar';
+import BackgroundSendTray from './components/BackgroundSendTray';
 import { MobileNavDrawer } from './components/MobileNavDrawer';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
@@ -655,6 +656,9 @@ function ProtectedLayout() {
       {/* Menu de raccourcis mobile — masqué sur les routes plein écran
           (fiche projet, chat d'agent) qui gèrent déjà tout leur espace. */}
       {!isFullBleedRoute && <MobileShortcutBar />}
+
+      {/* Progression des messages envoyés en arrière-plan (fenêtre de message refermée). */}
+      <BackgroundSendTray />
     </div>
     </AgentChatProvider>
   );

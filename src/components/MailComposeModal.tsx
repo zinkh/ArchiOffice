@@ -14,11 +14,12 @@
 // choisissent dans les contacts du cabinet.
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconX, IconPaperclip, IconLoader2, IconSend, IconBrandGoogle, IconBrandWindows, IconMailbox } from '@tabler/icons-react';
+import { IconX, IconPaperclip, IconSend, IconBrandGoogle, IconBrandWindows, IconMailbox } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { applyTenantHeader } from '../lib/activeTenant';
-import { fileToEmailAttachment, MAX_EMAIL_TOTAL_BYTES } from '../lib/emailAttachments';
+import { fileToEmailAttachment, MAX_EMAIL_TOTAL_BYTES, type EmailAttachment } from '../lib/emailAttachments';
+import { startBackgroundSend, type SendProgress } from '../lib/backgroundSend';
 import type { MailAccount, MailProvider } from '../hooks/useMailAccounts';
 import { useUser } from '../UserContext';
 
@@ -187,8 +188,6 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
   const [files, setFiles] = useState<File[]>(() => initialFiles ?? []);
   const [forwardIds, setForwardIds] = useState<Set<string>>(new Set());
   const [contacts, setContacts] = useState<ContactOption[]>([]);
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch<any[]>('/api/contacts')
@@ -224,20 +223,42 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
     return next;
   });
 
-  const send = async (e: React.FormEvent) => {
+  // L'envoi part en arrière-plan : la fenêtre se referme aussitôt et la progression
+  // s'affiche dans BackgroundSendTray, pendant que la personne continue de travailler.
+  // Le traitement ne lit que des valeurs capturées ici, jamais l'état du composant
+  // (qui n'existe plus une fois la fenêtre fermée).
+  const send = (e: React.FormEvent) => {
     e.preventDefault();
     if (!to.trim() || !subject.trim() || overLimit) return;
-    setSending(true);
-    setError(null);
-    try {
+    const aTelecharger = (forwardAttachments || []).filter(a => forwardIds.has(a.id));
+    const joint = [...files];
+    // Seuls les chemins qui passent par /api/send-email encodent les pièces jointes en base64.
+    const encode = !account || (account.provider !== 'google' && account.provider !== 'microsoft');
+    const etapes = aTelecharger.length + (encode ? aTelecharger.length + joint.length : 0) + 1;
+
+    const run = async (progress: SendProgress) => {
+      let fait = 0;
       // Pièces jointes d'origine cochées : récupérées d'abord, l'envoi est refusé si l'une manque
       // (un transfert partirait sinon sans la pièce annoncée).
       const forwarded: File[] = [];
-      for (const att of (forwardAttachments || []).filter(a => forwardIds.has(a.id))) {
+      for (const att of aTelecharger) {
+        progress(t('mail_bg_step_fetch', { done: forwarded.length + 1, total: aTelecharger.length }) as string, fait, etapes);
         try { forwarded.push(await downloadAttachment(att)); }
         catch { throw new Error(t('mail_forward_attachment_error', { name: att.filename }) as string); }
+        fait += 1;
       }
-      const allFiles = [...forwarded, ...files];
+      const allFiles = [...forwarded, ...joint];
+      const encoder = async (): Promise<EmailAttachment[] | undefined> => {
+        if (allFiles.length === 0) return undefined;
+        const out: EmailAttachment[] = [];
+        for (const f of allFiles) {
+          progress(t('mail_bg_step_prepare', { done: out.length + 1, total: allFiles.length }) as string, fait, etapes);
+          out.push(await fileToEmailAttachment(f));
+          fait += 1;
+        }
+        return out;
+      };
+      const envoi = () => progress(t('mail_bg_step_send') as string, etapes - 1, etapes);
 
       if (!account) {
         // Aucun compte ne peut envoyer nativement (IMAP sans SMTP propre,
@@ -246,7 +267,8 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
         // comme avant le support multi-comptes. Les pièces jointes voyagent
         // en base64 dans le même appel (nodemailer les relaie telles
         // quelles) — jusqu'ici silencieusement perdues sur ce chemin.
-        const attachments = allFiles.length > 0 ? await Promise.all(allFiles.map(fileToEmailAttachment)) : undefined;
+        const attachments = await encoder();
+        envoi();
         await apiFetch('/api/send-email', {
           method: 'POST',
           body: JSON.stringify({ to, cc: cc.trim() || undefined, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, attachments }),
@@ -264,12 +286,14 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
           fd.set('references', replyTo.messageIdHeader);
         }
         allFiles.forEach(f => fd.append('attachments', f));
+        envoi();
         await postForm('/api/gmail/send', fd);
       } else if (nativeOutlookReply) {
         const fd = new FormData();
         fd.set('comment', body);
         fd.set('accountId', account.id);
         allFiles.forEach(f => fd.append('attachments', f));
+        envoi();
         await postForm(`/api/outlook/messages/${encodeURIComponent(replyTo!.messageId)}/reply`, fd);
       } else if (account.provider === 'microsoft') {
         const fd = new FormData();
@@ -279,23 +303,28 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
         fd.set('text', body);
         fd.set('accountId', account.id);
         allFiles.forEach(f => fd.append('attachments', f));
+        envoi();
         await postForm('/api/outlook/send', fd);
       } else {
         // Compte IMAP avec son propre SMTP configuré (Réglages → Mes boîtes
         // mail) : /api/send-email sait aiguiller vers ce compte précis.
-        const attachments = allFiles.length > 0 ? await Promise.all(allFiles.map(fileToEmailAttachment)) : undefined;
+        const attachments = await encoder();
+        envoi();
         await apiFetch('/api/send-email', {
           method: 'POST',
           body: JSON.stringify({ to, cc: cc.trim() || undefined, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, accountId: account.id, attachments }),
         });
       }
-      onSent?.();
-      onClose();
-    } catch (err: any) {
-      setError(err?.code === 'INSUFFICIENT_SCOPE' ? t('mail_reconnect_banner') as string : err?.message || t('mail_action_error') as string);
-    } finally {
-      setSending(false);
-    }
+    };
+
+    startBackgroundSend({
+      label: subject.trim(),
+      step: t('mail_bg_step_prepare_start') as string,
+      run,
+      onSent,
+      describeError: (err: any) => (err?.code === 'INSUFFICIENT_SCOPE' ? t('mail_reconnect_banner') as string : err?.message || t('mail_action_error') as string),
+    });
+    onClose();
   };
 
   return (
@@ -408,21 +437,16 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
             {overLimit && ` ${t('mailbox_compose_size_over')}`}
           </p>
 
-          {error && (
-            <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-700 px-3 py-2 text-xs text-red-700 dark:text-red-400">
-              {error}
-            </div>
-          )}
         </div>
 
         <div className="p-4 flex justify-end" style={{ borderTop: '1px solid var(--tblr-border)' }}>
           <button
             type="submit"
-            disabled={sending || overLimit}
+            disabled={overLimit}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-60"
             style={{ background: 'var(--tblr-primary)', color: 'white' }}
           >
-            {sending ? <IconLoader2 size={14} className="animate-spin" /> : <IconSend size={14} />} {t('mailbox_compose_send')}
+            <IconSend size={14} /> {t('mailbox_compose_send')}
           </button>
         </div>
       </form>
