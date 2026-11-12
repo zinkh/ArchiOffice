@@ -290,10 +290,19 @@ export function hitElement(e: CroquisElement, x: number, y: number, zoom: number
   return false;
 }
 
+/** Mesure réelle d'un texte (fournie par le rendu) ; sans elle, la largeur est estimée. */
+export type TextMeasure = (e: CroquisElement) => number | undefined;
+
 /** Élément le plus haut (dessiné en dernier) sous le point, ou `null`. */
-export function topElementAt(elements: readonly CroquisElement[], x: number, y: number, zoom: number): CroquisElement | null {
+export function topElementAt(
+  elements: readonly CroquisElement[],
+  x: number,
+  y: number,
+  zoom: number,
+  measure?: TextMeasure,
+): CroquisElement | null {
   for (let i = elements.length - 1; i >= 0; i--) {
-    if (hitElement(elements[i], x, y, zoom)) return elements[i];
+    if (hitElement(elements[i], x, y, zoom, measure?.(elements[i]))) return elements[i];
   }
   return null;
 }
@@ -304,8 +313,9 @@ export function eraseAtPoint(
   x: number,
   y: number,
   zoom: number,
+  measure?: TextMeasure,
 ): { elements: CroquisElement[]; removed: number } {
-  const kept = elements.filter((e) => !hitElement(e, x, y, zoom));
+  const kept = elements.filter((e) => !hitElement(e, x, y, zoom, measure?.(e)));
   return { elements: kept.length === elements.length ? (elements as CroquisElement[]) : kept, removed: elements.length - kept.length };
 }
 

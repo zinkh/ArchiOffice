@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
+    "@fontsource/caveat": "^5.3.0",
     "@fontsource/source-sans-3": "^5.3.1",
     "@google/genai": "^2.28.0",
     "@marsidev/react-turnstile": "^1.6.3",
@@ -101,6 +102,7 @@
     "react-router-dom": "^7.18.4",
     "react-select": "^5.10.2",
     "recharts": "^3.10.1",
+    "roughjs": "4.6.6",
     "rss-parser": "^3.13.0",
     "sanitize-html": "^2.18.1",
     "styled-components": "^6.6.0",

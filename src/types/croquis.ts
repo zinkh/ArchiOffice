@@ -70,3 +70,10 @@ export interface CroquisHandle {
   x: number;
   y: number;
 }
+
+/** Fond posé sous le dessin : un plan ou une photo, déjà réduit (voir src/lib/croquis/background.ts). */
+export interface CroquisBackground {
+  image: CanvasImageSource;
+  width: number;
+  height: number;
+}
