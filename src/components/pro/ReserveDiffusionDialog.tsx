@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IconDownload, IconSend, IconBellRinging, IconChevronDown, IconChevronRight, IconAlertTriangle } from '@tabler/icons-react';
 import { ModalShell } from '../ui/ModalShell';
 import { apiFetch, baseFetchJson } from '../../lib/api';
+import { estAnnulation, verifierAnnulation } from '../../lib/annulation';
 import { getAccessToken } from '../../lib/authToken';
 import { applyTenantHeader } from '../../lib/activeTenant';
 import type { Plan } from '../../types';
@@ -66,6 +67,8 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
   const [open, setOpen] = useState<string | null>(null);
   const [reminder, setReminder] = useState<ReminderSetting | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Annulation de l'export PDF en cours (jamais de l'envoi par e-mail).
+  const annulation = useRef<AbortController | null>(null);
   // Contenu du PDF (téléchargement et diffusion) : tout par défaut, comme avant.
   const [content, setContent] = useState<ReservesExportContent>({ ...DEFAULT_RESERVES_CONTENT });
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
@@ -149,6 +152,9 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
   const telecharger = async () => {
     setMessage(null);
     setBusy('Préparation…');
+    const controleur = new AbortController();
+    annulation.current = controleur;
+    const signal = controleur.signal;
     try {
       const { exportReservesToPDF } = await import('../../lib/reservesExport');
       let fichiers = 1;
@@ -161,15 +167,16 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
           const etape = `Lot ${i + 1} / ${groupesParLot.length} : ${g.label}`;
           setBusy(`${etape}…`);
           const blob = await exportReservesToPDF(g.rows, plans, project, settings, {
-            ...exportOptions({ output: 'blob', allowedLots: [g.key], scopeLabel: `Lot : ${g.label}` }),
+            ...exportOptions({ output: 'blob', allowedLots: [g.key], scopeLabel: `Lot : ${g.label}`, signal }),
             onProgress: (m: string) => setBusy(`${etape} · ${m}`),
           } as any);
           pdfs.push({ nom: reservesPdfFilename(title, project, g.label), blob });
         }
+        verifierAnnulation(signal);
         await livrer(pdfs, reservesPdfFilename(title, project, 'par lot').replace(/\.pdf$/i, '.zip'));
         fichiers = pdfs.length;
       } else {
-        await exportReservesToPDF(scopeReserves, plans, project, settings, { ...exportOptions(), onProgress: setBusy });
+        await exportReservesToPDF(scopeReserves, plans, project, settings, { ...exportOptions({ signal }), onProgress: setBusy });
       }
       await apiFetch(`/api/projects/${projectId}/reserve-exports`, {
         method: 'POST', body: JSON.stringify({ kind, channel: 'telechargement', lots: lotsArg, include_levees: inclureLevees }),
@@ -181,9 +188,11 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
           : `PDF de ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''} téléchargé.`,
       });
     } catch (err: any) {
+      if (estAnnulation(err)) { setMessage({ text: "Export annulé : aucun fichier n'a été produit." }); return; }
       console.error('[ReserveDiffusionDialog] export', err);
       setMessage({ text: "L'export a échoué.", error: true });
     } finally {
+      annulation.current = null;
       setBusy(null);
     }
   };
@@ -292,7 +301,14 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
             {message.text}
           </div>
         )}
-        {busy && <div role="status" className="text-sm text-[var(--tblr-muted)]">{busy}</div>}
+        {busy && (
+          <div role="status" className="flex flex-wrap items-center gap-3 text-sm text-[var(--tblr-muted)]">
+            <span>{busy}</span>
+            {annulation.current && (
+              <button type="button" onClick={() => annulation.current?.abort()} className={cn(BOUTON, 'border border-[var(--tblr-border)] text-[var(--tblr-text)]')}>Annuler l'export</button>
+            )}
+          </div>
+        )}
 
         {/* 1. Périmètre */}
         <section className="space-y-2">
