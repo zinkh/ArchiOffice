@@ -43,6 +43,7 @@ import { registerMailAiRoutes } from "./server/routes/mailAi";
 import { registerProjectStakeholdersRoutes } from "./server/routes/projectStakeholders";
 import { registerGlobalSearchRoutes } from "./server/routes/globalSearch";
 import { registerObservationRoutes } from "./server/routes/observations";
+import { registerCroquisRoutes } from "./server/routes/croquis";
 import { registerMeetingRoutes } from "./server/routes/meetings";
 import { registerMeetingAttendeeRoutes } from "./server/routes/meetingAttendees";
 import { registerDocumentTemplateRoutes } from "./server/routes/documentTemplates";
@@ -1169,6 +1170,8 @@ export async function createApp() {
   registerProjectStakeholdersRoutes(app, { supabaseAdmin, getTenantId });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
   registerObservationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage });
+  // Avant les routes de réunions et d'affaires : elle y accroche le ménage des fichiers de croquis à la suppression.
+  registerCroquisRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
