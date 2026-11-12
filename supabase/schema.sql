@@ -645,6 +645,31 @@ CREATE TABLE IF NOT EXISTS site_report_notes (
   description TEXT, statut TEXT,
   photos TEXT[] NOT NULL DEFAULT '{}'
 );
+
+-- Croquis de réunion et de compte-rendu (supabase/migrate_croquis.sql).
+-- `meeting_id` : la clé vers `meetings` n'est PAS posée ici. Cette table n'est créée que par
+-- migrate_add_meetings.sql, rejouée après ce fichier sur un poste local neuf ; migrate_croquis.sql
+-- ajoute la clé `croquis_meeting_id_fkey` une fois `meetings` présente.
+CREATE TABLE IF NOT EXISTS croquis (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  meeting_id TEXT,
+  site_report_id TEXT REFERENCES site_reports(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT 'Croquis',
+  scene JSONB NOT NULL DEFAULT '{"version":1,"elements":[]}'::jsonb,
+  bg_path TEXT,
+  bg_opacity REAL NOT NULL DEFAULT 0.35 CHECK (bg_opacity >= 0.05 AND bg_opacity <= 1),
+  bg_width INTEGER, bg_height INTEGER,
+  preview_path TEXT,
+  created_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT croquis_one_parent CHECK (meeting_id IS NULL OR site_report_id IS NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_croquis_tenant_meeting ON croquis(tenant_id, meeting_id) WHERE meeting_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_croquis_tenant_site_report ON croquis(tenant_id, site_report_id) WHERE site_report_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_croquis_tenant_project ON croquis(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_site_report_notes_tenant_report ON site_report_notes(tenant_id, report_id);
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -1071,6 +1096,7 @@ ALTER TABLE phone_calls          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ordres_de_service    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_reports         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_report_notes    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE croquis              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documents            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_versions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE visas                ENABLE ROW LEVEL SECURITY;
@@ -1181,6 +1207,8 @@ CREATE POLICY "tenant_isolation" ON phone_calls
 CREATE POLICY "tenant_isolation" ON ordres_de_service
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON site_reports
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON croquis
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON site_report_notes
   USING (tenant_id = my_tenant_id());

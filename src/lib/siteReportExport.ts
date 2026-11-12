@@ -20,6 +20,8 @@ import {
 } from './siteReportLotSuivi';
 import type { Contact, Observation, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote } from '../types';
 import { TCE_LABEL } from './observationLots';
+import type { CroquisExportItem } from './croquis/exportLayout';
+import { drawCroquisSection } from './croquis/pdfSection';
 
 export interface SiteReportExportProject {
   id: string;
@@ -54,6 +56,8 @@ export interface SiteReportExportOptions {
    * du compte-rendu, sous leur propre titre, sans photos (le PDF reste léger).
    */
   previousOpenByLot?: ObservationsByLot[];
+  /** Croquis du compte-rendu (voir src/lib/croquisExport.ts) : une section « Croquis » après les rubriques. */
+  croquis?: CroquisExportItem[];
 }
 
 export interface SiteReportPdf {
@@ -411,6 +415,32 @@ export async function exportSiteReportToPDF(
       if (opts.includeRubriquePhotos !== false) await drawThumbnails(sorted.flatMap(n => n.photos || []));
       y += 2;
     }
+  }
+
+  // ── Croquis du compte-rendu : une page neuve, un croquis par bloc, titre en bandeau gris ─────────
+  if (opts.croquis?.length) {
+    progress('Croquis…');
+    doc.addPage('a4', orientation);
+    y = drawAgencyHeader(doc, settings, letterhead);
+    y = drawCroquisSection(doc, opts.croquis, {
+      x: MARGIN,
+      y,
+      contentW: contentW(),
+      bottomLimit: doc.internal.pageSize.getHeight() - FOOTER_RESERVE,
+      topOfNewPage: y,
+      newPage: () => {
+        doc.addPage('a4', orientation);
+        return drawAgencyHeader(doc, settings, letterhead);
+      },
+      headingHeight: 12,
+      drawHeading: (top) => {
+        doc.setFillColor(...GRIS_FOND);
+        doc.rect(MARGIN, top - 1, contentW(), 7, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...GRIS_TEXTE);
+        doc.text(`CROQUIS (${opts.croquis!.length})`, MARGIN + 2, top + 4);
+        return top + 10;
+      },
+    });
   }
 
   // ── Une section par lot (historique daté + photos) ──────────────────────

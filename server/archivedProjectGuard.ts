@@ -22,6 +22,7 @@ export const TABLES_RATTACHEES: Record<string, string> = {
   meetings: 'meetings',
   permits: 'permits',
   plans: 'plans',
+  croquis: 'croquis',
   avenants_moe: 'avenants_moe',
   'time-entries': 'time_entries',
   time_entries: 'time_entries',

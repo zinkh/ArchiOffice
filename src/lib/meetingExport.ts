@@ -9,6 +9,8 @@ import type { AgencySettings as BaseAgencySettings } from './proposalExport';
 import { drawAgencyFooters, drawPartnerLogos, logosDuBandeau, reglagesEntete } from './pdfLetterhead';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
+import { fitInBox, type CroquisExportItem } from './croquis/exportLayout';
+import { drawCroquisSection } from './croquis/pdfSection';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -51,6 +53,8 @@ export async function exportMeetingToPDF(
   attendees: MeetingAttendee[],
   settings: AgencySettings,
   projectName: string,
+  /** Croquis de la réunion (voir src/lib/croquisExport.ts), imprimés après les notes. */
+  croquis: readonly CroquisExportItem[] = [],
 ): Promise<void> {
   const { default: jsPDF } = await import('jspdf');
   const pdf = new jsPDF('p', 'mm', 'a4');
@@ -181,6 +185,24 @@ export async function exportMeetingToPDF(
     y += 5;
   }
 
+  // ── Croquis ───────────────────────────────────────────────────────────────
+  if (croquis.length > 0) {
+    y = drawCroquisSection(pdf, croquis, {
+      x: margin,
+      y,
+      contentW,
+      bottomLimit: pageH - margin - 10,
+      topOfNewPage: margin,
+      newPage: () => { newPage(); return y; },
+      headingHeight: 8,
+      drawHeading: (top) => {
+        applyFont('bold', 10);
+        pdf.text(`Croquis (${croquis.length})`, margin, top);
+        return top + 6;
+      },
+    });
+  }
+
   // ── Photos grid ───────────────────────────────────────────────────────────
   const photos = meeting.photos || [];
   if (photos.length > 0) {
@@ -260,6 +282,8 @@ export async function exportMeetingToDocx(
   attendees: MeetingAttendee[],
   settings: AgencySettings,
   projectName: string,
+  /** Croquis de la réunion (voir src/lib/croquisExport.ts), insérés après les notes. */
+  croquis: readonly CroquisExportItem[] = [],
 ): Promise<void> {
   const {
     Document, Packer, Paragraph, TextRun, ImageRun, Table, TableRow, TableCell,
@@ -434,6 +458,33 @@ export async function exportMeetingToDocx(
     }
   }
 
+  // ── Croquis : un titre, puis l'image dans la largeur utile (A4, marges de 2,5 cm ≈ 590 px) ─────────
+  const croquisChildren: Paragraph[] = [];
+  if (croquis.length > 0) {
+    croquisChildren.push(new Paragraph({
+      spacing: { before: 400, after: 200 },
+      children: [new TextRun({ text: `Croquis (${croquis.length})`, bold: true, size: 24 })],
+    }));
+    for (const item of croquis) {
+      const box = fitInBox(item.width, item.height, 590, 520);
+      if (box.w <= 0) continue;
+      croquisChildren.push(new Paragraph({
+        keepNext: true,
+        spacing: { before: 160, after: 60 },
+        children: [new TextRun({ text: item.title || 'Croquis', bold: true, size: 20, color: '111827' })],
+      }));
+      croquisChildren.push(new Paragraph({
+        spacing: { after: 240 },
+        border: Object.fromEntries((['top', 'bottom', 'left', 'right'] as const).map(side => [side, { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB', space: 2 }])),
+        children: [new ImageRun({
+          type: item.mime === 'image/png' ? 'png' : 'jpg',
+          data: item.bytes,
+          transformation: { width: Math.round(box.w), height: Math.round(box.h) },
+        })],
+      }));
+    }
+  }
+
   // ── Assemble document ─────────────────────────────────────────────────────
   const doc = new Document({
     styles: STYLES_WORD_ARIAL,
@@ -492,6 +543,9 @@ export async function exportMeetingToDocx(
           ),
           new Paragraph({ children: [], spacing: { after: 280 } }),
         ] : []),
+
+        // Croquis
+        ...croquisChildren,
 
         // Photos
         ...photoSectionChildren,

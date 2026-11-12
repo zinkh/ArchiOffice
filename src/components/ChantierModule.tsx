@@ -15,7 +15,7 @@ import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
   IconBuilding, IconTools, IconFileDiff, IconPhoto, IconClipboardList, IconAlertTriangle,
-  IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX, IconChartBar,
+  IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX, IconChartBar, IconPencil,
 } from '@tabler/icons-react';
 import PlanningChantierTab from './chantier/PlanningChantierTab';
 import { Project, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
@@ -35,6 +35,7 @@ import { cn } from '../lib/utils';
 import type { AgencySettings } from '../lib/proposalExport';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Section } from './chantier/Section';
+import CroquisPanel from './croquis/CroquisPanel';
 import { DraftInput, parseDays } from './chantier/fields';
 import { upsertById } from '../lib/observationsLocal';
 import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
@@ -471,6 +472,13 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     return undefined;
   };
 
+  /** Les croquis du compte-rendu, prêts à entrer dans le PDF (une lecture qui échoue n'empêche jamais l'export). */
+  const loadCroquisForExport = async () => {
+    if (!selectedReport) return [];
+    const { loadCroquisExportItems } = await import('../lib/croquisExport');
+    return loadCroquisExportItems({ kind: 'siteReport', id: selectedReport.id, projectId: project.id, pending: selectedReport.pendingSync });
+  };
+
   const sendDiffusion = async (contactIds: string[]) => {
     if (!selectedReport || contactIds.length === 0) return;
     if (!settings) { setDiffusionError('Réglages du cabinet non chargés, réessayez dans un instant.'); return; }
@@ -487,7 +495,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined, croquis: await loadCroquisForExport() },
       );
       if (blob.size > MAX_DIFFUSION_PDF_BYTES) {
         setDiffusionError(`Le PDF fait ${(blob.size / 1024 / 1024).toFixed(1)} Mo, la limite d'envoi est de 20 Mo : retirez un document joint ou décochez les photos des rubriques.`);
@@ -968,7 +976,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined, croquis: await loadCroquisForExport() },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -1693,6 +1701,14 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         <DecisionRow key={i} decision={d} onChange={patch => updateDecision(i, patch)} onRemove={() => removeDecision(i)} />
                       ))}
                     </div>
+                  </Section>
+
+                  {/* Croquis : schéma rapide, sur feuille blanche ou par-dessus un plan ou une photo */}
+                  <Section id="croquis" title="Croquis" icon={IconPencil}>
+                    <CroquisPanel
+                      parent={{ kind: 'siteReport', id: selectedReport.id, projectId: project.id, pending: selectedReport.pendingSync }}
+                      readOnly={Boolean(project.archived_at)}
+                    />
                   </Section>
 
                   {/* Reportage photo */}

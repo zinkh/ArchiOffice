@@ -145,6 +145,7 @@ The schema lives in `supabase/schema.sql`. Key tables:
 | `documents` | Versioned document repository |
 | `site_reports` | Construction site inspection reports |
 | `meetings` | Meeting minutes (réunions de chantier) |
+| `croquis` | Croquis d'une réunion ou d'un compte-rendu (scène jsonb, fond, aperçu), voir `.claude/rules/chantier-det-rdt.md` |
 | `contacts` | CRM contacts |
 | `tasks` | Milestone & Gantt tasks |
 | `billing_events` | Payment tracking (Stancer/Stripe) |

@@ -6,6 +6,8 @@ export const ENTITY_LABELS: Record<PendingWrite['entity'], string> = {
   meetingPhoto: 'Photo de réunion',
   meetingAttendee: 'Intervenant de réunion',
   phoneCall: 'Appel téléphonique',
+  croquis: 'Croquis',
+  croquisFile: 'Image de croquis',
   reserve: 'Réserve',
   reservePhoto: 'Photo de réserve',
   gpaReserve: 'Réserve GPA',

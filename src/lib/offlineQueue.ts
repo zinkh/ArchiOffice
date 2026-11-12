@@ -249,6 +249,24 @@ export async function discardPendingWrite(id: string, entity: PendingWrite['enti
 }
 
 /**
+ * Met une écriture JSON en file SANS tenter l'envoi dans l'appel, puis lance le rejeu en arrière-plan.
+ * Sert quand l'écriture ne doit pas devancer une autre, encore en attente : l'enregistrement d'un
+ * croquis ne part jamais avant sa création. Le rejeu respecte l'ordre de mise en file.
+ */
+export async function enqueueJsonRequest(request: JsonWriteRequest): Promise<void> {
+  await enqueue({
+    id: request.id,
+    entity: request.entity,
+    method: request.method,
+    url: request.url,
+    kind: 'json',
+    jsonBody: request.body,
+  });
+  window.dispatchEvent(new CustomEvent(OFFLINE_QUEUE_CHANGED_EVENT, { detail: { id: request.id, entity: request.entity } }));
+  void replayNow();
+}
+
+/**
  * Met une photo en file SANS tenter l'envoi dans l'appel : l'écran n'attend jamais le réseau.
  * L'envoi part tout de suite en arrière-plan (`replayNow`), un fichier à la fois, avec reprise
  * automatique : la photo vit dans IndexedDB, donc elle survit à une fermeture de l'onglet et à

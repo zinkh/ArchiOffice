@@ -45,6 +45,13 @@ export function buildPlanFolderPath(project: FolderProject | null | undefined): 
   return [projectFolderName(project), 'Plans'];
 }
 
+/** Les croquis de réunion et de compte-rendu vont dans leur propre sous-dossier de l'affaire :
+ *  ce sont des dessins de travail (fond importé, aperçu PNG), pas des pièces contractuelles. */
+export function buildCroquisFolderPath(project: FolderProject | null | undefined): string[] {
+  if (!project) return [SANS_AFFAIRE, 'Croquis'];
+  return [projectFolderName(project), 'Croquis'];
+}
+
 /** Les références visuelles suivent la phase de conception, dans un
  *  sous-dossier Inspiration pour ne pas les mélanger aux pièces contractuelles. */
 export function buildInspirationFolderPath(
