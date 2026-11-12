@@ -4,6 +4,12 @@ Prototype autonome : [`croquis-reunion.html`](croquis-reunion.html) (un seul fic
 Rough.js 4.6.6 chargé depuis jsDelivr). Il sert de référence fonctionnelle et
 visuelle, pas de code à livrer tel quel.
 
+> **Statut : porté dans ArchiOffice.** Les sept points de « Portage attendu » ci-dessous sont
+> réalisés (éditeur, table `croquis`, routes, enregistrement automatique et hors ligne, exports
+> PDF et Word, fond tiré de l'affaire, tests). Le détail, les pièges et ce qui reste à vérifier
+> sont dans `.claude/rules/chantier-det-rdt.md`, section « Croquis de réunion et de
+> compte-rendu ». Ce fichier reste la consigne d'origine et la référence du prototype.
+
 ## Objectif
 
 Offrir dans les réunions et les comptes-rendus de chantier un espace simple pour
