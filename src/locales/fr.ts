@@ -4714,6 +4714,8 @@ export default {
       "mailbox_compose_subject": "Objet",
       "mailbox_compose_body": "Message",
       "mailbox_compose_attach": "Joindre",
+      "mailbox_compose_size_counter": "Pièces jointes : {{size}} sur {{max}} maximum par message.",
+      "mailbox_compose_size_over": "Taille dépassée : retirez des fichiers, ou envoyez ce message sans les pièces jointes et laissez le destinataire les récupérer par le lien de dépôt personnel qui figure dans le corps du message.",
       "mailbox_compose_send": "Envoyer",
       "mailbox_compose_new": "Nouveau message",
       "mailbox_reply": "Répondre",

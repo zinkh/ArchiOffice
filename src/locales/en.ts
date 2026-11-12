@@ -4564,6 +4564,8 @@ export default {
       "mailbox_compose_subject": "Subject",
       "mailbox_compose_body": "Message",
       "mailbox_compose_attach": "Attach",
+      "mailbox_compose_size_counter": "Attachments: {{size}} of {{max}} maximum per message.",
+      "mailbox_compose_size_over": "Size exceeded: remove files, or send this message without attachments and let the recipient use the personal upload link in the message body.",
       "mailbox_compose_send": "Send",
       "mailbox_compose_new": "New message",
       "mailbox_reply": "Reply",
