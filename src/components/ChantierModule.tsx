@@ -472,6 +472,13 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     return undefined;
   };
 
+  /** Les croquis du compte-rendu, prêts à entrer dans le PDF (une lecture qui échoue n'empêche jamais l'export). */
+  const loadCroquisForExport = async () => {
+    if (!selectedReport) return [];
+    const { loadCroquisExportItems } = await import('../lib/croquisExport');
+    return loadCroquisExportItems({ kind: 'siteReport', id: selectedReport.id, projectId: project.id, pending: selectedReport.pendingSync });
+  };
+
   const sendDiffusion = async (contactIds: string[]) => {
     if (!selectedReport || contactIds.length === 0) return;
     if (!settings) { setDiffusionError('Réglages du cabinet non chargés, réessayez dans un instant.'); return; }
@@ -488,7 +495,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined, croquis: await loadCroquisForExport() },
       );
       if (blob.size > MAX_DIFFUSION_PDF_BYTES) {
         setDiffusionError(`Le PDF fait ${(blob.size / 1024 / 1024).toFixed(1)} Mo, la limite d'envoi est de 20 Mo : retirez un document joint ou décochez les photos des rubriques.`);
@@ -969,7 +976,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined, croquis: await loadCroquisForExport() },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);

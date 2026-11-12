@@ -844,12 +844,19 @@ export default function Reunions() {
     return '';
   };
 
+  /** Les croquis de la réunion, prêts à entrer dans l'export (une lecture qui échoue n'empêche jamais l'export). */
+  const getCroquisForExport = async () => {
+    if (!selectedMeeting) return [];
+    const { loadCroquisExportItems } = await import('../lib/croquisExport');
+    return loadCroquisExportItems({ kind: 'meeting', id: selectedMeeting.id, projectId: selectedMeeting.project_id ?? null, pending: selectedMeeting.pendingSync });
+  };
+
   const handleExportPDF = async () => {
     if (!selectedMeeting) return;
     setExportingPdf(true);
     try {
       const attendees = await getAttendeesForExport();
-      await exportMeetingToPDF(selectedMeeting, attendees, agencySettings, getParentName());
+      await exportMeetingToPDF(selectedMeeting, attendees, agencySettings, getParentName(), await getCroquisForExport());
     } finally { setExportingPdf(false); }
   };
 
@@ -858,7 +865,7 @@ export default function Reunions() {
     setExportingDocx(true);
     try {
       const attendees = await getAttendeesForExport();
-      await exportMeetingToDocx(selectedMeeting, attendees, agencySettings, getParentName());
+      await exportMeetingToDocx(selectedMeeting, attendees, agencySettings, getParentName(), await getCroquisForExport());
     } finally { setExportingDocx(false); }
   };
 
