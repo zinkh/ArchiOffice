@@ -13,9 +13,13 @@ import type { Croquis } from '../types';
 import type { CroquisScene } from '../types/croquis';
 import { emptyScene, sanitizeScene, serializeScene } from './croquis/scene';
 
+/**
+ * La réunion ou le compte-rendu qui porte les croquis. `pending` : lui-même encore en file (créé hors ligne),
+ * donc inconnu du serveur : ses croquis ne partent pas tout de suite, ils attendent son envoi dans la file.
+ */
 export type CroquisParent =
-  | { kind: 'meeting'; id: string; projectId?: string | null }
-  | { kind: 'siteReport'; id: string; projectId?: string | null };
+  | { kind: 'meeting'; id: string; projectId?: string | null; pending?: boolean }
+  | { kind: 'siteReport'; id: string; projectId?: string | null; pending?: boolean };
 
 /** Ce que la superposition lit d'une entrée de file : un sous-ensemble de `PendingWrite`. */
 export type PendingLike = Pick<PendingWrite, 'id' | 'entity' | 'method' | 'kind'> & Partial<Pick<PendingWrite, 'jsonBody' | 'createdAt'>>;

@@ -38,7 +38,8 @@ export function useCroquisList(parent: CroquisParent | null): UseCroquisListResu
   const [croquis, setCroquis] = useState<Croquis[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  const parentKey = parent ? `${parent.kind}:${parent.id}` : '';
+  // `pending` fait partie de la clé : quand le parent est enfin envoyé, la liste se relit auprès du serveur.
+  const parentKey = parent ? `${parent.kind}:${parent.id}:${parent.pending ? 'pending' : 'sent'}` : '';
   const parentRef = useRef(parent);
   useEffect(() => { parentRef.current = parent; }, [parent]);
 
@@ -53,6 +54,12 @@ export function useCroquisList(parent: CroquisParent | null): UseCroquisListResu
     const pending = await readPendingCroquisWrites();
     const show = (rows: Croquis[]) => setCroquis(applyPendingCroquisWrites(rows, pending, current));
     const inScope = (row: Croquis) => (current.kind === 'meeting' ? row.meeting_id === current.id : row.site_report_id === current.id);
+    if (current.pending) {
+      // Parent pas encore envoyé : le serveur ne le connaît pas, inutile (et trompeur) de lui demander ses croquis.
+      try { show((await db.croquisCache.toArray()).filter(inScope)); } catch { show([]); }
+      setLoading(false);
+      return;
+    }
     try {
       const result = await cachedListFirst(db.croquisCache, inScope, croquisListUrl(current), show);
       if (!result.synced && !result.hadLocalData) {

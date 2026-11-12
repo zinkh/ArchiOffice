@@ -786,7 +786,7 @@ export default function CroquisEditor({
         >
           {zoomLabel}
         </button>
-        <span className={SEPARATOR} aria-hidden="true" />
+        <span className={`${SEPARATOR} max-[440px]:hidden`} aria-hidden="true" />
         {!readOnly && (
           <button type="button" className={ICON_BTN} aria-label={t('croquis_clear')} title={t('croquis_clear')} onClick={clearAll}>
             <IconTrash size={20} stroke={1.6} aria-hidden />

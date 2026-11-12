@@ -123,7 +123,11 @@ export async function createCroquis(parent: CroquisParent, input: { title: strin
     title: input.title,
     scene,
   };
-  const result = await queuedJsonRequest<Croquis>({ entity: 'croquis', id: croquisWriteId('create', id), method: 'POST', url: '/api/croquis', body });
+  const request: JsonRequest = { entity: 'croquis', id: croquisWriteId('create', id), method: 'POST', url: '/api/croquis', body };
+  // Un parent encore en file est inconnu du serveur (404) : la création attend son envoi, dans l'ordre de la file.
+  const result: { queued: boolean; data?: Croquis } = parent.pending
+    ? (await enqueueJsonRequest(request), { queued: true })
+    : await queuedJsonRequest<Croquis>(request);
   if (!result.queued && result.data) {
     cachePut(result.data);
     return { row: result.data, queued: false };

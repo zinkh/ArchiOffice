@@ -14,7 +14,7 @@ export const ICON_BTN =
 
 /** Bouton texte de la barre du haut (Fond, Style). */
 export const TEXT_BTN =
-  'h-11 rounded-lg px-3 text-sm font-medium text-neutral-900 hover:bg-neutral-200/70 ' +
+  'h-11 rounded-lg px-2 text-sm font-medium text-neutral-900 hover:bg-neutral-200/70 min-[441px]:px-3 ' +
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 ' +
   'aria-expanded:bg-neutral-900 aria-expanded:text-white';
 
