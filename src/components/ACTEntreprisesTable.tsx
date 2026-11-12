@@ -324,6 +324,7 @@ export default function ACTEntreprisesTable({
         fallbackName={e.nom}
         onSelect={c => onSelectContact(e.id, c)}
         onCreate={name => onCreateContact(e.id, name)}
+        onEditContact={c => window.open(`/contacts?open=${encodeURIComponent(c.id)}`, '_blank', 'noopener,noreferrer')}
       />
       <input
         className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
@@ -337,12 +338,6 @@ export default function ACTEntreprisesTable({
         placeholder="Autres adresses (séparées par une virgule)" value={e.emails_supplementaires || ''}
         onChange={ev => patch(e.id, { emails_supplementaires: ev.target.value })}
       />
-      {e.contact_id && (
-        <a href={`/contacts?open=${encodeURIComponent(e.contact_id)}`} target="_blank" rel="noopener noreferrer"
-          className="mt-1 inline-block px-1 text-[0.6875rem] underline text-[var(--tblr-muted)] hover:text-[var(--tblr-primary)]">
-          Modifier la fiche contact
-        </a>
-      )}
       {e.contact_id && (
         <div className="mt-1 px-1">
           <QualificationBadge

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { IconBuilding, IconPlus } from '@tabler/icons-react';
+import { IconBuilding, IconPencil, IconPlus } from '@tabler/icons-react';
 import type { Contact } from '../types';
 
 interface EntrepriseAutocompleteProps {
@@ -13,6 +13,8 @@ interface EntrepriseAutocompleteProps {
   onSelect: (contact: Contact) => void;
   /** Le texte tapé ne correspond à aucun contact existant : proposé pour en créer un directement dans les Contacts. */
   onCreate: (name: string) => void;
+  /** Icône crayon de chaque entreprise de la liste : ouvre sa fiche contact pour la modifier. */
+  onEditContact?: (contact: Contact) => void;
   placeholder?: string;
   className?: string;
   autoFocus?: boolean;
@@ -26,7 +28,7 @@ interface EntrepriseAutocompleteProps {
  * cas courant, pas l'exception.
  */
 export function EntrepriseAutocomplete({
-  contacts, contactId, fallbackName, onSelect, onCreate, placeholder, className, autoFocus,
+  contacts, contactId, fallbackName, onSelect, onCreate, onEditContact, placeholder, className, autoFocus,
 }: EntrepriseAutocompleteProps) {
   const selected = contacts.find(c => c.id === contactId);
   const [query, setQuery] = useState(selected?.company_name || fallbackName || '');
@@ -102,24 +104,37 @@ export function EntrepriseAutocomplete({
               Créer « {query.trim()} » dans les contacts
             </button>
           )}
-          {matches.map(c => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => { onSelect(c); setOpen(false); }}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-700 flex items-start gap-2 transition-colors"
-            >
-              <IconBuilding className="shrink-0 text-zinc-400 mt-0.5" size={14} />
-              <div className="truncate text-left">
-                <p className="font-medium text-zinc-900 dark:text-white truncate">
-                  {c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}
-                </p>
-                {!!(c.corps_etat && c.corps_etat.length) && (
-                  <p className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400 truncate">{c.corps_etat.join(', ')}</p>
+          {matches.map(c => {
+            const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+            return (
+              <div key={c.id} className="flex items-stretch hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => { onSelect(c); setOpen(false); }}
+                  className="flex-1 min-w-0 text-left px-3 py-2 text-sm flex items-start gap-2"
+                >
+                  <IconBuilding className="shrink-0 text-zinc-400 mt-0.5" size={14} />
+                  <div className="truncate text-left">
+                    <p className="font-medium text-zinc-900 dark:text-white truncate">{nom}</p>
+                    {!!(c.corps_etat && c.corps_etat.length) && (
+                      <p className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400 truncate">{c.corps_etat.join(', ')}</p>
+                    )}
+                  </div>
+                </button>
+                {onEditContact && (
+                  <button
+                    type="button"
+                    title="Modifier la fiche contact"
+                    aria-label={`Modifier la fiche contact de ${nom}`}
+                    onClick={() => onEditContact(c)}
+                    className="shrink-0 px-2.5 text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400"
+                  >
+                    <IconPencil size={14} />
+                  </button>
                 )}
               </div>
-            </button>
-          ))}
+            );
+          })}
           {matches.length === 0 && !q && (
             <div className="px-3 py-4 text-center text-zinc-500 text-xs italic">Aucune entreprise dans les contacts.</div>
           )}
