@@ -5,6 +5,7 @@ import { IconLoader2, IconX } from '@tabler/icons-react';
 import { useCroquisSession } from '../../hooks/useCroquisSession';
 import type { Croquis } from '../../types';
 import CroquisEditor from './CroquisEditor';
+import CroquisProjectBackground from './CroquisProjectBackground';
 
 interface CroquisDialogProps {
   row: Croquis;
@@ -93,6 +94,7 @@ export default function CroquisDialog({ row, readOnly = false, onClose }: Croqui
               onBackgroundImport={session.onBackgroundImport}
               onBackgroundClear={session.onBackgroundClear}
               readOnly={readOnly}
+              backgroundSlot={row.project_id ? <CroquisProjectBackground projectId={row.project_id} onPick={session.onBackgroundImport} /> : undefined}
               statusLabel={session.statusLabel}
               exportFileName={`${row.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'croquis'}.png`}
             />

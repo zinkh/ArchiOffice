@@ -12,8 +12,11 @@ import { resolveSignedUrl } from './signedStorageUrl';
 import { texteSurCouleur } from './reserveCouleurs';
 
 // Même worker auto-hébergé que PlanAnnotator : ce module peut être chargé
-// sans lui (export lancé depuis une liste sans plan affiché).
-if (!pdfjs.GlobalWorkerOptions.workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+// sans lui (export lancé depuis une liste sans plan affiché, fond de croquis).
+// Affectation INCONDITIONNELLE : react-pdf fixe lui-même `workerSrc = 'pdf.worker.mjs'` (un chemin relatif
+// qui n'existe pas) dès qu'il est importé, donc tester « pas encore défini » ne se vérifiait jamais et le
+// rendu d'un PDF ne marchait que si PlanAnnotator s'était déjà chargé.
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const isPdfRef = (fileUrl: string) => fileUrl.includes('application/pdf') || /\.pdf(\?|$)/i.test(fileUrl);
 
