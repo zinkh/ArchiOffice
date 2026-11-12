@@ -18,7 +18,7 @@ import { IconX, IconPaperclip, IconLoader2, IconSend, IconBrandGoogle, IconBrand
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { applyTenantHeader } from '../lib/activeTenant';
-import { fileToEmailAttachment } from '../lib/emailAttachments';
+import { fileToEmailAttachment, MAX_EMAIL_TOTAL_BYTES } from '../lib/emailAttachments';
 import type { MailAccount, MailProvider } from '../hooks/useMailAccounts';
 import { useUser } from '../UserContext';
 
@@ -98,6 +98,23 @@ async function downloadAttachment(att: MailForwardAttachment): Promise<File> {
   return new File([blob], att.filename, { type: att.mimeType || blob.type });
 }
 
+const splitAddresses = (list: string): string[] => list.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+const sameAddress = (a: string, b: string): boolean => {
+  const bare = (s: string) => (s.match(/<([^>]+)>/)?.[1] || s).trim().toLowerCase();
+  return bare(a) === bare(b);
+};
+/** Ajoute `address` à la liste Cc, sauf s'il y figure déjà ou s'il est déjà destinataire principal. */
+function addCcAddress(cc: string, address: string | null | undefined, to: string): string {
+  const addr = address?.trim();
+  if (!addr) return cc;
+  if (splitAddresses(cc).some(x => sameAddress(x, addr)) || splitAddresses(to).some(x => sameAddress(x, addr))) return cc;
+  return cc.trim() ? `${cc.trim().replace(/[,;]\s*$/, '')}, ${addr}` : addr;
+}
+function removeCcAddress(cc: string, address: string | null | undefined): string {
+  const addr = address?.trim();
+  return addr ? splitAddresses(cc).filter(x => !sameAddress(x, addr)).join(', ') : cc;
+}
+
 const formatSize = (bytes: number): string => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} Ko` : `${(bytes / (1024 * 1024)).toFixed(1)} Mo`);
 
 function RecipientField({ label, value, onChange, disabled, required, contacts }: {
@@ -157,7 +174,9 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
   );
   const account = sendable.find(a => a.id === accountId) || null;
   const [to, setTo] = useState(replyTo?.fromAddress || initial?.to || '');
-  const [cc, setCc] = useState(initial?.cc || '');
+  // Copie d'office à l'adresse du compte expéditeur (traçabilité dans sa propre
+  // boîte). Le champ reste libre : la personne peut retirer cette adresse.
+  const [cc, setCc] = useState(() => addCcAddress(initial?.cc || '', account?.email, replyTo?.fromAddress || initial?.to || ''));
   const [subject, setSubject] = useState(
     replyTo ? (/^re\s*:/i.test(replyTo.subject) ? replyTo.subject : `Re: ${replyTo.subject}`) : initial?.subject || ''
   );
@@ -190,6 +209,15 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
   const heading = title || (replyTo ? (replyTo.replyAll ? t('mail_compose_reply_all_title') : t('mail_compose_reply_title')) : t('mail_compose_new_title'));
   const contactList = useMemo(() => contacts, [contacts]);
 
+  // Poids des pièces jointes, recalculé à chaque ajout ou retrait (fichiers
+  // choisis + pièces d'origine cochées pour un transfert).
+  const totalBytes = useMemo(
+    () => files.reduce((sum, f) => sum + f.size, 0)
+      + (forwardAttachments || []).filter(a => forwardIds.has(a.id)).reduce((sum, a) => sum + (a.size || 0), 0),
+    [files, forwardAttachments, forwardIds],
+  );
+  const overLimit = totalBytes > MAX_EMAIL_TOTAL_BYTES;
+
   const toggleForward = (id: string) => setForwardIds(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -198,7 +226,7 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!to.trim() || !subject.trim()) return;
+    if (!to.trim() || !subject.trim() || overLimit) return;
     setSending(true);
     setError(null);
     try {
@@ -292,7 +320,11 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
                   <button
                     key={a.id}
                     type="button"
-                    onClick={() => setAccountId(a.id)}
+                    onClick={() => {
+                      // Changer de compte remplace l'ancienne copie d'office par celle du nouveau.
+                      setCc(prev => addCcAddress(removeCcAddress(prev, account?.email), a.email, to));
+                      setAccountId(a.id);
+                    }}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium"
                     style={a.id === accountId
                       ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' }
@@ -370,6 +402,12 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
             ))}
           </div>
 
+          <p className="text-xs" style={{ color: overLimit ? 'var(--tblr-danger)' : 'var(--tblr-muted)', fontWeight: overLimit ? 600 : 400 }}
+            role={overLimit ? 'alert' : undefined}>
+            {t('mailbox_compose_size_counter', { size: formatSize(totalBytes), max: formatSize(MAX_EMAIL_TOTAL_BYTES) })}
+            {overLimit && ` ${t('mailbox_compose_size_over')}`}
+          </p>
+
           {error && (
             <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-700 px-3 py-2 text-xs text-red-700 dark:text-red-400">
               {error}
@@ -380,7 +418,7 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
         <div className="p-4 flex justify-end" style={{ borderTop: '1px solid var(--tblr-border)' }}>
           <button
             type="submit"
-            disabled={sending}
+            disabled={sending || overLimit}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium disabled:opacity-60"
             style={{ background: 'var(--tblr-primary)', color: 'white' }}
           >

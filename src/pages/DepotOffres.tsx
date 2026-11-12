@@ -26,6 +26,8 @@ interface Contexte {
   en_retard: boolean;
   instructions: string | null;
   pieces: Array<{ id: string; nom: string; taille: number | null }>;
+  /** Pièces du DCE qui concernent cette entreprise (`lots` nul = tous les lots), avec leurs fichiers. */
+  dce?: Array<{ id: string; nom: string; type_doc: string; lots: string[] | null; fichiers: Array<{ id: string; nom: string; taille: number | null }> }>;
   depots: Array<{ id: string; lot_id: string | null; kind: DepotKind; version: number; nom: string | null; taille: number | null; hors_delai: boolean; recu_le: string }>;
 }
 
@@ -119,6 +121,35 @@ export default function DepotOffres() {
             <p style={{ color: 'var(--tblr-muted)' }}>Lots qui vous sont confiés : {ctx.lots.map(l => `Lot ${l.lot_number} ${l.lot_title}`).join(' ; ')}.</p>
           )}
         </section>
+
+        {(ctx.dce?.length ?? 0) > 0 && (
+          <section aria-label="Dossier de consultation des entreprises" className="space-y-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider">Dossier de consultation (DCE)</h2>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Les pièces ci-dessous concernent votre consultation. Téléchargez-les ici plutôt que par e-mail : vous êtes sûr de disposer de la dernière version.
+            </p>
+            <div className="space-y-3">
+              {ctx.dce!.map(piece => (
+                <div key={piece.id} className="rounded-lg" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+                  <p className="px-3 pt-2.5 text-sm font-semibold break-words">{piece.nom}</p>
+                  <p className="px-3 pb-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                    {piece.type_doc}{piece.lots === null ? ' · tous les lots' : piece.lots.length ? ` · ${piece.lots.join(' ; ')}` : ''}
+                  </p>
+                  <ul className="divide-y" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                    {piece.fichiers.map(f => (
+                      <li key={f.id}>
+                        <a href={`${base}/pieces/${encodeURIComponent(f.id)}`} className="flex items-center gap-2 px-3 py-2.5 text-sm hover:underline min-h-11" target="_blank" rel="noopener noreferrer">
+                          <IconDownload size={15} aria-hidden /> <span className="flex-1 min-w-0 break-words">{f.nom}</span>
+                          {f.taille ? <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{formatOctets(f.taille)}</span> : null}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {ctx.pieces.length > 0 && (
           <section aria-label="Documents de la consultation" className="space-y-2">
