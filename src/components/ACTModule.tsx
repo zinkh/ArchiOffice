@@ -535,13 +535,25 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   // Documents de l'affaire proposés pour composer le DCE. Un échec de lecture
   // laisse la liste vide : les pièces restent des intitulés, comme avant.
   const [documentsAffaire, setDocumentsAffaire] = useState<DocumentDce[]>([]);
+  const [docsVersion, setDocsVersion] = useState(0);
   useEffect(() => {
     let vivant = true;
     apiFetch<DocumentDce[]>(`/api/documents?project_id=${encodeURIComponent(projectId)}`)
       .then(d => { if (vivant) setDocumentsAffaire(Array.isArray(d) ? d : []); })
       .catch(() => {});
     return () => { vivant = false; };
-  }, [projectId]);
+  }, [projectId, docsVersion]);
+
+  /** Rattache un document versé (RC, CCAP) à la pièce du DCE de même type, créée si elle manque. */
+  const verserPieceAuDce = (typeDoc: 'RC' | 'CCAP', documentId: string) => {
+    const existants = consultation.dce_documents;
+    const i = existants.findIndex(d => d.type_doc === typeDoc);
+    const dce: DCEDocument[] = i >= 0
+      ? existants.map((d, j) => (j === i ? { ...d, document_ids: [...new Set([...(d.document_ids ?? []), documentId])] } : d))
+      : [...existants, { id: crypto.randomUUID(), nom: TYPE_DOC_LABELS[typeDoc] || typeDoc, type_doc: typeDoc, tous_lots: true, lots_ids: [], document_ids: [documentId] }];
+    update({ ...consultation, dce_documents: dce });
+    setDocsVersion(v => v + 1);
+  };
 
   const telechargerTableauIndices = async () => {
     const { genererTableauIndicesPdf } = await import('../lib/dceIndicesPdf');
@@ -1093,6 +1105,9 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               contacts={allContacts}
               operation={{ nom: projectName, ...operation }}
               onChange={marche => update({ ...consultation, marche })}
+              projectId={projectId}
+              documentsAffaire={documentsAffaire}
+              onVerserAuDce={verserPieceAuDce}
               onImporterOffres={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
             />
           </div>
