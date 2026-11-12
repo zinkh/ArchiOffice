@@ -9,6 +9,7 @@ import {
 } from '../../lib/actMarche';
 import { exporterMarcheDocx, exporterMarchePdf } from '../../lib/actMarcheExport';
 import type { DocumentDce } from '../../lib/dceIndices';
+import { contexteMarche } from '../../lib/marchePieces';
 import { deposerFichierDce, documentDejaVerse, type SpecPieceDce } from '../../lib/dceVersement';
 import { genererActeFormulaire, type ActeRempli } from '../../lib/actEngagementForm';
 import { FormulaireNonReconnuError } from '../../lib/actEngagementImport';
@@ -142,18 +143,9 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
   );
 
   /** Réglages du marché, complétés par ce que l'affaire sait déjà. */
-  const contexte = useMemo((): ContexteMarche => ({
-    operation: { nom: operation.nom, code: operation.code, adresse: operation.adresse },
-    params: {
-      ...p,
-      moa_nom: p.moa_nom || operation.maitreOuvrage,
-      lieu_construction: p.lieu_construction || operation.adresse,
-      permis_numero: p.permis_numero || operation.permisNumero,
-      permis_date: p.permis_date || operation.permisDate,
-    },
-    agence: {},
+  const contexte = useMemo((): ContexteMarche => contexteMarche(consultation.marche, operation),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [consultation.marche, operation]);
+  [consultation.marche, operation]);
 
   const tvaPct = parametresDe(consultation).tva_pct ?? PARAMETRES_DEFAUT.tva_pct;
 

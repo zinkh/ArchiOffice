@@ -53,6 +53,7 @@ import type { Lot as LotDocument, OffreDocument } from '../types/dpgf';
 import { lignesIndices, type DocumentDce } from '../lib/dceIndices';
 import DceFichiersPicker from './act/DceFichiersPicker';
 import DceVersementPro from './act/DceVersementPro';
+import { genererPiecesMarchePdf } from '../lib/marchePieces';
 import { rattacherPieces, type SpecPieceDce } from '../lib/dceVersement';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -530,6 +531,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
       tous_lots: d.tous_lots,
       lots_ids: d.lots_ids,
       document_ids: d.document_ids ?? [],
+      type_doc: d.type_doc,
     })),
     [consultation.dce_documents],
   );
@@ -990,6 +992,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               documentsAffaire={documentsAffaire}
               projectId={projectId}
               depotDeadlineAt={depot.deadlineAt}
+              genererPiecesMarche={() => genererPiecesMarchePdf({ consultation: consultation as any, lots, operation: { nom: projectName, ...operation } })}
               entrepriseContacts={entrepriseContacts}
               corpsEtatOptions={corpsEtatOptions}
               lotOptions={lotOptions}
