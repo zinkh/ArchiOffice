@@ -23,6 +23,13 @@ function convertedParents(): string[] {
   return [...parents].sort();
 }
 
+// `[alias:]table!indice(` : on garde la table avant le « ! ».
+function findHints(text: string): { table: string; hint: string }[] {
+  return [...text.matchAll(/\b([a-z_][a-z0-9_]*)!([a-z_][a-z0-9_]*)\(/g)]
+    .filter(m => !JOIN_TYPES.has(m[2]))
+    .map(m => ({ table: m[1], hint: m[2] }));
+}
+
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     if (name === 'node_modules' || name === 'dist' || name === 'dist-api' || name.startsWith('.')) continue;
@@ -39,21 +46,16 @@ describe('jointures PostgREST et clés composites', () => {
     .filter(d => { try { return statSync(d).isDirectory(); } catch { return false; } })
     .flatMap(d => sourceFiles(d));
 
-  // `[alias:]table!indice(` : on garde la table avant le « ! ».
-  const hints = files.flatMap(file => {
-    const text = readFileSync(file, 'utf8');
-    return [...text.matchAll(/\b([a-z_][a-z0-9_]*)!([a-z_][a-z0-9_]*)\(/g)]
-      .filter(m => !JOIN_TYPES.has(m[2]))
-      .map(m => ({ file: relative(ROOT, file), table: m[1], hint: m[2] }));
-  });
+  const hints = files.flatMap(file => findHints(readFileSync(file, 'utf8')).map(h => ({ file: relative(ROOT, file), ...h })));
 
   it('lit bien les parents convertis dans les migrations', () => {
     expect(parents).toEqual(expect.arrayContaining(['projects', 'contacts', 'contrats_moe']));
   });
 
-  it('le balayage n\'est pas vide : il retrouve les indices de colonne existants', () => {
-    // observations.ts joint site_reports par `created_report_id` et `resolved_report_id`.
-    expect(hints.some(h => h.table === 'site_reports' && h.file.endsWith('observations.ts'))).toBe(true);
+  it('le détecteur reconnaît un indice de colonne et ignore les types de jointure', () => {
+    // Témoin : sans lui, un balayage qui ne trouve rien passerait pour un code propre.
+    expect(findHints('r:site_reports!created_report_id(report_number)')).toEqual([{ table: 'site_reports', hint: 'created_report_id' }]);
+    expect(findHints('observation_reports!inner(report_id), projects(name)')).toEqual([]);
   });
 
   it('aucun indice de colonne ne vise un parent converti en clé composite', () => {
@@ -62,8 +64,9 @@ describe('jointures PostgREST et clés composites', () => {
       + 'Joindre sans indice, ou ne pas convertir ce parent.').toEqual([]);
   });
 
-  it('site_reports reste hors des migrations tant que observations.ts utilise des indices de colonne', () => {
-    const usedWithHint = hints.some(h => h.table === 'site_reports');
-    if (usedWithHint) expect(parents).not.toContain('site_reports');
+  it('site_reports est converti en clé composite et plus aucune jointure à indice ne le vise', () => {
+    // observations.ts le joignait par indice de colonne : réécrit en lecture groupée (withReportNumbers).
+    expect(parents).toContain('site_reports');
+    expect(hints.filter(h => h.table === 'site_reports')).toEqual([]);
   });
 });

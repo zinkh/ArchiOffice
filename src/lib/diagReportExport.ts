@@ -8,7 +8,7 @@
 import type { Project } from '../types';
 import type { AgencySettings } from './proposalExport';
 import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
-import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
+import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
 import { htmlToBlocks, type Run } from './diagReportBlocks';
 import type { DiagReport } from './diagReports';
 
@@ -195,11 +195,12 @@ export async function exportDiagReportDocx(
       size, color,
     })));
 
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
   const firstHeader = [
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 20, color: '111827' })] }),
+    new Paragraph({ children: [new TextRun({ text: cab.agencyName || '', bold: true, size: 20, color: '111827' })] }),
     new Paragraph({
       border: { bottom: { style: BorderStyle.SINGLE, size: 5, color: 'D1D5DB' } },
-      children: [new TextRun({ text: [settings.address, settings.phone, settings.email].filter(Boolean).join(' · '), size: 15, color: '6B7280' })],
+      children: [new TextRun({ text: [cab.address, cab.phone, cab.email].filter(Boolean).join(' · '), size: 15, color: '6B7280' })],
     }),
   ];
   const footer = [
@@ -262,7 +263,7 @@ export async function exportDiagReportDocx(
   const doc = new Document({
     styles: STYLES_WORD_ARIAL,
     sections: [{
-      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: DOC_TITLE, firstHeader, footer }),
+      ...await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: DOC_TITLE, firstHeader, footer }),
       children: body,
     }],
   });

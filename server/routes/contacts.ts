@@ -194,6 +194,55 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
     }
   });
 
+  // Affaires d'un contact, tous liens confondus : maître d'ouvrage (projects.client_id),
+  // lot, cotraitant et intervenant. Pour une société on ajoute celles de ses interlocuteurs,
+  // pour une personne celles de sa société : un artisan est rattaché à l'affaire par l'une
+  // ou l'autre fiche selon la façon dont elle a été saisie.
+  app.get("/api/contacts/:id/projects", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: self } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('id, company_contact_id').eq('id', id).maybeSingle();
+      if (!self) return res.status(404).json({ error: "Contact introuvable pour ce cabinet." });
+      const ids = new Set<string>([id]);
+      if ((self as any).company_contact_id) ids.add((self as any).company_contact_id);
+      const { data: people } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('id').eq('company_contact_id', id);
+      for (const p of (people || []) as any[]) ids.add(p.id);
+      const list = [...ids];
+
+      const [clients, lots, cotraitants, stakeholders] = await Promise.all([
+        tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name').in('client_id', list),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'project_lots').select('project_id, lot_number, lot_title').in('contact_id', list),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'project_cotraitants').select('project_id, specialty').in('contact_id', list),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'project_stakeholders').select('project_id, role').in('contact_id', list),
+      ]);
+
+      const byProject = new Map<string, { id: string; name: string; roles: string[] }>();
+      const add = (projectId: string | null, role: string, name?: string) => {
+        if (!projectId) return;
+        const entry = byProject.get(projectId) || { id: projectId, name: name || '', roles: [] };
+        if (name) entry.name = name;
+        if (role && !entry.roles.includes(role)) entry.roles.push(role);
+        byProject.set(projectId, entry);
+      };
+      for (const p of (clients.data || []) as any[]) add(p.id, "Maître d'ouvrage", p.name);
+      for (const l of (lots.data || []) as any[]) add(l.project_id, ['Lot', l.lot_number, l.lot_title].filter(Boolean).join(' '));
+      for (const c of (cotraitants.data || []) as any[]) add(c.project_id, c.specialty ? `Cotraitant, ${c.specialty}` : 'Cotraitant');
+      for (const s of (stakeholders.data || []) as any[]) add(s.project_id, s.role || 'Intervenant');
+
+      const missing = [...byProject.values()].filter(p => !p.name).map(p => p.id);
+      if (missing.length) {
+        const { data: names } = await tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name').in('id', missing);
+        for (const n of (names || []) as any[]) { const e = byProject.get(n.id); if (e) e.name = n.name; }
+      }
+      const out = [...byProject.values()].filter(p => p.name).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+      res.json(out);
+    } catch (e: any) {
+      console.error("Error listing contact projects:", e.message);
+      res.status(500).json({ error: "Failed to list contact projects" });
+    }
+  });
+
   app.delete("/api/contacts/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);

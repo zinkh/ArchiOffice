@@ -9,7 +9,7 @@ type ProposalForExport = Partial<Proposal>;
 import type { AgencySettings } from './proposalExport';
 import { classifyContentLine, feasibilityCoverFields, feasibilityFilename, parseInlineMarkdown, stripInlineMarkdown, type FeasibilitySection } from './feasibilityBlocks';
 import { partnerLogosParagraph } from './docxPartnerLogos';
-import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, drawCompactHeader, loadLogoDataUrl } from './pdfLetterhead';
+import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, drawCompactHeader, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
 import { compressImage, type CompressedImage } from './imageCompression';
 import { resolveSignedUrl } from './signedStorageUrl';
 
@@ -235,7 +235,8 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
   // En-tête de la première page : logo à gauche, repère du document à droite, filet noir.
   // Les pages suivantes n'ont pas de logo : seul le repère, en gris, sous un filet.
   const { repere, fields } = documentMeta(p, options);
-  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 600, 400, 0.92, 'image/png') : null;
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
+  const logo = cab.logoUrl ? await compressImage(cab.logoUrl, 600, 400, 0.92, 'image/png') : null;
   const firstHeaderChildren: InstanceType<typeof Paragraph>[] = [
     new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
@@ -243,7 +244,7 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
       spacing: { after: 240 },
       children: [
         ...(logo ? [new ImageRun({ type: 'png', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * 48), height: 48 } })] : [
-          new TextRun({ text: settings.agencyName || '', bold: true, size: 24, color: '111827' }),
+          new TextRun({ text: cab.agencyName || '', bold: true, size: 24, color: '111827' }),
         ]),
         new TextRun({ text: `\t${repere}`, size: 17, color: '6B7280' }),
       ],
@@ -255,7 +256,7 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
       border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '111827', space: 4 } },
       spacing: { after: 240 },
       children: [
-        new TextRun({ text: settings.agencyName || '', bold: true, size: 16, color: '111827' }),
+        new TextRun({ text: cab.agencyName || '', bold: true, size: 16, color: '111827' }),
         new TextRun({ text: `\t${repere}`, size: 16, color: '6B7280' }),
       ],
     }),

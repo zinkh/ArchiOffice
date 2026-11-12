@@ -345,6 +345,17 @@ export async function createApp() {
   app.use('/mcp-upload', mcpToolLimiter);
   registerMcpUploadRoute(app, () => supabaseAdmin, `http://127.0.0.1:${PORT}`);
 
+  // Envoi d'e-mail : les pièces jointes arrivent en base64 dans le JSON (25 Mo
+  // décodés au plus, soit environ 34 Mo encodés). Le plafond général de 10 Mo
+  // renvoyait un 413 dès quelques plans PDF. Plafond relevé pour cette seule
+  // route, et seulement pour une requête portant un jeton (le contrôle
+  // d'authentification complet intervient plus bas).
+  const emailBodyParser = express.json({ limit: '40mb' });
+  app.use('/api/send-email', (req, res, next) => {
+    if (!req.headers.authorization) return next();
+    return emailBodyParser(req, res, next);
+  });
+
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 

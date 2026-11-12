@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { IconFileText, IconDownload, IconChevronDown, IconGavel, IconFileDescription, IconSignature, IconUpload } from '@tabler/icons-react';
+import { IconFileText, IconDownload, IconFolderPlus, IconChevronDown, IconGavel, IconFileDescription, IconSignature, IconUpload } from '@tabler/icons-react';
 import type { Contact, ProjectLot } from '../../types';
 import { cn } from '../../lib/utils';
 import { fetchAgencySettings } from '../../lib/pdfLetterhead';
@@ -8,6 +8,9 @@ import {
   type ContexteMarche, type DocModele, type ParametresMarche,
 } from '../../lib/actMarche';
 import { exporterMarcheDocx, exporterMarchePdf } from '../../lib/actMarcheExport';
+import type { DocumentDce } from '../../lib/dceIndices';
+import { contexteMarche } from '../../lib/marchePieces';
+import { deposerFichierDce, documentDejaVerse, type SpecPieceDce } from '../../lib/dceVersement';
 import { genererActeFormulaire, type ActeRempli } from '../../lib/actEngagementForm';
 import { FormulaireNonReconnuError } from '../../lib/actEngagementImport';
 import { lireActeDepuisBuffer } from '../../lib/actEngagementRead';
@@ -16,7 +19,7 @@ import { PARAMETRES_DEFAUT, parametresDe, piecesOffreDe, type DonneesNegociation
 
 interface ConsultationLue extends DonneesNegociation {
   marche?: ParametresMarche;
-  dce_documents: { nom: string; type_doc: string }[];
+  dce_documents: { id: string; nom: string; type_doc: string; tous_lots: boolean; lots_ids: string[]; document_ids?: string[] }[];
   criteres: { nom: string; poids: number }[];
   entreprises: EntrepriseOffre[];
   offres: OffreImportee[];
@@ -40,6 +43,11 @@ interface Props {
   onChange: (marche: ParametresMarche) => void;
   /** Verse les entreprises et offres issues d'un acte d'engagement rempli. */
   onImporterOffres: (res: ResultatImport) => void;
+  projectId: string;
+  /** Documents de l'affaire : un RC ou un CCAP déjà versé au DCE reçoit alors une nouvelle version (indice suivant). */
+  documentsAffaire: DocumentDce[];
+  /** Rattache le document versé à la pièce du DCE correspondante (créée si besoin). */
+  onVerserAuDce: (versements: Array<{ spec: SpecPieceDce; documentId: string }>) => void;
 }
 
 type DocId = 'rc' | 'ccap' | 'acte';
@@ -107,12 +115,13 @@ export function RecapActe({ lu, apercu, onImporter }: { lu: { fichier: string; a
   );
 }
 
-export default function MarcheDocumentsPanel({ consultation, lots, contacts, operation, onChange, onImporterOffres }: Props) {
+export default function MarcheDocumentsPanel({ consultation, lots, contacts, operation, onChange, onImporterOffres, projectId, documentsAffaire, onVerserAuDce }: Props) {
   const [ouvert, setOuvert] = useState<DocId | null>('rc');
   const [enCours, setEnCours] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [acteLu, setActeLu] = useState<{ fichier: string; acte: ActeRempli } | null>(null);
   const [importe, setImporte] = useState<string | null>(null);
+  const [infoDce, setInfoDce] = useState<string | null>(null);
   const champFichier = useRef<HTMLInputElement>(null);
 
   const p = { ...PARAMETRES_MARCHE_DEFAUT, ...(consultation.marche ?? {}) } as ParametresMarche;
@@ -134,18 +143,9 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
   );
 
   /** Réglages du marché, complétés par ce que l'affaire sait déjà. */
-  const contexte = useMemo((): ContexteMarche => ({
-    operation: { nom: operation.nom, code: operation.code, adresse: operation.adresse },
-    params: {
-      ...p,
-      moa_nom: p.moa_nom || operation.maitreOuvrage,
-      lieu_construction: p.lieu_construction || operation.adresse,
-      permis_numero: p.permis_numero || operation.permisNumero,
-      permis_date: p.permis_date || operation.permisDate,
-    },
-    agence: {},
+  const contexte = useMemo((): ContexteMarche => contexteMarche(consultation.marche, operation),
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [consultation.marche, operation]);
+  [consultation.marche, operation]);
 
   const tvaPct = parametresDe(consultation).tva_pct ?? PARAMETRES_DEFAUT.tva_pct;
 
@@ -177,6 +177,57 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
     } catch (e) {
       console.error(e);
       setErreur('La génération du document a échoué.');
+    } finally { setEnCours(null); }
+  };
+
+  /**
+   * Génère le PDF et le verse au DCE : il devient un document de l'affaire (catégorie
+   * « DCE ») rattaché à la pièce RC ou CCAP du DCE, donc joint au mail d'invitation et
+   * listé dans le tableau d'indices. Déjà versé : nouvelle version, indice suivant.
+   */
+  /** Dépose un PDF généré et le rattache à sa pièce du DCE (nouvelle version s'il y est déjà). */
+  const verserPdf = async (spec: SpecPieceDce, nomFichier: string, blob: Blob) => {
+    const existant = documentDejaVerse(consultation.dce_documents, documentsAffaire, spec, nomFichier);
+    const documentId = await deposerFichierDce({ projectId, nomFichier, blob, existantId: existant?.id });
+    onVerserAuDce([{ spec, documentId }]);
+    setInfoDce(existant
+      ? `${nomFichier} : nouvelle version versée au DCE (indice suivant).`
+      : `${nomFichier} versé au DCE : il sera joint aux invitations et listé dans le tableau d'indices.`);
+  };
+
+  const verserAuDce = async (id: 'rc' | 'ccap') => {
+    setErreur(null); setInfoDce(null);
+    setEnCours(`${id}-dce`);
+    try {
+      const settings = await fetchAgencySettings();
+      const docs = construire(id, { ...contexte, agence: { nom: settings.agencyName, adresse: settings.address } });
+      let fichier: { nom: string; blob: Blob } | null = null;
+      await exporterMarchePdf(docs, settings, `${id === 'rc' ? 'Reglement_consultation' : 'CCAP'}_${nomFichierBase}`, (nom, blob) => { fichier = { nom, blob }; });
+      if (!fichier) throw new Error('PDF non généré');
+      const { nom, blob } = fichier as { nom: string; blob: Blob };
+      await verserPdf({ typeDoc: id === 'rc' ? 'RC' : 'CCAP', nom: id === 'rc' ? 'Règlement de la Consultation' : 'CCAP', unique: true }, nom, blob);
+    } catch (e: any) {
+      console.error(e);
+      setErreur(e?.message || 'Le versement au DCE a échoué.');
+    } finally { setEnCours(null); }
+  };
+
+  /** Formulaire d'acte d'engagement vierge, versé au DCE : les entreprises le reçoivent avec l'invitation. */
+  const verserFormulaireAuDce = async () => {
+    setErreur(null); setInfoDce(null);
+    setEnCours('acte-dce');
+    try {
+      const settings = await fetchAgencySettings();
+      const data = await genererActeFormulaire(
+        { ...contexte, agence: { nom: settings.agencyName, adresse: settings.address } },
+        lots.map(l => ({ numero: l.lot_number, titre: l.lot_title })),
+        tvaPct, settings,
+      );
+      await verserPdf({ typeDoc: 'Autre', nom: "Acte d'engagement (formulaire)", unique: false },
+        `Acte_engagement_formulaire_${nomFichierBase.replace(/[^\p{L}\p{N}]+/gu, '_')}.pdf`, new Blob([data], { type: 'application/pdf' }));
+    } catch (e: any) {
+      console.error(e);
+      setErreur(e?.message || 'Le versement au DCE a échoué.');
     } finally { setEnCours(null); }
   };
 
@@ -222,6 +273,11 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
           <IconDownload size={13} /> {enCours === `${id}-${f}` ? 'Génération…' : f === 'pdf' ? 'Générer en PDF' : 'Générer en Word'}
         </button>
       ))}
+      <button type="button" className={BOUTON} disabled={!!enCours} onClick={() => verserAuDce(id)}
+        title="Génère le PDF et le rattache au DCE (document de l'affaire, joint aux invitations)">
+        <IconFolderPlus size={13} /> {enCours === `${id}-dce` ? 'Versement…' : 'Verser au DCE'}
+      </button>
+      {infoDce && <p role="status" className="basis-full text-xs text-green-600 dark:text-green-400 font-bold">{infoDce}</p>}
     </div>
   );
 
@@ -307,6 +363,11 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
             <button type="button" className={BOUTON} disabled={!!enCours} onClick={genererFormulaire}>
               <IconDownload size={13} /> {enCours === 'acte-pdf' ? 'Génération…' : 'Générer le formulaire (PDF à remplir)'}
             </button>
+            <button type="button" className={BOUTON} disabled={!!enCours} onClick={verserFormulaireAuDce}
+              title="Génère le formulaire et le rattache au DCE (joint aux invitations)">
+              <IconFolderPlus size={13} /> {enCours === 'acte-dce' ? 'Versement…' : 'Verser au DCE'}
+            </button>
+            {infoDce && <p role="status" className="basis-full text-xs text-green-600 dark:text-green-400 font-bold">{infoDce}</p>}
             <button type="button" className={BOUTON} disabled={!!enCours} onClick={() => champFichier.current?.click()}>
               <IconUpload size={13} /> {enCours === 'acte-lecture' ? 'Lecture…' : 'Lire un formulaire rempli'}
             </button>

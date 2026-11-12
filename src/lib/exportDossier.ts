@@ -17,6 +17,7 @@ import {
 } from './proExport';
 import { compterArticles, filtrerPourExport, type ExportSelection } from './exportPerimetre';
 import type { FichierExporte, Sortie } from './exportSortie';
+import { verifierAnnulation } from './annulation';
 import type { CouvertureOptions } from './pageDeGarde';
 import { ORIENTATION_CCTP, ORIENTATION_DPGF, documentsParLot, suffixeLot, type Orientation } from './exportOrientation';
 
@@ -54,6 +55,8 @@ export interface DemandeDossier {
   couverture?: CouvertureOptions;
   /** CCTP : joint un dossier « Annexe - Fiches techniques » (fichiers d'origine et index PDF). Jamais par défaut. */
   annexeFiches?: boolean;
+  /** Annulation demandée par la personne : l'export s'arrête au prochain point de contrôle (entre deux fichiers) et lève `ExportAnnule`. */
+  signal?: AbortSignal;
   /** Lecture d'un fichier de fiche par sa référence de stockage ; par défaut, URL signée du stockage de l'application. */
   lireFichier?: (fileUrl: string) => Promise<Blob>;
 }
@@ -116,8 +119,10 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
   const etiquette = d.perimetre ? `${d.projectName ?? d.dpgf.titre} - ${d.perimetre}` : d.projectName;
   const settings = d.settings;
   const prix = { avecPrix: d.avecPrix, avecTva: d.avecTva, sortie };
+  const arret = () => verifierAnnulation(d.signal);
 
   for (const doc of DOCUMENTS_DOSSIER) {
+    arret();
     const choix = d.documents[doc];
     if (!choix) continue;
     const fmts = formats(choix);
@@ -136,6 +141,7 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
       const parties = d.parLot ? documentsParLot(source) : [{ lot: undefined, doc: source }];
       for (const partie of parties) {
         for (const batiment of batiments.length ? batiments : [undefined]) {
+          arret();
           if (partie.lot && cctpBlocs(partie.doc, batiment?.id).length === 0) continue;
           const opts = {
             projectName: etiquette, settings, batiment, // Le CCTP d'un lot cite tous les lots de l'opération, pas seulement le sien.
@@ -174,6 +180,7 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
       const orientation = d.orientations?.dpgf ?? ORIENTATION_DPGF;
       const parties = d.parLot ? documentsParLot(source) : [{ lot: undefined, doc: source }];
       for (const partie of parties) {
+        arret();
         const options = { ...prix, orientation, couverture: d.couverture, suffixeNom: partie.lot ? suffixeLot(partie.lot) : undefined };
         const intitule = partie.lot ? `${etiquette ?? d.dpgf.titre} - ${suffixeLot(partie.lot)}` : etiquette;
         for (const f of fmts) await (f === 'pdf' ? exportDPGFtoPDF : exportDPGFtoExcel)(partie.doc, intitule, 'lot', settings, options);
@@ -188,5 +195,6 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
     const opts = { mode: doc, vierge: !d.avecPrix, projectName: etiquette, settings, sortie } as const;
     for (const f of fmts) await (f === 'pdf' ? exportBPUtoPDF(source, opts) : exportBPUtoExcel(source, opts));
   }
+  arret();
   return { fichiers, avertissements };
 }

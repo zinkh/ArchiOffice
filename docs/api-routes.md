@@ -4,11 +4,11 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-845 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+846 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
-| GET | `*` | [server.ts:1449](../server.ts#L1449) |
+| GET | `*` | [server.ts:1460](../server.ts#L1460) |
 | GET | `/.well-known/oauth-authorization-server` | [packages/archioffice-agents/src/server/mcp/oauthRoutes.ts:46](../packages/archioffice-agents/src/server/mcp/oauthRoutes.ts#L46) |
 | GET | `/.well-known/oauth-protected-resource` | [packages/archioffice-agents/src/server/mcp/oauthRoutes.ts:59](../packages/archioffice-agents/src/server/mcp/oauthRoutes.ts#L59) |
 | POST | `/admin/users` | [server/offlineGateway.ts:113](../server/offlineGateway.ts#L113) |
@@ -137,15 +137,16 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/chorus-pro/status` | [server/routes/chorusPro.ts:102](../server/routes/chorusPro.ts#L102) |
 | GET | `/api/chorus-pro/status/:invoiceId` | [server/routes/chorusPro.ts:225](../server/routes/chorusPro.ts#L225) |
 | POST | `/api/chorus-pro/test` | [server/routes/chorusPro.ts:132](../server/routes/chorusPro.ts#L132) |
-| GET | `/api/contact-categories` | [server/routes/contacts.ts:217](../server/routes/contacts.ts#L217) |
-| POST | `/api/contact-categories` | [server/routes/contacts.ts:227](../server/routes/contacts.ts#L227) |
-| DELETE | `/api/contact-categories/:id` | [server/routes/contacts.ts:241](../server/routes/contacts.ts#L241) |
+| GET | `/api/contact-categories` | [server/routes/contacts.ts:266](../server/routes/contacts.ts#L266) |
+| POST | `/api/contact-categories` | [server/routes/contacts.ts:276](../server/routes/contacts.ts#L276) |
+| DELETE | `/api/contact-categories/:id` | [server/routes/contacts.ts:290](../server/routes/contacts.ts#L290) |
 | GET | `/api/contacts` | [server/routes/contacts.ts:98](../server/routes/contacts.ts#L98) |
 | POST | `/api/contacts` | [server/routes/contacts.ts:119](../server/routes/contacts.ts#L119) |
 | POST | `/api/contacts/:contactId/qualifications` | [server/routes/qualifications.ts:43](../server/routes/qualifications.ts#L43) |
 | POST | `/api/contacts/:contactId/qualifications/rge-sync` | [server/routes/qualifications.ts:139](../server/routes/qualifications.ts#L139) |
-| DELETE | `/api/contacts/:id` | [server/routes/contacts.ts:197](../server/routes/contacts.ts#L197) |
+| DELETE | `/api/contacts/:id` | [server/routes/contacts.ts:246](../server/routes/contacts.ts#L246) |
 | PUT | `/api/contacts/:id` | [server/routes/contacts.ts:157](../server/routes/contacts.ts#L157) |
+| GET | `/api/contacts/:id/projects` | [server/routes/contacts.ts:201](../server/routes/contacts.ts#L201) |
 | POST | `/api/contacts/merge` | [server/routes/contactMerge.ts:40](../server/routes/contactMerge.ts#L40) |
 | POST | `/api/contacts/merge-safe` | [server/routes/contactMerge.ts:103](../server/routes/contactMerge.ts#L103) |
 | GET | `/api/contrats_moe` | [server/routes/contratsMoe.ts:13](../server/routes/contratsMoe.ts#L13) |
@@ -247,7 +248,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/gpa-reserves` | [server/routes/gpaReserves.ts:36](../server/routes/gpaReserves.ts#L36) |
 | DELETE | `/api/gpa-reserves/:id` | [server/routes/gpaReserves.ts:71](../server/routes/gpaReserves.ts#L71) |
 | PUT | `/api/gpa-reserves/:id` | [server/routes/gpaReserves.ts:84](../server/routes/gpaReserves.ts#L84) |
-| GET | `/api/health` | [server.ts:1025](../server.ts#L1025) |
+| GET | `/api/health` | [server.ts:1036](../server.ts#L1036) |
 | GET | `/api/historical-monuments` | [server/routes/geoProxy.ts:739](../server/routes/geoProxy.ts#L739) |
 | GET | `/api/hourly-costs` | [server/routes/timeTracking.ts:191](../server/routes/timeTracking.ts#L191) |
 | PUT | `/api/hourly-costs/:userId` | [server/routes/timeTracking.ts:199](../server/routes/timeTracking.ts#L199) |
@@ -372,11 +373,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/notifications/mark-read` | [server/routes/activityFeed.ts:327](../server/routes/activityFeed.ts#L327) |
 | GET | `/api/notifications/pending` | [server/routes/push.ts:153](../server/routes/push.ts#L153) |
 | GET | `/api/notifications/unread-count` | [server/routes/activityFeed.ts:304](../server/routes/activityFeed.ts#L304) |
-| DELETE | `/api/observations/:id` | [server/routes/observations.ts:300](../server/routes/observations.ts#L300) |
-| PUT | `/api/observations/:id` | [server/routes/observations.ts:162](../server/routes/observations.ts#L162) |
-| POST | `/api/observations/:id/link/:reportId` | [server/routes/observations.ts:338](../server/routes/observations.ts#L338) |
-| POST | `/api/observations/:id/photos` | [server/routes/observations.ts:262](../server/routes/observations.ts#L262) |
-| POST | `/api/observations/:id/to-reserve` | [server/routes/observations.ts:219](../server/routes/observations.ts#L219) |
+| DELETE | `/api/observations/:id` | [server/routes/observations.ts:319](../server/routes/observations.ts#L319) |
+| PUT | `/api/observations/:id` | [server/routes/observations.ts:181](../server/routes/observations.ts#L181) |
+| POST | `/api/observations/:id/link/:reportId` | [server/routes/observations.ts:358](../server/routes/observations.ts#L358) |
+| POST | `/api/observations/:id/photos` | [server/routes/observations.ts:281](../server/routes/observations.ts#L281) |
+| POST | `/api/observations/:id/to-reserve` | [server/routes/observations.ts:238](../server/routes/observations.ts#L238) |
 | DELETE | `/api/odoo/disconnect` | [server/routes/odoo.ts:159](../server/routes/odoo.ts#L159) |
 | GET | `/api/odoo/status` | [server/routes/odoo.ts:146](../server/routes/odoo.ts#L146) |
 | POST | `/api/odoo/sync` | [server/routes/odoo.ts:175](../server/routes/odoo.ts#L175) |
@@ -540,9 +541,9 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/projects/:projectId/lots` | [server/routes/lots.ts:28](../server/routes/lots.ts#L28) |
 | PUT | `/api/projects/:projectId/lots/order` | [server/routes/lots.ts:125](../server/routes/lots.ts#L125) |
 | POST | `/api/projects/:projectId/marches-act` | [server/routes/marchesEntreprises.ts:102](../server/routes/marchesEntreprises.ts#L102) |
-| GET | `/api/projects/:projectId/observations` | [server/routes/observations.ts:69](../server/routes/observations.ts#L69) |
-| POST | `/api/projects/:projectId/observations` | [server/routes/observations.ts:102](../server/routes/observations.ts#L102) |
-| POST | `/api/projects/:projectId/observations/to-reserves` | [server/routes/observations.ts:238](../server/routes/observations.ts#L238) |
+| GET | `/api/projects/:projectId/observations` | [server/routes/observations.ts:87](../server/routes/observations.ts#L87) |
+| POST | `/api/projects/:projectId/observations` | [server/routes/observations.ts:121](../server/routes/observations.ts#L121) |
+| POST | `/api/projects/:projectId/observations/to-reserves` | [server/routes/observations.ts:257](../server/routes/observations.ts#L257) |
 | GET | `/api/projects/:projectId/panneau-chantier` | [server/routes/panneaux.ts:89](../server/routes/panneaux.ts#L89) |
 | PUT | `/api/projects/:projectId/panneau-chantier` | [server/routes/panneaux.ts:118](../server/routes/panneaux.ts#L118) |
 | POST | `/api/projects/:projectId/panneau-chantier/pdf` | [server/routes/panneaux.ts:141](../server/routes/panneaux.ts#L141) |
@@ -582,11 +583,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/proposals/:id/signature/sync` | [server/routes/signatures.ts:110](../server/routes/signatures.ts#L110) |
 | POST | `/api/proposals/import` | [server/routes/proposals.ts:270](../server/routes/proposals.ts#L270) |
 | GET | `/api/public/chantier/:token` | [server/routes/panneaux.ts:179](../server/routes/panneaux.ts#L179) |
-| GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:116](../server/routes/consultationDepotPublic.ts#L116) |
-| DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:384](../server/routes/consultationDepotPublic.ts#L384) |
-| POST | `/api/public/depot/:token/fichiers` | [server/routes/consultationDepotPublic.ts:247](../server/routes/consultationDepotPublic.ts#L247) |
-| GET | `/api/public/depot/:token/pieces/:docId` | [server/routes/consultationDepotPublic.ts:181](../server/routes/consultationDepotPublic.ts#L181) |
-| POST | `/api/public/depot/:token/saisie` | [server/routes/consultationDepotPublic.ts:345](../server/routes/consultationDepotPublic.ts#L345) |
+| GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:162](../server/routes/consultationDepotPublic.ts#L162) |
+| DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:437](../server/routes/consultationDepotPublic.ts#L437) |
+| POST | `/api/public/depot/:token/fichiers` | [server/routes/consultationDepotPublic.ts:300](../server/routes/consultationDepotPublic.ts#L300) |
+| GET | `/api/public/depot/:token/pieces/:docId` | [server/routes/consultationDepotPublic.ts:229](../server/routes/consultationDepotPublic.ts#L229) |
+| POST | `/api/public/depot/:token/saisie` | [server/routes/consultationDepotPublic.ts:398](../server/routes/consultationDepotPublic.ts#L398) |
 | GET | `/api/public/doe/:token` | [server/routes/doeAtelierPublic.ts:94](../server/routes/doeAtelierPublic.ts#L94) |
 | DELETE | `/api/public/doe/:token/documents/:id` | [server/routes/doeAtelierPublic.ts:243](../server/routes/doeAtelierPublic.ts#L243) |
 | POST | `/api/public/doe/:token/fichiers` | [server/routes/doeAtelierPublic.ts:144](../server/routes/doeAtelierPublic.ts#L144) |
@@ -634,7 +635,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/reports/:reportId/diffuse` | [server/routes/siteReportDiffusion.ts:65](../server/routes/siteReportDiffusion.ts#L65) |
 | GET | `/api/reports/:reportId/notes` | [server/routes/siteReports.ts:117](../server/routes/siteReports.ts#L117) |
 | POST | `/api/reports/:reportId/notes` | [server/routes/siteReports.ts:130](../server/routes/siteReports.ts#L130) |
-| GET | `/api/reports/:reportId/observations` | [server/routes/observations.ts:316](../server/routes/observations.ts#L316) |
+| GET | `/api/reports/:reportId/observations` | [server/routes/observations.ts:335](../server/routes/observations.ts#L335) |
 | POST | `/api/reserve-exports/:id/send` | [server/routes/reserveExports.ts:113](../server/routes/reserveExports.ts#L113) |
 | GET | `/api/reserves` | [server/routes/reserves.ts:30](../server/routes/reserves.ts#L30) |
 | POST | `/api/reserves` | [server/routes/reserves.ts:42](../server/routes/reserves.ts#L42) |
@@ -836,7 +837,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/local-login` | [server/localAuthRoutes.ts:58](../server/localAuthRoutes.ts#L58) |
 | POST | `/local-setup` | [server/localAuthRoutes.ts:24](../server/localAuthRoutes.ts#L24) |
 | GET | `/local-status` | [server/localAuthRoutes.ts:20](../server/localAuthRoutes.ts#L20) |
-| GET | `/manifest.webmanifest` | [server.ts:1426](../server.ts#L1426) |
+| GET | `/manifest.webmanifest` | [server.ts:1437](../server.ts#L1437) |
 | DELETE | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:69](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L69) |
 | GET | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:68](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L68) |
 | POST | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:30](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L30) |

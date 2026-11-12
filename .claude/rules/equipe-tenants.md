@@ -150,13 +150,22 @@ local n'applique chaque fichier qu'une fois et la production a déjà reçu le p
 production avant de l'écrire : 40 parents restants, 84 clés simples, 0 ligne croisée ; ce lot en
 pose 46. À ne pas défaire :
 
-- **`site_reports` est EXCLU** tant qu'`observations.ts` le joint par indice de colonne
-  (`site_reports!created_report_id(...)`) : PostgREST n'accepte un indice de colonne que pour une
-  clé à UNE seule colonne, la jointure échouerait (PGRST200) sur une clé composite. Une jointure
-  SANS indice (`projects(name)`) reste valable.
+- **Pas de jointure PostgREST à indice de colonne vers un parent converti** (le nom de la colonne
+  après un point d'exclamation) : PostgREST n'accepte un indice de colonne que pour une clé à UNE
+  seule colonne, la jointure échouerait (PGRST200) sur une clé composite. Une jointure SANS indice
+  (`projects(name)`) reste valable, et c'est ce que fait le code partout.
   `tests/compositeFkEmbedHints.test.ts` lit les `v_parents` des migrations et interdit tout indice
   de colonne vers un parent converti : **ajouter un parent à une migration sans réécrire ses
-  jointures à indice fait échouer ce test**, avant la production.
+  jointures à indice fait échouer ce test**, avant la production. Pour lire un champ d'une table liée
+  par PLUSIEURS clés vers la même table (deux liens vers `site_reports`), faire UNE lecture groupée
+  limitée au cabinet plutôt qu'une jointure : voir `withReportNumbers` (`server/routes/observations.ts`).
+- **Troisième lot : `site_reports`** (`supabase/migrate_zz_tenant_composite_fks_3.sql`, 3 clés :
+  `observations.created_report_id` et `resolved_report_id` en SET NULL, `site_report_notes.report_id`
+  en CASCADE). `observations.ts` le joignait par indice de colonne ; ces jointures sont réécrites en une
+  lecture groupée et la forme de la réponse (`created_report`, `resolved_report`, `created_report_number`,
+  `resolved_report_number`) est inchangée (`tests/observationReportNumbers.test.ts`). **À appliquer en
+  production APRÈS le déploiement de ce code** : appliquée avant, les listes d'observations échoueraient
+  tant que l'ancien serveur tourne.
 - **`marches_entreprises` a deux liens auto-référents en `RESTRICT`** (`parent_marche_id`,
   `accord_cadre_groupe_id`) : leur clé composite n'est PAS différable et reste refusée même après
   `SET CONSTRAINTS ALL DEFERRED`. La mise à niveau local vers cloud les traverse, car son `UPDATE`
@@ -169,11 +178,29 @@ fonction SQL dont les paramètres viennent de lectures limitées au cabinet) et
 `accordCadreConsultations.ts` (tous les liens sont dérivés du marché de l'URL et de son groupe,
 limités au cabinet) sont conformes : aucun identifiant du corps n'atteint la base sans contrôle.
 
-Pas encore fait : `site_reports` (voir plus haut), les tables d'infrastructure et de messagerie
-(`agents`, `conversations`, `email_connections`, `calendar_*`, `external_storage_connections`,
-`support_tickets`, `webhooks`, `rag_documents`, `feed_posts`, `inspiration_*`,
-`custom_references`, `articles_type`, `document_templates`, `tender_rss_sources`), et les clés
-vers `profiles`, dont le `tenant_id` n'est que le cabinet par défaut d'une personne.
+**Quatrième lot : infrastructure et messagerie** (`supabase/migrate_zz_tenant_composite_fks_4.sql`,
+21 parents : `agents`, `conversations`, `custom_references`, `email_connections`,
+`agent_conversations`, `agent_missions`, `agent_recurring_tasks`, `agent_schedules`,
+`articles_type`, `calendar_calendars`, `calendar_connections`, `consultation_depot_invites`,
+`document_templates`, `external_storage_connections`, `feed_posts`, `inspiration_boards`,
+`inspiration_items`, `rag_documents`, `support_tickets`, `tender_rss_sources`, `webhooks`). Mesuré en
+production : 36 clés, 0 ligne croisée, la plus grosse table enfant a 28 lignes. Vérifié dans le code
+qu'aucun flux légitime ne croise deux cabinets sur ces liens (réponse de la plateforme à un ticket :
+cabinet du ticket ; duplication d'un modèle : source lue par `tenantScopedFrom` ; segments RAG : cabinet de
+leur document ; connexions de messagerie lues par cabinet). **Un nouveau parent s'ajoute seulement
+après cette vérification** : une clé composite refuserait un flux qui croise volontairement deux
+cabinets (une ressource partagée ou de la plateforme), même si les données d'aujourd'hui sont propres.
+Différence avec les lots précédents, à ne pas défaire : **un `RESTRICT` ENTRE DEUX TABLES**
+(`agent_missions.coordinator_agent_id` vers `agents`) devient `NO ACTION` différable, car un `RESTRICT`
+n'est pas différable et ferait échouer la mise à niveau local vers cloud quel que soit l'ordre des
+réécritures de `tenant_id` ; la suppression d'un coordinateur encore référencé reste refusée sur-le-champ.
+Un lien AUTO-RÉFÉRENT reste un vrai `RESTRICT` (parent et enfant sont réécrits dans la même instruction).
+
+Pas encore fait : `project_members` (son `tenant_id` est du TEXTE alors que celui de `projects` est un
+UUID : il faudrait d'abord changer ce type, avec ses politiques RLS et ses index, pour un gain faible
+puisque la route contrôle déjà le projet) et les clés vers `profiles`, dont le `tenant_id` n'est que le
+cabinet par défaut d'une personne. Hors de ces deux cas, toutes les clés entre tables à `tenant_id`
+sont couvertes.
 
 ### Plusieurs cabinets pour une même personne
 
@@ -477,6 +504,7 @@ journalise dans `contact_merge_log`. Réservée au rôle serveur (`REVOKE` pour 
   une seule profondeur : la société choisie ne doit pas être elle-même rattachée), `relation_status` (prospect, en_discussion, client, partenaire, inactif),
   `relation_reminder_on` / `relation_reminder_note`. Validés par `normalizeRelation` (`server/routes/contacts.ts`, `tests/contactRelations.test.ts`) ; une instance non migrée
   retombe sur l'enregistrement sans ces colonnes. Se modifient dans l'onglet « Vue d'ensemble » de la vue détaillée. `merge_contacts` rattache `contacts.company_contact_id`.
+- **Onglet « Affaires » et choix de la société** : `GET /api/contacts/:id/projects` (`server/routes/contacts.ts`, `tests/contactProjects.test.ts`) rend les affaires où la fiche tient un rôle : maître d'ouvrage (`projects.client_id`), lot (`project_lots.contact_id`), cotraitant, intervenant. Il y ajoute celles de la société de rattachement et des interlocuteurs : un artisan est rattaché à l'affaire par la fiche société OU par la fiche personne selon la saisie, et ne lire que `client_id` le faisait disparaître. Le choix de la société passe par `CompanyPicker.tsx` (recherche dans les sociétés du cabinet, création de la société tapée proposée quand rien ne correspond, ou de celle déjà saisie sur la fiche).
 - **Fusion automatique des doublons sûrs** (`POST /api/contacts/merge-safe`, `planSafeMerges` / `isSafeDuplicateGroup` dans `src/lib/contactMerge.ts`, `SafeMergeDialog.tsx`, bouton du bandeau des doublons, administrateurs et managers) : un groupe est sûr quand toutes les fiches ont la même clé de nom ET qu'aucune colonne à choix n'a deux valeurs différentes (les vides se complètent, les listes se cumulent). Les groupes réunis par e-mail ou SIRET sous des noms différents, ou en conflit, restent à la main. `dry_run: true` rend l'aperçu (groupes, fiches en double, groupes laissés de côté) ; sinon le mot FUSIONNER est exigé et le serveur fusionne 25 groupes par appel via la même fonction `merge_contacts` (fiche conservée = `suggestPrimary`), l'écran rappelant la route jusqu'à épuisement. Tests : `tests/contactMergeRoute.test.ts`, `src/lib/__tests__/contactMerge.test.ts`.
 - **Import Google Contacts et CardDAV : jamais de doublon à la resynchronisation** (`server/contactSyncMatch.ts`, `tests/contactSyncMatch.test.ts`). Un contact importé est rapproché d'une fiche par identifiant Google (`google_resource_name`), puis e-mail (les trois champs, sans tenir compte de la casse), puis nom (`nameKey`) ; la fiche la plus ancienne l'emporte, un contact personnel n'est jamais rapproché, une valeur importée vide n'efface rien. L'ancien code cherchait par e-mail avec `.maybeSingle()` : une société sans e-mail était recréée à chaque synchro, et dès que deux fiches partageaient un e-mail l'erreur ignorée en faisait créer une de plus. Les doublons déjà créés se traitent avec la fusion.
 - **Relances** : filtre par statut ou « Relances à faire » dans le tableau ; règle d'alerte `contact_relance_echue` (`server/agentAlerts.ts`, seuil en jours de retard, 0 par défaut, contacts personnels exclus, colonne absente = aucune alerte).

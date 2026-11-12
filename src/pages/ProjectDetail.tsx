@@ -2106,7 +2106,7 @@ export default function ProjectDetail() {
                     title={t('projectdetail_contract_title')}
                     description={t('projectdetail_contract_desc')}
                     action={
-                      <Link to="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
+                      <Link to={contratHonoraires?.id ? `/contrats?open=${encodeURIComponent(contratHonoraires.id)}` : '/contrats'} className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} />
                         {t('projectdetail_contract_manage')}
                       </Link>
@@ -2240,7 +2240,7 @@ export default function ProjectDetail() {
                           {verrouille && (
                             <p className="text-xs text-[var(--tblr-muted)]">
                               {contratHonoraires.numero ? t('projectdetail_fees_locked_num', { num: contratHonoraires.numero }) : t('projectdetail_fees_locked')}
-                              {' '}<Link to="/contrats" className="underline hover:text-[var(--tblr-primary)]">{t('projectdetail_fees_locked_link')}</Link>
+                              {' '}<Link to={contratHonoraires?.id ? `/contrats?open=${encodeURIComponent(contratHonoraires.id)}` : '/contrats'} className="underline hover:text-[var(--tblr-primary)]">{t('projectdetail_fees_locked_link')}</Link>
                             </p>
                           )}
                         </div>
