@@ -1,3 +1,5 @@
+import type { CroquisScene } from './types/croquis';
+
 export type DocumentPhase = 'ESQ' | 'APS' | 'APD' | 'PC' | 'PRO' | 'DCE' | 'ACT' | 'VISA' | 'DET' | 'AOR' | 'Général';
 
 export interface ProjectPhaseHistoryEntry {
@@ -1701,6 +1703,36 @@ export interface Meeting {
   photos?: MeetingPhoto[];
   attendees?: MeetingAttendee[];
   /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+}
+
+// ── Croquis de réunion et de compte-rendu ───────────────────────────────────
+
+/**
+ * Croquis rattaché à une réunion OU à un compte-rendu de chantier (jamais les
+ * deux : contrainte `croquis_one_parent`). Table `croquis`,
+ * `supabase/migrate_croquis.sql`. Les éléments dessinés vivent dans `scene`.
+ */
+export interface Croquis {
+  id: string;
+  tenant_id?: string;
+  project_id?: string | null;
+  meeting_id?: string | null;
+  site_report_id?: string | null;
+  title: string;
+  scene: CroquisScene;
+  /** Référence du fond (plan ou photo) ; absent ou `null` = feuille blanche. */
+  bg_path?: string | null;
+  /** Opacité du fond, de 0,05 à 1. */
+  bg_opacity: number;
+  bg_width?: number | null;
+  bg_height?: number | null;
+  /** Aperçu PNG inséré dans les exports PDF et Word. */
+  preview_path?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Posé côté client tant que l'écriture n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
   pendingSync?: boolean;
 }
 
