@@ -4,7 +4,7 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-837 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+838 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
@@ -137,15 +137,16 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/chorus-pro/status` | [server/routes/chorusPro.ts:102](../server/routes/chorusPro.ts#L102) |
 | GET | `/api/chorus-pro/status/:invoiceId` | [server/routes/chorusPro.ts:225](../server/routes/chorusPro.ts#L225) |
 | POST | `/api/chorus-pro/test` | [server/routes/chorusPro.ts:132](../server/routes/chorusPro.ts#L132) |
-| GET | `/api/contact-categories` | [server/routes/contacts.ts:217](../server/routes/contacts.ts#L217) |
-| POST | `/api/contact-categories` | [server/routes/contacts.ts:227](../server/routes/contacts.ts#L227) |
-| DELETE | `/api/contact-categories/:id` | [server/routes/contacts.ts:241](../server/routes/contacts.ts#L241) |
+| GET | `/api/contact-categories` | [server/routes/contacts.ts:266](../server/routes/contacts.ts#L266) |
+| POST | `/api/contact-categories` | [server/routes/contacts.ts:276](../server/routes/contacts.ts#L276) |
+| DELETE | `/api/contact-categories/:id` | [server/routes/contacts.ts:290](../server/routes/contacts.ts#L290) |
 | GET | `/api/contacts` | [server/routes/contacts.ts:98](../server/routes/contacts.ts#L98) |
 | POST | `/api/contacts` | [server/routes/contacts.ts:119](../server/routes/contacts.ts#L119) |
 | POST | `/api/contacts/:contactId/qualifications` | [server/routes/qualifications.ts:43](../server/routes/qualifications.ts#L43) |
 | POST | `/api/contacts/:contactId/qualifications/rge-sync` | [server/routes/qualifications.ts:139](../server/routes/qualifications.ts#L139) |
-| DELETE | `/api/contacts/:id` | [server/routes/contacts.ts:197](../server/routes/contacts.ts#L197) |
+| DELETE | `/api/contacts/:id` | [server/routes/contacts.ts:246](../server/routes/contacts.ts#L246) |
 | PUT | `/api/contacts/:id` | [server/routes/contacts.ts:157](../server/routes/contacts.ts#L157) |
+| GET | `/api/contacts/:id/projects` | [server/routes/contacts.ts:201](../server/routes/contacts.ts#L201) |
 | POST | `/api/contacts/merge` | [server/routes/contactMerge.ts:40](../server/routes/contactMerge.ts#L40) |
 | POST | `/api/contacts/merge-safe` | [server/routes/contactMerge.ts:103](../server/routes/contactMerge.ts#L103) |
 | GET | `/api/contrats_moe` | [server/routes/contratsMoe.ts:13](../server/routes/contratsMoe.ts#L13) |
