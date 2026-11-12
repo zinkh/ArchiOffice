@@ -2575,6 +2575,7 @@ export default {
       "contacts_company_detach": "Detach",
       "contacts_company_link": "Company",
       "contacts_company_none": "No company",
+      "contacts_company_create": "Create company \"{{name}}\" and link",
       "contacts_view_label": "View",
       "contacts_view_table": "Table",
       "contacts_view_detail": "Detailed",

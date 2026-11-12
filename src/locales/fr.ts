@@ -2624,6 +2624,7 @@ export default {
       "contacts_company_detach": "Détacher",
       "contacts_company_link": "Société de rattachement",
       "contacts_company_none": "Aucune société",
+      "contacts_company_create": "Créer la société « {{name}} » et rattacher",
       "contacts_view_label": "Affichage",
       "contacts_view_table": "Tableau",
       "contacts_view_detail": "Détaillée",
