@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
+  destinatairesEntreprise, radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
 } from '../actEntreprises';
 
 const ent = (p: Partial<EntrepriseSuivi> = {}): EntrepriseSuivi => ({
@@ -162,5 +162,16 @@ describe('lotsCorrespondants', () => {
   it('rien quand aucun corps d\'état ne recoupe un lot', () => {
     expect(lotsCorrespondants(['Électricité'], lots)).toEqual([]);
     expect(lotsCorrespondants([], lots)).toEqual([]);
+  });
+});
+
+describe('destinatairesEntreprise', () => {
+  it('met l\'e-mail du contact en premier puis les adresses supplémentaires, sans doublon', () => {
+    expect(destinatairesEntreprise({ email: 'a@x.fr', emails_supplementaires: 'b@x.fr; A@x.fr, c@x.fr  d@x.fr' }))
+      .toEqual(['a@x.fr', 'b@x.fr', 'c@x.fr', 'd@x.fr']);
+  });
+  it('ignore ce qui n\'est pas une adresse et gère l\'absence d\'e-mail du contact', () => {
+    expect(destinatairesEntreprise({ emails_supplementaires: 'compta, b@x.fr' })).toEqual(['b@x.fr']);
+    expect(destinatairesEntreprise({})).toEqual([]);
   });
 });

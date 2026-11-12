@@ -60,3 +60,11 @@ export async function fetchAttachableDocuments(query: { project_id?: string; res
   if (query.resource_id) params.set('resource_id', query.resource_id);
   return apiFetch<AttachableDocument[]>(`/api/documents?${params.toString()}`);
 }
+
+/** Document de l'affaire téléchargé en fichier, pour être joint d'office à un message. */
+export async function documentToFile(doc: { name: string; file_url: string; mime_type?: string | null }): Promise<File> {
+  const resp = await fetch(await resolveSignedUrl(doc.file_url));
+  if (!resp.ok) throw new Error(`Téléchargement du document impossible (${resp.status})`);
+  const blob = await resp.blob();
+  return new File([blob], doc.name, { type: doc.mime_type || blob.type || undefined });
+}

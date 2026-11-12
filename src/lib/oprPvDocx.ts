@@ -3,7 +3,7 @@
 // coordonnées sur la première page, ligne réduite ensuite, pied de page avec l'adresse et
 // pagination « P1|2 ».
 import type { AgencySettings } from './proposalExport';
-import { agencyFooterLine, loadLogoDataUrl } from './pdfLetterhead';
+import { agencyFooterLine, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
 import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 import type { DocPv } from './oprPvDocument';
 
@@ -18,7 +18,8 @@ export async function construireDocxPv(doc: DocPv, settings: AgencySettings): Pr
   type Para = InstanceType<typeof Paragraph>;
   type Tab = InstanceType<typeof Table>;
 
-  const logo = await loadLogoDataUrl(settings.logoUrl);
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
+  const logo = await loadLogoDataUrl(cab.logoUrl);
   const entete: Para[] = [];
   if (logo) {
     const h = 40;
@@ -26,11 +27,11 @@ export async function construireDocxPv(doc: DocPv, settings: AgencySettings): Pr
     entete.push(new Paragraph({ children: [new ImageRun({ type: 'png', data, transformation: { width: Math.round((logo.width / logo.height) * h), height: h } })] }));
   }
   entete.push(
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 20, color: '111827' })] }),
+    new Paragraph({ children: [new TextRun({ text: cab.agencyName || '', bold: true, size: 20, color: '111827' })] }),
     new Paragraph({
       border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'D1D5DB' } },
       spacing: { after: 120 },
-      children: [new TextRun({ text: [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
+      children: [new TextRun({ text: [cab.address, cab.phone ? `Tél : ${cab.phone}` : '', cab.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
     }),
   );
   const pied: Para[] = [
@@ -136,7 +137,7 @@ export async function construireDocxPv(doc: DocPv, settings: AgencySettings): Pr
   }
 
   const section = {
-    ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: doc.titre, firstHeader: entete, footer: pied }),
+    ...await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: doc.titre, firstHeader: entete, footer: pied }),
     children: enfants,
   };
   return Packer.toBlob(new Document({ styles: STYLES_WORD_ARIAL, sections: [section] }));

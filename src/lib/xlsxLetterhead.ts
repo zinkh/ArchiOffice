@@ -9,7 +9,7 @@ import { saveAs } from 'file-saver';
 import type { Sortie } from './exportSortie';
 import type { Workbook, Worksheet, Alignment, Fill } from 'exceljs';
 import type { AgencySettings } from './proposalExport';
-import { agencyFooterLine, loadLogoDataUrl, resolvePartnerLogos, type LetterheadOptions } from './pdfLetterhead';
+import { agencyFooterLine, enteteDe, loadLogoDataUrl, type LetterheadOptions } from './pdfLetterhead';
 
 export type Logo = LetterheadOptions['logo'];
 
@@ -126,14 +126,17 @@ function colDepuisPx(largeurs: number[], px: number): number {
 
 export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
   const { settings, colonnes } = opts;
+  // En-tête principal : le cabinet, ou le cotraitant mandataire du groupement
+  // (le cabinet passe alors dans le bandeau). Le pied reste celui du cabinet.
+  const { settings: cab, logo, partners: partenaires } = enteteDe(settings, opts);
   const nbCol = Math.max(colonnes.length, 1);
   // ── Géométrie de l'en-tête, calculée avant de poser quoi que ce soit ──────
   // Les cellules n'ont pas de largeur variable : le logo doit tenir à gauche du
   // texte, et le titre (aligné à droite) ne doit pas passer sur le nom du cabinet.
   const largeurs = colonnes.map(c => c.width);
-  const largeurLogo = opts.logo ? Math.round((opts.logo.width / opts.logo.height) * LOGO_HAUTEUR_PX) : 0;
+  const largeurLogo = logo ? Math.round((logo.width / logo.height) * LOGO_HAUTEUR_PX) : 0;
   let colTexte = 1; // 1-based : première colonne qui porte le texte du cabinet
-  if (opts.logo) {
+  if (logo) {
     let x = 0;
     let idx = 0;
     while (idx < nbCol && x < largeurLogo + 10) { x += largeurs[idx] * PX_PAR_CARACTERE; idx++; }
@@ -145,11 +148,10 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
     colTexte = Math.min(idx + 1, nbCol);
   }
   const largeurDispo = largeurs.slice(colTexte - 1).reduce((t, w) => t + w * PX_PAR_CARACTERE, 0);
-  const largeurNom = (settings.agencyName || '').length * 8.2;
+  const largeurNom = (cab.agencyName || '').length * 8.2;
   const largeurTitre = opts.title.length * 8.8;
   const texteSurTitre = nbCol < 2 || colTexte >= nbCol || largeurNom + largeurTitre + 40 > largeurDispo;
   const nbInfos = opts.infos?.length ?? 0;
-  const partenaires = resolvePartnerLogos(opts.partnerLogos);
   const lignesLogos = partenaires.length > 0 ? LIGNES_LOGOS : 0;
   const base = LIGNES_ENTETE + (texteSurTitre ? LIGNES_TITRE_SOUS_ENTETE : 0) + nbInfos + lignesLogos;
   const ws = wb.addWorksheet(nomOnglet(opts.nom), {
@@ -159,9 +161,9 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
   largeurs.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   // ── En-tête : logo à gauche, coordonnées à côté, titre à droite ───────────
-  if (opts.logo) {
+  if (logo) {
     try {
-      const id = wb.addImage({ base64: opts.logo.dataUrl, extension: 'png' });
+      const id = wb.addImage({ base64: logo.dataUrl, extension: 'png' });
       ws.addImage(id, { tl: { col: 0, row: 0 }, ext: { width: largeurLogo, height: LOGO_HAUTEUR_PX } });
     } catch { /* un logo illisible ne doit pas empêcher l'export */ }
   }
@@ -175,10 +177,10 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
     cell.alignment = { horizontal: align, vertical: 'middle' };
   };
 
-  const contact = [settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  ');
+  const contact = [cab.phone ? `Tél : ${cab.phone}` : '', cab.email].filter(Boolean).join('  ·  ');
   const droite = [opts.reference, new Date().toLocaleDateString('fr-FR')].filter(Boolean).join('  ·  ');
-  cellule(1, colTexte, settings.agencyName || '', 11, true, GRIS_TEXTE);
-  cellule(2, colTexte, settings.address || '', 8, false, GRIS_DOUX);
+  cellule(1, colTexte, cab.agencyName || '', 11, true, GRIS_TEXTE);
+  cellule(2, colTexte, cab.address || '', 8, false, GRIS_DOUX);
   cellule(3, colTexte, contact, 8, false, GRIS_DOUX);
   if (!texteSurTitre) {
     cellule(1, colTitre, opts.title, 12, true, GRIS_TEXTE, 'right');
@@ -252,7 +254,7 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
   const pied = echapperPied(mentions.join('  ·  '));
   // Logo et coordonnées ne sont que sur la première page imprimée. Les suivantes
   // portent une ligne : l'agence à gauche, le document à droite.
-  const nomAgence = echapperPied(settings.agencyName || '');
+  const nomAgence = echapperPied(cab.agencyName || '');
   const nomDocument = echapperPied([opts.title, opts.subtitle].filter(Boolean).join(' | ').slice(0, 90));
   const piedComplet = `&L&"Calibri,Regular"&7 ${pied}&R&"Calibri,Bold"&8 P&P|&N`;
   ws.headerFooter = {

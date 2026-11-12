@@ -354,10 +354,19 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
           <div className="flex items-center gap-2 flex-wrap">
             <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
               <IconPaperclip size={13} /> {t('mailbox_compose_attach')}
-              <input type="file" multiple hidden onChange={e => setFiles(Array.from(e.target.files || []))} />
+              <input type="file" multiple hidden onChange={e => {
+                // Les fichiers choisis s'AJOUTENT aux précédents (un second choix ne les remplace plus).
+                const choisis = Array.from(e.target.files || []);
+                setFiles(prev => [...prev, ...choisis.filter(n => !prev.some(p => p.name === n.name && p.size === n.size && p.lastModified === n.lastModified))]);
+                e.target.value = '';
+              }} />
             </label>
             {files.map((f, i) => (
-              <span key={i} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-muted)' }}>{f.name}</span>
+              <span key={`${f.name}-${i}`} className="inline-flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded-lg" style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-muted)' }}>
+                {f.name}
+                <button type="button" aria-label={`Retirer ${f.name}`} onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                  className="px-1 rounded hover:text-red-500">×</button>
+              </span>
             ))}
           </div>
 
