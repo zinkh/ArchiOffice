@@ -32,6 +32,13 @@ export interface LetterheadOptions {
    * liste vide : l'en-tête reste celui du cabinet seul.
    */
   partnerLogos?: LogoImage[];
+  /**
+   * Mandataire du groupement quand ce n'est pas le cabinet : son logo et ses
+   * coordonnées prennent l'en-tête principal, le cabinet passe dans le bandeau
+   * « En groupement avec ». Absent : le mandataire du groupement actif de
+   * l'écran ; `null` : l'en-tête reste celui du cabinet.
+   */
+  mandataire?: CotraitantIdentity | null;
 }
 
 // ── Groupement actif ─────────────────────────────────────────────────────────
@@ -45,6 +52,32 @@ let groupementActif: LogoImage[] = [];
 
 export function setActiveGroupementLogos(logos: LogoImage[]): void {
   groupementActif = logos;
+}
+
+// Mandataire du groupement actif, quand c'est un cotraitant (voir
+// useActiveGroupement) : même principe que les logos, lu par chaque en-tête.
+let mandataireActif: CotraitantIdentity | null = null;
+
+export function setActiveMandataire(mandataire: CotraitantIdentity | null): void {
+  mandataireActif = mandataire;
+}
+
+/**
+ * Ce qui s'imprime dans l'en-tête principal : le cabinet, ou le cotraitant
+ * mandataire (logo et coordonnées), le cabinet rejoignant alors le bandeau des
+ * partenaires. Le pied de page reste celui du cabinet.
+ */
+function enteteDe(
+  settings: AgencySettings, opts: Pick<LetterheadOptions, 'logo' | 'partnerLogos' | 'mandataire'>,
+): { settings: AgencySettings; logo: LogoImage | null; partners: LogoImage[] } {
+  const partners = resolvePartnerLogos(opts.partnerLogos);
+  const m = opts.mandataire === undefined ? mandataireActif : opts.mandataire;
+  if (!m) return { settings, logo: opts.logo ?? null, partners };
+  return {
+    settings: { ...settings, agencyName: m.titre, address: m.adresse, phone: m.telephone, email: m.email },
+    logo: m.logo,
+    partners: [...(opts.logo ? [opts.logo] : []), ...partners],
+  };
 }
 
 /** Logos à imprimer : ceux passés explicitement, à défaut ceux du groupement actif. */
@@ -136,8 +169,9 @@ export const ENTETE_REDUIT_BAS = 16;
  * Rend l'ordonnée où le contenu peut commencer.
  */
 export function drawCompactHeader(
-  pdf: any, settings: AgencySettings, opts: Pick<LetterheadOptions, 'title' | 'subtitle' | 'margin'>,
+  pdf: any, agencySettings: AgencySettings, opts: Pick<LetterheadOptions, 'title' | 'subtitle' | 'margin' | 'mandataire'>,
 ): number {
+  const settings = enteteDe(agencySettings, opts).settings;
   const pageW = pdf.internal.pageSize.getWidth();
   const margin = opts.margin ?? 14;
   const base = 8;
@@ -168,9 +202,10 @@ export function drawCompactHeader(
  * ligne réduite (voir plus haut), jamais le logo.
  */
 export function drawAgencyHeader(
-  pdf: any, settings: AgencySettings, opts: LetterheadOptions,
+  pdf: any, agencySettings: AgencySettings, opts: LetterheadOptions,
 ): number {
-  if (pageCourante(pdf) > 1) return drawCompactHeader(pdf, settings, opts);
+  if (pageCourante(pdf) > 1) return drawCompactHeader(pdf, agencySettings, opts);
+  const { settings, logo, partners } = enteteDe(agencySettings, opts);
   marquerEntete(pdf, 1);
   const pageW = pdf.internal.pageSize.getWidth();
   const margin = opts.margin ?? 14;
@@ -178,12 +213,12 @@ export function drawAgencyHeader(
 
   // Logo à gauche, hauteur bornée, rapport conservé.
   let textX = margin;
-  if (opts.logo) {
+  if (logo) {
     const hMax = 14;
     const h = hMax;
-    const w = (opts.logo.width / opts.logo.height) * h;
+    const w = (logo.width / logo.height) * h;
     try {
-      pdf.addImage(opts.logo.dataUrl, opts.logo.format, margin, y, w, h);
+      pdf.addImage(logo.dataUrl, logo.format, margin, y, w, h);
       textX = margin + w + 5;
     } catch { /* un logo illisible ne doit pas emporter l'export */ }
   }
@@ -239,7 +274,7 @@ export function drawAgencyHeader(
   pdf.setLineWidth(0.4);
   pdf.line(margin, y, pageW - margin, y);
 
-  const bandeauBas = drawPartnerLogos(pdf, resolvePartnerLogos(opts.partnerLogos), margin, y + 3);
+  const bandeauBas = drawPartnerLogos(pdf, partners, margin, y + 3);
   if (bandeauBas !== null) {
     pdf.setLineWidth(0.25);
     pdf.line(margin, bandeauBas, pageW - margin, bandeauBas);
@@ -394,6 +429,32 @@ export async function loadCotraitantIdentities(
   } catch {
     return [];
   }
+}
+
+/**
+ * Membre du groupement qui peut être désigné mandataire : le cabinet l'est par
+ * défaut, un cotraitant l'est quand son contrat le marque `mandataire`.
+ */
+export interface GroupementMemberMandataire extends GroupementMember {
+  mandataire?: boolean;
+}
+
+/**
+ * En-tête d'un groupement : le cotraitant mandataire (identité complète, s'il y
+ * en a un) et les logos des AUTRES cotraitants, qui vont dans le bandeau « En
+ * groupement avec ». Sans mandataire, tous les logos de cotraitants.
+ */
+export async function loadGroupementHeader(
+  members: GroupementMemberMandataire[] | undefined | null,
+): Promise<{ mandataire: CotraitantIdentity | null; partnerLogos: LogoImage[] }> {
+  const identites = await loadCotraitantIdentities(members);
+  const idMandataire = (members ?? []).find(m => m.mandataire && m.contact_id)?.contact_id;
+  const mandataire = identites.find(i => i.contactId === idMandataire) ?? null;
+  const partnerLogos = identites
+    .filter(i => i !== mandataire)
+    .map(i => i.logo)
+    .filter((l): l is LogoImage => l !== null);
+  return { mandataire, partnerLogos };
 }
 
 /**

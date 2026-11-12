@@ -18,7 +18,7 @@ import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_ENTREPRISE, CONTACT_CATEGORY_
 import { cn } from '../lib/utils';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
-import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, loadCotraitantLogos, fetchAgencySettings } from '../lib/pdfLetterhead';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, loadGroupementHeader, fetchAgencySettings } from '../lib/pdfLetterhead';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -135,12 +135,14 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   // En-tête et pied du cabinet, comme les autres documents.
   const settings = await fetchAgencySettings();
   const logo = await loadLogoDataUrl(settings.logoUrl);
-  const partnerLogos = await loadCotraitantLogos(contrat.cotraitants);
+  // Le mandataire (cotraitant) tient l'en-tête principal ; le cabinet et les
+  // autres cotraitants passent dans le bandeau « En groupement avec ».
+  const { mandataire, partnerLogos } = await loadGroupementHeader(contrat.cotraitants);
   const letterhead = {
     title: "Contrat de maîtrise d'œuvre",
     subtitle: TYPE_CONTRAT_LABELS[contrat.type_contrat] ?? contrat.type_contrat,
     reference: contrat.numero ? `Réf. : ${contrat.numero}` : undefined,
-    margin, logo, partnerLogos,
+    margin, logo, partnerLogos, mandataire,
   };
   const headerEnd = drawAgencyHeader(doc, settings, letterhead);
   doc.setTextColor(...GRIS_DOUX);
@@ -471,6 +473,10 @@ function ContratModal({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalHonorairesContrat, JSON.stringify((form.cotraitants || []).map(c => c.fee_pct))]);
+  // Un seul mandataire : le cabinet (aucun cotraitant marqué) ou un cotraitant.
+  const setMandataire = (id: string | null) => {
+    setForm(f => ({ ...f, cotraitants: (f.cotraitants || []).map(c => ({ ...c, mandataire: id === c.id })) }));
+  };
   const removeCotraitant = (id: string) => {
     setForm(f => ({ ...f, cotraitants: (f.cotraitants || []).filter(c => c.id !== id) }));
   };
@@ -842,6 +848,20 @@ function ContratModal({
                         <IconPlus size={13} /> Ajouter
                       </button>
                     </div>
+                    {(form.cotraitants || []).length > 0 && (
+                      <div className="mb-3">
+                        <label htmlFor="contrat-mandataire" className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Mandataire du groupement</label>
+                        <select id="contrat-mandataire" className="w-full px-3 py-2 rounded-lg text-sm outline-none focus:ring-1 focus:ring-blue-400" style={inputStyle}
+                          value={(form.cotraitants || []).find(c => c.mandataire)?.id ?? ''}
+                          onChange={e => setMandataire(e.target.value || null)}>
+                          <option value="">Le cabinet (agence)</option>
+                          {(form.cotraitants || []).map(c => (
+                            <option key={c.id} value={c.id} disabled={!c.contact_id}>{c.contact_name || c.specialty || 'Cotraitant sans contact'}</option>
+                          ))}
+                        </select>
+                        <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Le logo et les coordonnées du mandataire figurent dans l'en-tête principal des documents ; les autres membres passent sous « En groupement avec ».</p>
+                      </div>
+                    )}
                     {(form.cotraitants || []).length === 0 ? (
                       <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun cotraitant</p>
                     ) : (

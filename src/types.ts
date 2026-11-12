@@ -1743,6 +1743,12 @@ export interface ContratCotraitant extends ContratMembreTVA {
   specialty?: string;
   fee_pct?: number;
   montant_honoraires?: number;
+  /**
+   * Ce cotraitant est le mandataire du groupement : son logo et ses coordonnées
+   * tiennent l'en-tête principal des documents. Absent chez tous : le mandataire
+   * est le cabinet. Dans le jsonb `cotraitants`, donc sans migration.
+   */
+  mandataire?: boolean;
 }
 
 /**
