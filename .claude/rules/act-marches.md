@@ -298,6 +298,20 @@ restent lisibles par le cabinet.
   Aucune migration, rien à cocher. Le téléchargement (`.../pieces/:docId`) n'accepte qu'un fichier de
   ces pièces ou une pièce complémentaire cochée dans les réglages (`published_document_ids`, visible
   par toutes les entreprises) : un fichier du DCE d'un autre lot est refusé (404).
+- **Dossier partagé** (bouton « Ajouter un dossier (zip, lien) » de la fenêtre d'envoi du DCE,
+  `act/DossierPartageDialog.tsx`, logique pure `src/lib/dossierPartageMail.ts`, testée) : un zip ou autre
+  fichier téléversé (`POST /api/documents`, 50 Mo au plus, catégorie DCE, rangé dans les documents de l'affaire),
+  un document déjà dans l'affaire, ou un lien externe (https seulement). Chaque élément devient une pièce de
+  `consultation.dce_documents` marquée `partage: true` (+ `liens_externes: [{ libelle, url }]`, jsonb, aucune
+  migration), rattachée aux lots de l'entreprise (aucun lot = tous les lots). Une pièce `partage` **ne part jamais
+  en pièce jointe** (limite de 25 Mo) et n'entre pas dans le tableau d'indices : `ACTModule` la retire de
+  `dcePieces` et la passe à part (`dcePartages`). Le portail la rend comme n'importe quelle pièce du DCE
+  (téléchargement par la route `pieces/:docId`) et rend ses liens dans `dce[].liens` : **jamais crus tels quels**,
+  `assainirLiensExternes` ne garde que `https:` (libellé 200 caractères, 20 liens au plus), et une pièce qui n'a
+  que des liens reste affichée. Le message cite le bloc « Dossier partagé » (inséré avant « Nous restons à votre
+  disposition », retiré avec « × » qui retire aussi la pièce du DCE) ; sans espace de dépôt disponible, un
+  avertissement rappelle que seuls les liens externes sont accessibles. Seuls les éléments ajoutés pendant CE
+  message sont retirables ici.
 
 ### Documents du marché (ACT, phase Critères)
 

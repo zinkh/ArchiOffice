@@ -1303,6 +1303,8 @@ export default {
       "settings_mail_signature_title": "Email signature",
       "settings_mail_signature_desc": "Automatically added at the bottom of each new message or reply written from the app. You can still edit or remove it before sending.",
       "settings_mail_signature_placeholder": "First Last\nArchitect\nTel. 00 00 00 00 00",
+      "settings_mail_signature_fallback_hint": "While this field is empty, the firm's signature (name, agency, address, contact) is added under your messages. The preview above shows its content.",
+      "settings_mail_signature_use_agency": "Use the firm's signature",
       "settings_personal_contacts_desc": "A personal contact is never visible to the rest of the firm — this only controls whether your own show up in your list.",
       "settings_show_personal_contacts": "Show my personal contacts in the list",
       "siret": "SIRET",

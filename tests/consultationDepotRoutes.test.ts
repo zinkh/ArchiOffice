@@ -436,6 +436,32 @@ describe('réglages et pièces publiées', () => {
     expect((await request(app).get(`/api/public/depot/${jeton}/pieces/${cctpB}`)).status).toBe(404);
   });
 
+  it("rend les dossiers partagés par lien externe, assainis et limités aux lots de l'entreprise", async () => {
+    const c = cabinet();
+    fakeSupabaseAdmin.seed('act_data', [{
+      id: uid('act'), tenant_id: c.tenantId, project_id: c.projectId,
+      consultation: {
+        dce_documents: [
+          { id: 'l1', nom: 'Plans (kDrive)', type_doc: 'Autre', partage: true, tous_lots: false, lots_ids: [c.lotA], document_ids: [],
+            liens_externes: [
+              { libelle: 'Plans', url: 'https://exemple.fr/plans' },
+              { libelle: 'Piège', url: 'javascript:alert(1)' },
+              { libelle: 'Non sécurisé', url: 'http://exemple.fr/x' },
+            ] },
+          { id: 'l2', nom: 'Autre lot', type_doc: 'Autre', partage: true, tous_lots: false, lots_ids: [c.lotB], document_ids: [],
+            liens_externes: [{ libelle: 'Couverture', url: 'https://exemple.fr/couverture' }] },
+          { id: 'l3', nom: 'Que des liens refusés', type_doc: 'Autre', partage: true, tous_lots: true, lots_ids: [], document_ids: [],
+            liens_externes: [{ libelle: 'Piège', url: 'data:text/html,x' }] },
+        ],
+      },
+    }]);
+    const { jeton } = await inviter(c); // lot A seulement
+    const ctx = await request(app).get(`/api/public/depot/${jeton}`);
+    expect(ctx.body.dce.map((p: any) => p.nom)).toEqual(['Plans (kDrive)']);
+    expect(ctx.body.dce[0].liens).toEqual([{ libelle: 'Plans', url: 'https://exemple.fr/plans' }]);
+    expect(ctx.body.dce[0].fichiers).toEqual([]);
+  });
+
   it('sert une pièce du DCE hébergée sur le drive par un jeton à courte durée', async () => {
     const c = cabinet();
     const conn = fakeSupabaseAdmin.getTable('external_storage_connections').find(x => x.tenant_id === c.tenantId)!;

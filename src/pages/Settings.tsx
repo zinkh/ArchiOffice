@@ -24,6 +24,7 @@ import { CloudReconnectForm } from '../components/CloudReconnectForm';
 import { TurnstileField } from '../components/TurnstileField';
 import { useCaptcha } from '../lib/turnstile';
 import { desktopBridge } from '../lib/desktopBridge';
+import { signatureParDefaut } from '../lib/mailSignatureCabinet';
 import { changeLanguageLazy } from '../i18n';
 import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
 import type { ProjectCategory } from '../types';
@@ -512,6 +513,11 @@ export default function Settings() {
     mailSenderEmail: '',
   });
   const [emailNotice, setEmailNotice] = useState<string | null>(null);
+  // Signature du cabinet, posée en repli quand la signature personnelle reste vide (voir MailComposeModal).
+  const signatureCabinet = signatureParDefaut({
+    nom: userSettings.name || currentUser?.name,
+    agencyName: settings.agencyName, address: settings.address, phone: settings.phone, email: settings.email,
+  });
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3542,10 +3548,23 @@ export default function Settings() {
           maxLength={2000}
           value={userSettings.mailSignature}
           onChange={e => setUserSettings({ ...userSettings, mailSignature: e.target.value })}
-          placeholder={t('settings_mail_signature_placeholder') as string}
+          placeholder={(signatureCabinet || t('settings_mail_signature_placeholder')) as string}
           className="w-full p-2.5 rounded-lg text-sm resize-y"
           style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
         />
+        {signatureCabinet && (
+          <div className="space-y-1.5">
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_fallback_hint')}</p>
+            <button
+              type="button"
+              onClick={() => setUserSettings({ ...userSettings, mailSignature: signatureCabinet })}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            >
+              {t('settings_mail_signature_use_agency')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Contacts personnels ── */}

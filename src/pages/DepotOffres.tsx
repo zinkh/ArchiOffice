@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  IconAlertTriangle, IconCheck, IconDownload, IconFilePlus, IconLoader2, IconPlus, IconTrash, IconUpload,
+  IconAlertTriangle, IconCheck, IconDownload, IconExternalLink, IconFilePlus, IconLoader2, IconPlus, IconTrash, IconUpload,
 } from '@tabler/icons-react';
 import {
   DEPOT_ACCEPT, DEPOT_KIND_LABELS, DEPOT_TABLEURS, MAX_DEPOT_OCTETS, MAX_FICHIER_OCTETS, MAX_FICHIERS_PAR_DEPOT,
@@ -27,7 +27,12 @@ interface Contexte {
   instructions: string | null;
   pieces: Array<{ id: string; nom: string; taille: number | null }>;
   /** Pièces du DCE qui concernent cette entreprise (`lots` nul = tous les lots), avec leurs fichiers. */
-  dce?: Array<{ id: string; nom: string; type_doc: string; lots: string[] | null; fichiers: Array<{ id: string; nom: string; taille: number | null }> }>;
+  dce?: Array<{
+    id: string; nom: string; type_doc: string; lots: string[] | null;
+    fichiers: Array<{ id: string; nom: string; taille: number | null }>;
+    /** Liens externes d'un dossier partagé (https, assainis par le serveur). */
+    liens?: Array<{ libelle: string; url: string }>;
+  }>;
   depots: Array<{ id: string; lot_id: string | null; kind: DepotKind; version: number; nom: string | null; taille: number | null; hors_delai: boolean; recu_le: string }>;
 }
 
@@ -141,6 +146,14 @@ export default function DepotOffres() {
                         <a href={`${base}/pieces/${encodeURIComponent(f.id)}`} className="flex items-center gap-2 px-3 py-2.5 text-sm hover:underline min-h-11" target="_blank" rel="noopener noreferrer">
                           <IconDownload size={15} aria-hidden /> <span className="flex-1 min-w-0 break-words">{f.nom}</span>
                           {f.taille ? <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{formatOctets(f.taille)}</span> : null}
+                        </a>
+                      </li>
+                    ))}
+                    {(piece.liens ?? []).map(l => (
+                      <li key={l.url}>
+                        <a href={l.url} className="flex items-center gap-2 px-3 py-2.5 text-sm hover:underline min-h-11" target="_blank" rel="noopener noreferrer">
+                          <IconExternalLink size={15} aria-hidden /> <span className="flex-1 min-w-0 break-words">{l.libelle}</span>
+                          <span className="text-xs break-all" style={{ color: 'var(--tblr-muted)' }}>{new URL(l.url).hostname}</span>
                         </a>
                       </li>
                     ))}

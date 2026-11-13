@@ -179,6 +179,15 @@ maximum). `MailComposeModal` la pose sous le corps d'un nouveau message ou d'une
 réponse ; elle reste modifiable avant l'envoi. Les envois automatiques hors
 session (relances, alertes) ne la portent pas : aucune personne à qui l'attribuer.
 
+**Signature de repli du cabinet** : tant que `profiles.mail_signature` est vide, `signatureEffective` /
+`signatureParDefaut` (`src/lib/mailSignatureCabinet.ts`, testé) composent la signature à partir des réglages
+du cabinet (nom de la personne, `agency_name`, `address`, `phone`, `email`), champ absent = ligne absente, sans
+nom ni agence = aucune signature. Rien n'est écrit en dur. `MailComposeModal` la pose (à l'arrivée des
+réglages si ceux-ci ne sont pas encore lus, une seule fois) et `POST /api/send-email` applique le même repli
+côté serveur (`applyMailSignature` ne la double jamais). Réglages > Mon profil l'affiche en aperçu et propose
+« Utiliser la signature du cabinet ». Texte brut seulement : les routes Gmail et Outlook ne reçoivent que
+`text`, donc pas de logo en signature tant qu'elles n'acceptent pas de `html`.
+
 **Rattacher un email à une opération le classe dans sa boîte d'origine**
 (`server/mailFiling.ts`, appelé par `POST /api/mail/links`). Uniquement pour
 `local_type = 'project'`, avec un `connection_id`, sauf `file_in_mailbox: false` :

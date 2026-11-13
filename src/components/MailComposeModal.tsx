@@ -12,10 +12,13 @@
 // (À + Cc) et transférer (nouveau message, pièces jointes d'origine
 // seulement sur case cochée). Les destinataires se saisissent à la main ou se
 // choisissent dans les contacts du cabinet.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconX, IconPaperclip, IconSend, IconBrandGoogle, IconBrandWindows, IconMailbox } from '@tabler/icons-react';
+import { IconX, IconPaperclip, IconSend, IconBrandGoogle, IconBrandWindows, IconMailbox, IconFolderShare } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { useSettings } from '../hooks/useSettings';
+import { signatureEffective } from '../lib/mailSignatureCabinet';
+import { ajouterAuCorps, retirerDuCorps, type ElementDossierPartage } from '../lib/dossierPartageMail';
 import { getAccessToken } from '../lib/authToken';
 import { applyTenantHeader } from '../lib/activeTenant';
 import { fileToEmailAttachment, MAX_EMAIL_TOTAL_BYTES, type EmailAttachment } from '../lib/emailAttachments';
@@ -54,8 +57,25 @@ export interface MailForwardAttachment {
   url: string;
 }
 
+/**
+ * Dossier partagé (zip, lien externe) d'un envoi de consultation : cité dans le corps du message
+ * et accessible sur la page de dépôt de l'entreprise, hors limite de pièces jointes.
+ */
+export interface MailDossierPartage {
+  elements: ElementDossierPartage[];
+  /** En-tête du bloc dans le corps du message. */
+  entete: string;
+  /** Texte du corps avant lequel le bloc est inséré (à défaut, en fin de corps). */
+  ancre?: string;
+  /** Mise en garde quand l'espace de dépôt est indisponible : seuls les liens externes sont alors accessibles. */
+  avertissement?: string;
+  onOuvrir: () => void;
+  onRetirer: (id: string) => void;
+}
+
 interface MailComposeModalProps {
   accounts: MailAccount[];
+  dossierPartage?: MailDossierPartage;
   replyTo?: MailReplyContext | null;
   initial?: MailComposeInitial;
   forwardAttachments?: MailForwardAttachment[];
@@ -164,9 +184,10 @@ function RecipientField({ label, value, onChange, disabled, required, contacts }
   );
 }
 
-export default function MailComposeModal({ accounts, replyTo, initial, forwardAttachments, initialFiles, title, onClose, onSent }: MailComposeModalProps) {
+export default function MailComposeModal({ accounts, replyTo, initial, forwardAttachments, initialFiles, title, dossierPartage, onClose, onSent }: MailComposeModalProps) {
   const { t } = useTranslation();
   const { currentUser } = useUser();
+  const { settings: reglagesCabinet } = useSettings();
   const sendable = accounts.filter(canSendNatively);
   const noSendableAccount = sendable.length === 0;
 
@@ -183,8 +204,48 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
   );
   // La signature personnelle (Réglages → Mon profil) est posée d'office sous
   // le corps, modifiable ou supprimable avant l'envoi ; le texte cité ou
-  // transféré vient après elle.
-  const [body, setBody] = useState(`${initial?.body || ''}${currentUser?.mailSignature ? `\n\n${currentUser.mailSignature}` : ''}${initial?.quote || ''}`);
+  // transféré vient après elle. Sans signature personnelle, on pose celle du
+  // cabinet (nom, agence, adresse, contact tirés des réglages).
+  const identiteSignature = useMemo(() => ({
+    nom: (reglagesCabinet?.architectName as string | undefined) || currentUser?.name,
+    agencyName: reglagesCabinet?.agencyName,
+    address: reglagesCabinet?.address,
+    phone: reglagesCabinet?.phone,
+    email: reglagesCabinet?.email,
+  }), [reglagesCabinet, currentUser?.name]);
+  const signatureInitiale = signatureEffective(currentUser?.mailSignature, identiteSignature);
+  const [body, setBody] = useState(`${initial?.body || ''}${signatureInitiale ? `\n\n${signatureInitiale}` : ''}${initial?.quote || ''}`);
+  // Les réglages du cabinet peuvent n'arriver qu'après l'ouverture de la fenêtre : la signature
+  // de repli est alors posée à leur arrivée, une seule fois, sans toucher à ce qui a été saisi.
+  const [signaturePosee, setSignaturePosee] = useState(!!signatureInitiale);
+  useEffect(() => {
+    if (signaturePosee) return;
+    const signature = signatureEffective(currentUser?.mailSignature, identiteSignature);
+    if (!signature) return;
+    setSignaturePosee(true);
+    setBody(prev => {
+      const citation = initial?.quote || '';
+      if (citation && prev.endsWith(citation)) return `${prev.slice(0, prev.length - citation.length)}\n\n${signature}${citation}`;
+      return `${prev.replace(/\s+$/, '')}\n\n${signature}`;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identiteSignature, signaturePosee]);
+
+  // Le bloc « dossier partagé » du corps suit les éléments ajoutés ou retirés.
+  const elementsPartages = dossierPartage?.elements;
+  const partagesCites = useRef<Map<string, ElementDossierPartage>>(new Map());
+  useEffect(() => {
+    if (!dossierPartage) return;
+    const actuels = new Map((elementsPartages ?? []).map(e => [e.id, e]));
+    setBody(prev => {
+      let suivant = prev;
+      for (const [id, el] of partagesCites.current) if (!actuels.has(id)) suivant = retirerDuCorps(suivant, dossierPartage.entete, el);
+      for (const [id, el] of actuels) if (!partagesCites.current.has(id)) suivant = ajouterAuCorps(suivant, dossierPartage.entete, el, dossierPartage.ancre);
+      return suivant;
+    });
+    partagesCites.current = actuels;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elementsPartages]);
   const [files, setFiles] = useState<File[]>(() => initialFiles ?? []);
   const [forwardIds, setForwardIds] = useState<Set<string>>(new Set());
   const [contacts, setContacts] = useState<ContactOption[]>([]);
@@ -422,6 +483,13 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
                 e.target.value = '';
               }} />
             </label>
+            {dossierPartage && (
+              <button type="button" onClick={dossierPartage.onOuvrir}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium"
+                style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+                <IconFolderShare size={13} /> Ajouter un dossier (zip, lien)
+              </button>
+            )}
             {files.map((f, i) => (
               <span key={`${f.name}-${i}`} className="inline-flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded-lg" style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-muted)' }}>
                 {f.name}
@@ -430,6 +498,30 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
               </span>
             ))}
           </div>
+
+          {dossierPartage && (dossierPartage.elements.length > 0 || dossierPartage.avertissement) && (
+            <div className="space-y-1.5">
+              {dossierPartage.elements.length > 0 && (
+                <>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {dossierPartage.elements.map(el => (
+                      <span key={el.id} className="inline-flex items-center gap-1 text-xs pl-2 pr-1 py-1 rounded-lg" style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)', border: '1px dashed var(--tblr-border)' }}>
+                        <IconFolderShare size={12} aria-hidden /> {el.libelle}
+                        <button type="button" aria-label={`Retirer le dossier ${el.libelle}`} onClick={() => dossierPartage.onRetirer(el.id)}
+                          className="px-1 rounded hover:text-red-500">×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                    Dossier partagé : cité dans le message et accessible depuis l'espace de dépôt de l'entreprise, hors limite de pièces jointes. « × » le retire du dossier de consultation.
+                  </p>
+                </>
+              )}
+              {dossierPartage.avertissement && (
+                <p className="text-xs" role="status" style={{ color: 'var(--tblr-muted)' }}>{dossierPartage.avertissement}</p>
+              )}
+            </div>
+          )}
 
           <p className="text-xs" style={{ color: overLimit ? 'var(--tblr-danger)' : 'var(--tblr-muted)', fontWeight: overLimit ? 600 : 400 }}
             role={overLimit ? 'alert' : undefined}>

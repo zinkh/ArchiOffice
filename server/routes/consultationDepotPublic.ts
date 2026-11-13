@@ -32,6 +32,7 @@ import { getConnectionById } from '../externalStorage/externalConnection';
 import { parseStorageRef } from '../storagePaths';
 import { loadSuspendedTenants } from '../tenantSuspension';
 import { piecesDeEntreprise } from '../../src/lib/dceIndices';
+import { assainirLiensExternes } from '../../src/lib/dossierPartageMail';
 import {
   DEPOT_EXTENSIONS, DEPOT_FORMAT_LABELS, DEPOT_KINDS_FICHIER, DEPOT_TABLEURS,
   MAX_DEPOT_OCTETS, MAX_FICHIER_OCTETS, MAX_FICHIERS_PAR_DEPOT,
@@ -133,14 +134,17 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
           tous_lots: !!p.tous_lots,
           lots_ids: Array.isArray(p.lots_ids) ? p.lots_ids.map(String) : [],
           document_ids: Array.isArray(p.document_ids) ? p.document_ids.map(String) : [],
+          // Liens externes d'un dossier partagé : jamais crus tels quels (https seulement, bornés).
+          liens: assainirLiensExternes(p.liens_externes),
         })),
       inv.lots_ids,
-    ).filter(p => p.document_ids.length > 0);
+    ).filter(p => p.document_ids.length > 0 || p.liens.length > 0);
     const ids = [...new Set(pieces.flatMap(p => p.document_ids))];
-    if (!ids.length) return [];
-    const { data: docs } = await supabaseAdmin
-      .from('documents').select('id, name, size_bytes')
-      .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).in('id', ids);
+    const { data: docs } = ids.length
+      ? await supabaseAdmin
+        .from('documents').select('id, name, size_bytes')
+        .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).in('id', ids)
+      : { data: [] };
     const parId = new Map(((docs as any[]) || []).map(d => [d.id, d]));
     const libelleLot = (id: string) => {
       const l = lots.find(x => x.id === id);
@@ -149,11 +153,12 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
     return pieces.flatMap(p => {
       const fichiers = p.document_ids.map(id => parId.get(id)).filter(Boolean)
         .map((d: any) => ({ id: d.id as string, nom: d.name as string, taille: (d.size_bytes ?? null) as number | null }));
-      if (!fichiers.length) return [];
+      if (!fichiers.length && !p.liens.length) return [];
       return [{
         id: p.id, nom: p.nom, type_doc: p.type_doc,
         lots: p.tous_lots ? null : p.lots_ids.filter(id => inv.lots_ids.includes(id)).map(libelleLot).filter((x): x is string => !!x),
         fichiers,
+        liens: p.liens,
       }];
     });
   };
