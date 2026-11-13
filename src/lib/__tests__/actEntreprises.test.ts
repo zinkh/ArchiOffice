@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  destinatairesEntreprise, radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
+  destinatairesEntreprise, completerEmailsContact, radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
 } from '../actEntreprises';
 
 const ent = (p: Partial<EntrepriseSuivi> = {}): EntrepriseSuivi => ({
@@ -173,5 +173,40 @@ describe('destinatairesEntreprise', () => {
   it('ignore ce qui n\'est pas une adresse et gère l\'absence d\'e-mail du contact', () => {
     expect(destinatairesEntreprise({ emails_supplementaires: 'compta, b@x.fr' })).toEqual(['b@x.fr']);
     expect(destinatairesEntreprise({})).toEqual([]);
+  });
+});
+
+describe('completerEmailsContact', () => {
+  it('place les adresses saisies dans les emplacements libres de la fiche', () => {
+    expect(completerEmailsContact({}, { email: 'a@x.fr', emails_supplementaires: 'b@x.fr, c@x.fr' }))
+      .toEqual({ email_work: 'a@x.fr', email: 'b@x.fr', email_home: 'c@x.fr' });
+  });
+  it('n\'écrase ni ne duplique une adresse déjà présente (casse ignorée)', () => {
+    expect(completerEmailsContact({ email_work: 'A@x.fr' }, { email: 'a@x.fr' })).toBeNull();
+    expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: 'a@x.fr', emails_supplementaires: 'b@x.fr' }))
+      .toEqual({ email: 'b@x.fr' });
+  });
+  it('laisse le surplus sur la ligne quand la fiche est pleine', () => {
+    expect(completerEmailsContact(
+      { email: '1@x.fr', email_work: '2@x.fr', email_home: '3@x.fr', email_other: '4@x.fr' },
+      { email: '5@x.fr' },
+    )).toBeNull();
+  });
+});
+
+describe('completerEmailsContact : adresse corrigée', () => {
+  it('remplace l\'ancienne adresse là où elle se trouve sur la fiche', () => {
+    expect(completerEmailsContact(
+      { email_work: 'faute@x.fr', email: 'faute@x.fr', email_other: 'autre@x.fr' },
+      { email: 'bon@x.fr', emails_supplementaires: 'autre@x.fr' },
+      ['faute@x.fr', 'autre@x.fr'],
+    )).toEqual({ email_work: 'bon@x.fr' });
+  });
+  it('garde l\'ancienne adresse quand elle est seulement supprimée de la ligne', () => {
+    expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: '' }, ['a@x.fr'])).toBeNull();
+  });
+  it('sans ancienne adresse sur la fiche, la nouvelle va dans un emplacement libre', () => {
+    expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: 'b@x.fr' }, ['z@x.fr']))
+      .toEqual({ email: 'b@x.fr' });
   });
 });
