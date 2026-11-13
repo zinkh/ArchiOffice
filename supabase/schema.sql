@@ -959,6 +959,8 @@ CREATE TABLE IF NOT EXISTS project_shares (
   invited_by    TEXT,
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   revoked_at    TIMESTAMPTZ,
+  -- Fiche contact du confrère choisie à l'invitation (supabase/migrate_project_shares_contact.sql)
+  confrere_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
   CONSTRAINT project_shares_status_check CHECK (status IN ('active', 'revoked')),
   UNIQUE (project_id, user_id)
 );

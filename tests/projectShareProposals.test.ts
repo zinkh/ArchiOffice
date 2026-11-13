@@ -126,7 +126,7 @@ describe('proposition : fonctions pures', () => {
 describe('déposer une proposition', () => {
   it('droit d\'écriture : enregistre la proposition avec le texte que le confrère a vu', async () => {
     const { tenantId, admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const res = await propose(guest.token, projectId, ligneText(lotA, 'Coulées en pleine fouille, sur béton de propreté.'));
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toMatchObject({ status: 'pending', field: 'cctpDescription', targetType: 'ligne', baseValue: LIGNE_TEXT, proposedValue: 'Coulées en pleine fouille, sur béton de propreté.' });
@@ -138,34 +138,37 @@ describe('déposer une proposition', () => {
 
   it('ne modifie jamais le document', async () => {
     const { admin, projectId, lotA, dpgfId, doc } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     await propose(guest.token, projectId, ligneText(lotA, 'Texte proposé'));
     expect(storedDoc(dpgfId)).toEqual(doc);
   });
 
-  it('proposer exige le droit d\'écriture sur CE lot : lecture, commentaire ou autre lot refusés', async () => {
-    const { admin, projectId, lotA, lotB } = setup();
-    const reader = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read', lotId: lotA }]);
-    const commenter = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
-    const otherLot = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotB }]);
-    for (const [who, guest] of [['lecture', reader], ['commentaire', commenter], ['autre lot', otherLot]] as const) {
+  it('proposer exige le droit de modification de l\'atelier : lecture ou commentaire refusés', async () => {
+    const { admin, projectId, lotA } = setup();
+    const reader = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }, { kind: 'dpgf', access: 'read' }]);
+    const commenter = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
+    for (const [who, guest] of [['lecture', reader], ['commentaire', commenter]] as const) {
       const res = await propose(guest.token, projectId, ligneText(lotA, 'Texte proposé'));
       expect(res.status, who).toBe(403);
       expect(res.body.code, who).toBe('SHARE_FORBIDDEN');
     }
   });
 
-  it('un droit sur le DPGF ne permet pas de proposer un texte du CCTP', async () => {
+  it('le DPGF et le CCTP sont deux ateliers : un texte demande le droit du CCTP, un prix celui du DPGF', async () => {
     const { admin, projectId, lotA } = setup();
-    const dpgfOnly = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'comment', lotId: lotA }]);
-    const res = await propose(dpgfOnly.token, projectId, ligneText(lotA, 'Texte proposé'));
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('SHARE_FORBIDDEN');
+    const dpgfOnly = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write' }]);
+    const text = await propose(dpgfOnly.token, projectId, ligneText(lotA, 'Texte proposé'));
+    expect(text.status).toBe(403);
+    expect(text.body.code).toBe('SHARE_FORBIDDEN');
+    const cctpOnly = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }]);
+    const price = await propose(cctpOnly.token, projectId, { lotId: lotA, targetType: 'ligne', targetId: 'lig-a1', field: 'prixUnitaire', value: '12' });
+    expect(price.status).toBe(403);
+    expect(price.body.code).toBe('SHARE_FORBIDDEN');
   });
 
   it('ne propose de modifier que ce qu\'il voit : élément d\'un autre lot ou inexistant', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     expect((await propose(guest.token, projectId, ligneText(lotA, 'x', { targetId: 'lig-b1' }))).status).toBe(404);
     expect((await propose(guest.token, projectId, ligneText(lotA, 'x', { targetId: 'inventé' }))).status).toBe(404);
     expect((await propose(guest.token, projectId, ligneText(lotA, 'x', { targetType: 'chapitre', targetId: 'lig-a1' }))).status).toBe(404);
@@ -173,7 +176,7 @@ describe('déposer une proposition', () => {
 
   it('refuse un champ hors liste, un intitulé vide, un texte inchangé et une affaire archivée', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     expect((await propose(guest.token, projectId, ligneText(lotA, '9999', { field: 'marqueur' }))).status).toBe(400);
     expect((await propose(guest.token, projectId, ligneText(lotA, '   ', { field: 'designation' }))).status).toBe(400);
     const same = await propose(guest.token, projectId, ligneText(lotA, LIGNE_TEXT));
@@ -187,7 +190,7 @@ describe('déposer une proposition', () => {
 
   it('une nouvelle proposition sur le même champ remplace la précédente, sans toucher aux autres champs', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const first = (await propose(guest.token, projectId, ligneText(lotA, 'Première version'))).body;
     const other = (await propose(guest.token, projectId, ligneText(lotA, 'Désignation révisée', { field: 'designation' }))).body;
     const second = (await propose(guest.token, projectId, ligneText(lotA, 'Seconde version'))).body;
@@ -200,7 +203,7 @@ describe('déposer une proposition', () => {
 
   it('la limite de propositions en attente refuse la demande et alerte, sans rien perdre', async () => {
     const { tenantId, admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     fakeSupabaseAdmin.seed('project_share_proposals', Array.from({ length: MAX_PENDING_PER_SHARE }, (_, i) => ({
       id: `${tenantId}-bulk-${i}`, tenant_id: tenantId, project_id: projectId, share_id: guest.shareId, author_id: guest.userId,
       project_lot_id: lotA, target_type: 'ligne', target_id: `autre-${i}`, field: 'cctpDescription',
@@ -243,7 +246,7 @@ describe('déposer une proposition', () => {
 
   it('remplacer une proposition au niveau de la limite reste possible : elle libère sa propre place', async () => {
     const { tenantId, admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const first = (await propose(guest.token, projectId, ligneText(lotA, 'Première version'))).body;
     fakeSupabaseAdmin.seed('project_share_proposals', Array.from({ length: MAX_PENDING_PER_SHARE - 1 }, (_, i) => ({
       id: `${tenantId}-fill-${i}`, tenant_id: tenantId, project_id: projectId, share_id: guest.shareId, author_id: guest.userId,
@@ -257,8 +260,8 @@ describe('déposer une proposition', () => {
 
   it('chaque confrère ne lit que ses propres propositions, et ne retire que les siennes', async () => {
     const { admin, projectId, lotA } = setup();
-    const first = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
-    const second = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const first = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
+    const second = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const mine = (await propose(first.token, projectId, ligneText(lotA, 'Proposition du premier'))).body;
     await propose(second.token, projectId, ligneText(lotA, 'Proposition du second'));
     const seen = (await request(app).get(`/api/shared/projects/${projectId}/proposals`).set(authHeader(first.token))).body;
@@ -270,11 +273,12 @@ describe('déposer une proposition', () => {
     expect((await request(app).delete(`/api/shared/projects/${projectId}/proposals/${mine.id}`).set(authHeader(first.token))).status).toBe(409);
   });
 
-  it('un droit de lecture retiré masque aussi ses propositions', async () => {
-    const { admin, projectId, lotA, lotB } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }, { kind: 'cctp', access: 'read', lotId: lotB }]);
+  it('un atelier retiré masque aussi ses propositions', async () => {
+    const { admin, projectId, lotA } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     await propose(guest.token, projectId, ligneText(lotA, 'Texte proposé'));
-    await request(app).put(`/api/projects/${projectId}/shares/${guest.shareId}`).set(authHeader(admin.token)).send({ grants: [{ kind: 'cctp', access: 'read', lotId: lotB }] });
+    expect((await request(app).get(`/api/shared/projects/${projectId}/proposals`).set(authHeader(guest.token))).body).toHaveLength(1);
+    await request(app).put(`/api/projects/${projectId}/shares/${guest.shareId}`).set(authHeader(admin.token)).send({ grants: [{ kind: 'lots', access: 'read' }] });
     expect((await request(app).get(`/api/shared/projects/${projectId}/proposals`).set(authHeader(guest.token))).body).toEqual([]);
   });
 });
@@ -282,7 +286,7 @@ describe('déposer une proposition', () => {
 describe('décision du cabinet', () => {
   async function pendingProposal(over: Record<string, any> = {}) {
     const ctx = setup();
-    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write', lotId: ctx.lotA }]);
+    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const res = await propose(guest.token, ctx.projectId, ligneText(ctx.lotA, 'Coulées en pleine fouille, sur béton de propreté.', over));
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     return { ...ctx, guest, proposal: res.body };
@@ -325,7 +329,7 @@ describe('décision du cabinet', () => {
 
   it('applique aussi une désignation et le texte d\'un chapitre', async () => {
     const ctx = setup();
-    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write', lotId: ctx.lotA }]);
+    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const a = (await propose(guest.token, ctx.projectId, ligneText(ctx.lotA, 'Semelles filantes en béton armé', { field: 'designation' }))).body;
     const b = (await propose(guest.token, ctx.projectId, { lotId: ctx.lotA, targetType: 'chapitre', targetId: 'chap-a1', field: 'cctpDescription', value: 'Béton C30/37.' })).body;
     expect((await approve(ctx.admin.token, ctx.projectId, a.id)).status).toBe(200);

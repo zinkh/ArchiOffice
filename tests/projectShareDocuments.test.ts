@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
-import { allows, grantedLotIds, normalizeGrants, symmetrizeGrants } from '../server/projectShares/access';
+import { allows, normalizeGrants } from '../server/projectShares/access';
 import { guestDocumentView, parseDocument, visibleNodes } from '../server/projectShares/documentView';
 import { readCommentBody } from '../server/routes/projectShareDocuments';
 
@@ -78,68 +78,47 @@ async function inviteGuest(adminToken: string, projectId: string, grants: any[])
 const comment = (token: string, projectId: string, body: any) =>
   request(app).post(`/api/shared/projects/${projectId}/comments`).set(authHeader(token)).send(body);
 
-describe('droits par lot : fonctions pures', () => {
-  it('exige le lot pour le CCTP et le DPGF, et le refuse pour les autres types', () => {
-    expect('error' in normalizeGrants([{ kind: 'cctp', access: 'read' }])).toBe(true);
-    expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'read', lotId: '  ' }])).toBe(true);
-    expect('error' in normalizeGrants([{ kind: 'tasks', access: 'read', lotId: 'l1' }])).toBe(true);
-    expect('error' in normalizeGrants([{ kind: 'cctp', access: 'read', lotId: 'l1' }])).toBe(false);
+describe('droits par atelier : fonctions pures', () => {
+  it('accorde chaque atelier en entier : un lot envoyé par un ancien client est ignoré', () => {
+    expect('error' in normalizeGrants([{ kind: 'cctp', access: 'read' }])).toBe(false);
+    expect((normalizeGrants([{ kind: 'dpgf', access: 'read', lotId: 'l1' }]) as any).grants).toEqual([{ kind: 'dpgf', access: 'read' }]);
+    expect('error' in normalizeGrants([{ kind: 'inconnu', access: 'read' }])).toBe(true);
   });
 
-  it('accorde « commentaire » au CCTP et au DPGF seulement, et « écriture » (proposer) au CCTP et au DPGF', () => {
+  it('accorde « commentaire » au CCTP et au DPGF seulement, et « écriture » là où elle est branchée', () => {
     expect('error' in normalizeGrants([{ kind: 'tasks', access: 'comment' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'documents', access: 'comment' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'documents', access: 'write' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'lots', access: 'write' }])).toBe(true);
-    expect('error' in normalizeGrants([{ kind: 'cctp', access: 'write', lotId: 'l1' }])).toBe(false);
-    expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'write', lotId: 'l1' }])).toBe(false);
-    expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'comment', lotId: 'l1' }])).toBe(false);
+    expect('error' in normalizeGrants([{ kind: 'act', access: 'write' }])).toBe(true);
+    expect('error' in normalizeGrants([{ kind: 'cctp', access: 'write' }])).toBe(false);
+    expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'comment' }])).toBe(false);
+    expect('error' in normalizeGrants([{ kind: 'act', access: 'read' }])).toBe(false);
   });
 
-  it('garde un droit par lot, et le dernier gagne pour un même lot', () => {
+  it('un atelier n\'y figure qu\'une fois, le niveau le plus haut l\'emporte', () => {
     const result = normalizeGrants([
-      { kind: 'cctp', access: 'read', lotId: 'l1' },
-      { kind: 'cctp', access: 'read', lotId: 'l2' },
-      { kind: 'cctp', access: 'comment', lotId: 'l1' },
+      { kind: 'cctp', access: 'read' },
+      { kind: 'cctp', access: 'comment' },
+      { kind: 'cctp', access: 'read' },
+      { kind: 'dpgf', access: 'read' },
     ]) as any;
-    // Un lot vaut pour le CCTP ET le DPGF : deux lots, deux types, au niveau saisi en dernier.
-    expect(result.grants).toHaveLength(4);
-    expect(result.grants.filter((g: any) => g.lotId === 'l1').map((g: any) => `${g.kind}:${g.access}`).sort()).toEqual(['cctp:comment', 'dpgf:comment']);
-    expect(result.grants.filter((g: any) => g.lotId === 'l2').map((g: any) => `${g.kind}:${g.access}`).sort()).toEqual(['cctp:read', 'dpgf:read']);
+    expect(result.grants.map((g: any) => `${g.kind}:${g.access}`).sort()).toEqual(['cctp:comment', 'dpgf:read']);
   });
 
-  it('unifie le CCTP et le DPGF : un lot, un seul niveau, le plus haut des deux', () => {
-    const grants = symmetrizeGrants([
-      { kind: 'cctp', access: 'read', lotId: 'l1' },
-      { kind: 'dpgf', access: 'write', lotId: 'l1' },
-      { kind: 'dpgf', access: 'comment', lotId: 'l2' },
-      { kind: 'tasks', access: 'read' },
-    ]);
-    expect(grants.filter(g => g.lotId === 'l1').map(g => `${g.kind}:${g.access}`).sort()).toEqual(['cctp:write', 'dpgf:write']);
-    expect(grants.filter(g => g.lotId === 'l2').map(g => `${g.kind}:${g.access}`).sort()).toEqual(['cctp:comment', 'dpgf:comment']);
-    expect(grants.filter(g => g.kind === 'tasks')).toEqual([{ kind: 'tasks', access: 'read' }]);
-  });
-
-  it('un droit par lot sans lot n\'ouvre rien, même unifié', () => {
-    expect(symmetrizeGrants([{ kind: 'cctp', access: 'write' }])).toEqual([]);
-  });
-
-  it('un droit sur un lot ne vaut pas pour un autre, et l\'absence de lot n\'accorde rien', () => {
-    const grants = (normalizeGrants([{ kind: 'cctp', access: 'comment', lotId: 'l1' }, { kind: 'tasks', access: 'write' }]) as any).grants;
-    expect(allows(grants, 'cctp', 'read', 'l1')).toBe(true);
-    expect(allows(grants, 'cctp', 'comment', 'l1')).toBe(true);
-    expect(allows(grants, 'cctp', 'write', 'l1')).toBe(false); // commenter ne permet pas de proposer
-    expect(allows(grants, 'cctp', 'read', 'l2')).toBe(false);
-    expect(allows(grants, 'cctp', 'read')).toBe(false);
-    expect(allows(grants, 'dpgf', 'read', 'l1')).toBe(true); // un lot accordé l'est pour le CCTP et le DPGF
-    expect(allows(grants, 'dpgf', 'read', 'l2')).toBe(false);
+  it('le CCTP et le DPGF sont deux ateliers distincts, et un lot ne change rien au droit', () => {
+    const grants = (normalizeGrants([{ kind: 'cctp', access: 'comment' }, { kind: 'tasks', access: 'write' }]) as any).grants;
+    expect(allows(grants, 'cctp', 'read')).toBe(true);
+    expect(allows(grants, 'cctp', 'comment')).toBe(true);
+    expect(allows(grants, 'cctp', 'write')).toBe(false); // commenter ne permet pas de proposer
+    expect(allows(grants, 'cctp', 'read', 'n-importe-quel-lot')).toBe(true);
+    expect(allows(grants, 'dpgf', 'read')).toBe(false); // le CCTP ne donne pas les prix du DPGF
     expect(allows(grants, 'tasks', 'read')).toBe(true);
-    expect([...grantedLotIds(grants, 'cctp')]).toEqual(['l1']);
-    expect([...grantedLotIds(grants, 'cctp', 'write')]).toEqual([]);
+    expect(allows([], 'cctp', 'read')).toBe(false);
   });
 
   it('borne la taille d\'une liste de droits et le commentaire', () => {
-    const many = Array.from({ length: 201 }, (_, i) => ({ kind: 'cctp', access: 'read', lotId: `l${i}` }));
+    const many = Array.from({ length: 201 }, () => ({ kind: 'cctp', access: 'read' }));
     expect('error' in normalizeGrants(many)).toBe(true);
     expect('error' in readCommentBody('   ')).toBe(true);
     expect('error' in readCommentBody('x'.repeat(2001))).toBe(true);
@@ -201,49 +180,46 @@ describe('vue filtrée du document : fonctions pures', () => {
   });
 });
 
-describe('lecture par lot côté invité', () => {
-  it('rend le CCTP du seul lot accordé, avec ses chiffres mais sans ceux des autres lots ni les totaux', async () => {
-    const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read', lotId: lotA }]);
+describe('lecture par atelier côté invité', () => {
+  it('rend le CCTP de tous les lots, sans prix ni totaux quand le DPGF n\'est pas partagé', async () => {
+    const { admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }]);
     const res = await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token));
     expect(res.status).toBe(200);
-    expect(res.body.lots.map((l: any) => l.id)).toEqual(['lot-a']);
+    expect(res.body.lots.map((l: any) => l.id)).toEqual(['lot-a', 'lot-b']);
     expect(res.body.lots[0].titre).toBe('Gros œuvre');
     const raw = JSON.stringify(res.body);
-    // Le lot accordé porte ses chiffres (un seul droit pour le CCTP et le DPGF) ; rien d'un autre lot ni du document.
-    expect(raw).toContain(String(PRICE_A));
-    for (const secret of [String(PRICE_B), 'totalHT', 'totalTTC', 'Charpente', 'Fermettes']) expect(raw, secret).not.toContain(secret);
+    for (const secret of [String(PRICE_A), String(PRICE_B), 'totalHT', 'totalTTC']) expect(raw, secret).not.toContain(secret);
   });
 
-  it('rend le DPGF du lot accordé avec ses prix, et jamais ceux des autres lots', async () => {
-    const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'read', lotId: lotA }]);
-    const res = await request(app).get(`/api/shared/projects/${projectId}/dpgf`).set(authHeader(guest.token));
+  it('la vue CCTP porte les chiffres des lots dès que l\'atelier DPGF est partagé, jamais les totaux du document', async () => {
+    const { admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }, { kind: 'dpgf', access: 'read' }]);
+    const res = await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token));
     expect(res.status).toBe(200);
     const raw = JSON.stringify(res.body);
     expect(raw).toContain(String(PRICE_A));
-    expect(raw).not.toContain(String(PRICE_B));
+    expect(raw).toContain(String(PRICE_B));
+    for (const secret of ['totalHT', 'totalTTC']) expect(raw, secret).not.toContain(secret);
+  });
+
+  it('rend le DPGF de tous les lots avec leurs prix, jamais les totaux du document', async () => {
+    const { admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'read' }]);
+    const res = await request(app).get(`/api/shared/projects/${projectId}/dpgf`).set(authHeader(guest.token));
+    expect(res.status).toBe(200);
+    expect(res.body.lots.map((l: any) => l.id)).toEqual(['lot-a', 'lot-b']);
+    const raw = JSON.stringify(res.body);
+    expect(raw).toContain(String(PRICE_A));
     expect(raw).not.toContain('totalHT');
   });
 
-  it('cumule plusieurs lots, et un lot accordé s\'ouvre dans le CCTP ET dans le DPGF', async () => {
-    const { admin, projectId, lotA, lotB } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [
-      { kind: 'cctp', access: 'read', lotId: lotA }, { kind: 'cctp', access: 'read', lotId: lotB },
-    ]);
-    const cctp = await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token));
-    expect(cctp.body.lots.map((l: any) => l.id)).toEqual(['lot-a', 'lot-b']);
-    const dpgf = await request(app).get(`/api/shared/projects/${projectId}/dpgf`).set(authHeader(guest.token));
-    expect(dpgf.status).toBe(200);
-    expect(dpgf.body.lots.map((l: any) => l.id)).toEqual(['lot-a', 'lot-b']);
-  });
-
-  it('un lot non accordé reste fermé dans les deux documents', async () => {
-    const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'read', lotId: lotA }]);
-    const cctp = await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token));
-    expect(cctp.body.lots.map((l: any) => l.id)).toEqual(['lot-a']);
-    expect(JSON.stringify(cctp.body)).not.toContain('Fermettes');
+  it('un atelier non accordé reste fermé : le CCTP seul n\'ouvre pas le DPGF', async () => {
+    const { admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }]);
+    const res = await request(app).get(`/api/shared/projects/${projectId}/dpgf`).set(authHeader(guest.token));
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('SHARE_FORBIDDEN');
   });
 
   it('refuse le CCTP sans droit, et une affaire non partagée est introuvable', async () => {
@@ -253,47 +229,46 @@ describe('lecture par lot côté invité', () => {
     expect((await request(app).get(`/api/shared/projects/${projectId}-autre/cctp`).set(authHeader(guest.token))).status).toBe(404);
   });
 
-  it('un droit retiré ferme le lot immédiatement', async () => {
-    const { admin, projectId, lotA, lotB } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read', lotId: lotA }, { kind: 'cctp', access: 'read', lotId: lotB }]);
+  it('un atelier retiré se ferme immédiatement', async () => {
+    const { admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }, { kind: 'dpgf', access: 'read' }]);
     const put = await request(app).put(`/api/projects/${projectId}/shares/${guest.shareId}`).set(authHeader(admin.token))
-      .send({ grants: [{ kind: 'cctp', access: 'read', lotId: lotB }] });
+      .send({ grants: [{ kind: 'dpgf', access: 'read' }] });
     expect(put.status).toBe(200);
-    const res = await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token));
-    expect(res.body.lots.map((l: any) => l.id)).toEqual(['lot-b']);
+    expect((await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token))).status).toBe(403);
+    expect((await request(app).get(`/api/shared/projects/${projectId}/dpgf`).set(authHeader(guest.token))).status).toBe(200);
   });
 
-  it('rend 404 sans document, et le panneau reçoit les lots de l\'affaire', async () => {
+  it('rend 404 sans document, et le panneau reçoit les lots de l\'affaire pour ses libellés', async () => {
     const { tenantId, admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }, { kind: 'dpgf', access: 'read' }]);
     const docs = fakeSupabaseAdmin.getTable('dpgfs');
     docs.splice(0, docs.length, ...docs.filter((d: any) => d.tenant_id !== tenantId));
     expect((await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token))).status).toBe(404);
     const panel = await request(app).get(`/api/projects/${projectId}/shares`).set(authHeader(admin.token));
     expect(panel.body.lots.map((l: any) => l.id).sort()).toEqual([lotA, `${tenantId}-lotB`].sort());
-    expect(panel.body.lotScopedKinds).toEqual(['cctp', 'dpgf']);
+    expect(panel.body.lotScopedKinds).toBeUndefined();
     expect(panel.body.commentableKinds).toEqual(['cctp', 'dpgf']);
+    expect(panel.body.kinds).toContain('act');
   });
 });
 
-describe('attribution des droits par lot côté cabinet', () => {
-  it('refuse un lot qui n\'appartient pas à l\'affaire, à l\'invitation comme à la modification', async () => {
-    const { admin, projectId, lotA } = setup();
-    const foreign = setup();
-    const bad = [{ kind: 'cctp', access: 'read', lotId: foreign.lotA }];
-    const invite = await request(app).post(`/api/projects/${projectId}/shares`).set(authHeader(admin.token)).send({ email: newEmail(), grants: bad });
-    expect(invite.status).toBe(400);
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read', lotId: lotA }]);
-    const put = await request(app).put(`/api/projects/${projectId}/shares/${guest.shareId}`).set(authHeader(admin.token)).send({ grants: bad });
-    expect(put.status).toBe(400);
-    expect((await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token))).body.lots.map((l: any) => l.id)).toEqual(['lot-a']);
+describe('attribution des droits par atelier côté cabinet', () => {
+  it('ne connaît plus les lots : un lot envoyé est ignoré et le droit vaut pour l\'atelier', async () => {
+    const { admin, projectId } = setup();
+    const invite = await request(app).post(`/api/projects/${projectId}/shares`).set(authHeader(admin.token))
+      .send({ email: newEmail(), grants: [{ kind: 'cctp', access: 'read', lotId: 'lot-inconnu' }] });
+    expect(invite.status).toBe(201);
+    expect(invite.body.grants).toEqual([{ kind: 'cctp', access: 'read' }]);
   });
 
-  it('refuse un droit CCTP sans lot', async () => {
-    const { admin, projectId } = setup();
-    const res = await request(app).post(`/api/projects/${projectId}/shares`).set(authHeader(admin.token))
-      .send({ email: newEmail(), grants: [{ kind: 'cctp', access: 'read' }] });
-    expect(res.status).toBe(400);
+  it('une ligne de droit qui porte encore un lot n\'ouvre rien (refus par défaut, avant la migration)', async () => {
+    const { tenantId, admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'tasks', access: 'read' }]);
+    fakeSupabaseAdmin.seed('project_share_grants', [
+      { id: `${tenantId}-ancien`, share_id: guest.shareId, tenant_id: tenantId, resource_kind: 'cctp', access: 'write', project_lot_id: 'lot-a' },
+    ]);
+    expect((await request(app).get(`/api/shared/projects/${projectId}/cctp`).set(authHeader(guest.token))).status).toBe(403);
   });
 });
 
@@ -304,7 +279,7 @@ describe('commentaires côté invité', () => {
 
   it('commente une ligne du lot accordé, et la retrouve dans son fil', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     const created = await comment(guest.token, projectId, target(lotA));
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     expect(created.body).toMatchObject({ resourceKind: 'cctp', lotId: lotA, targetType: 'ligne', targetId: 'lig-a1', authorKind: 'guest', resolvedAt: null });
@@ -314,7 +289,7 @@ describe('commentaires côté invité', () => {
 
   it('commente un lot, un chapitre et un sous-article', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     for (const [targetType, targetId] of [['lot', 'lot-a'], ['chapitre', 'chap-a1'], ['ligne', 'lig-a1b']]) {
       expect((await comment(guest.token, projectId, target(lotA, { targetType, targetId }))).status, `${targetType}`).toBe(201);
     }
@@ -322,25 +297,24 @@ describe('commentaires côté invité', () => {
 
   it('lecture seule : commenter est refusé', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }, { kind: 'dpgf', access: 'read' }]);
     const res = await comment(guest.token, projectId, target(lotA));
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('SHARE_FORBIDDEN');
   });
 
-  it('refuse un lot non accordé, un autre type de document et un type non commentable', async () => {
-    const { admin, projectId, lotA, lotB } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
-    expect((await comment(guest.token, projectId, target(lotB, { targetId: 'lig-b1' }))).status).toBe(403);
-    // Le lot accordé l'est aussi pour le DPGF ; un autre lot ne l'est pour aucun des deux.
-    expect((await comment(guest.token, projectId, target(lotB, { resourceKind: 'dpgf', targetId: 'lig-b1' }))).status).toBe(403);
+  it('refuse un atelier non partagé et un type non commentable', async () => {
+    const { admin, projectId, lotA } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }]);
+    // Le CCTP est commentable, le DPGF n'est pas partagé : deux ateliers, deux droits.
+    expect((await comment(guest.token, projectId, target(lotA, { resourceKind: 'dpgf' }))).status).toBe(403);
     expect((await comment(guest.token, projectId, target(lotA, { resourceKind: 'tasks' }))).status).toBe(400);
   });
 
   it('ne commente que ce qu\'il voit : élément d\'un autre lot, inexistant, ou réservé au CCTP dans la vue DPGF', async () => {
     const { admin, projectId, lotA } = setup();
     const guest = await inviteGuest(admin.token, projectId, [
-      { kind: 'cctp', access: 'comment', lotId: lotA }, { kind: 'dpgf', access: 'comment', lotId: lotA },
+      { kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }, { kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' },
     ]);
     expect((await comment(guest.token, projectId, target(lotA, { targetId: 'lig-b1' }))).status).toBe(404);
     expect((await comment(guest.token, projectId, target(lotA, { targetId: 'inventé' }))).status).toBe(404);
@@ -353,7 +327,7 @@ describe('commentaires côté invité', () => {
 
   it('valide le corps et refuse une affaire archivée', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     expect((await comment(guest.token, projectId, target(lotA, { body: '   ' }))).status).toBe(400);
     expect((await comment(guest.token, projectId, target(lotA, { body: 'x'.repeat(2001) }))).status).toBe(400);
     expect((await comment(guest.token, projectId, target(lotA, { targetType: 'étage' }))).status).toBe(400);
@@ -365,8 +339,8 @@ describe('commentaires côté invité', () => {
 
   it('chaque confrère ne lit que ses propres fils', async () => {
     const { admin, projectId, lotA } = setup();
-    const first = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
-    const second = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const first = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
+    const second = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     await comment(first.token, projectId, target(lotA, { body: 'Fil du premier' }));
     await comment(second.token, projectId, target(lotA, { body: 'Fil du second' }));
     const seen = (await request(app).get(`/api/shared/projects/${projectId}/comments`).set(authHeader(first.token))).body;
@@ -376,19 +350,20 @@ describe('commentaires côté invité', () => {
 
   it('une réponse reste dans le fil du même partage, sur le même élément', async () => {
     const { admin, projectId, lotA } = setup();
-    const first = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
-    const second = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const first = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
+    const second = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     const root = (await comment(first.token, projectId, target(lotA))).body;
     expect((await comment(first.token, projectId, target(lotA, { parentId: root.id, body: 'Précision' }))).status).toBe(201);
     expect((await comment(first.token, projectId, target(lotA, { parentId: root.id, targetId: 'lig-a2' }))).status).toBe(404);
     expect((await comment(second.token, projectId, target(lotA, { parentId: root.id }))).status).toBe(404);
   });
 
-  it('un droit de lecture retiré masque aussi les commentaires du lot', async () => {
-    const { admin, projectId, lotA, lotB } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }, { kind: 'cctp', access: 'read', lotId: lotB }]);
+  it('un atelier retiré masque aussi ses commentaires', async () => {
+    const { admin, projectId, lotA } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     await comment(guest.token, projectId, target(lotA));
-    await request(app).put(`/api/projects/${projectId}/shares/${guest.shareId}`).set(authHeader(admin.token)).send({ grants: [{ kind: 'cctp', access: 'read', lotId: lotB }] });
+    expect((await request(app).get(`/api/shared/projects/${projectId}/comments`).set(authHeader(guest.token))).body).toHaveLength(1);
+    await request(app).put(`/api/projects/${projectId}/shares/${guest.shareId}`).set(authHeader(admin.token)).send({ grants: [{ kind: 'dpgf', access: 'comment' }] });
     expect((await request(app).get(`/api/shared/projects/${projectId}/comments`).set(authHeader(guest.token))).body).toEqual([]);
   });
 });
@@ -398,7 +373,7 @@ describe('commentaires côté cabinet', () => {
 
   it('liste tous les commentaires avec l\'adresse du confrère, y répond, et le confrère voit la réponse', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     const root = (await comment(guest.token, projectId, target(lotA))).body;
 
     const list = await request(app).get(`/api/projects/${projectId}/share-comments`).set(authHeader(admin.token));
@@ -417,7 +392,7 @@ describe('commentaires côté cabinet', () => {
 
   it('dit au cabinet sur quoi porte chaque commentaire, sans rien exposer à l\'invité', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     await comment(guest.token, projectId, target(lotA));
     await comment(guest.token, projectId, { ...target(lotA), targetType: 'lot', targetId: 'lot-a' });
     const list = (await request(app).get(`/api/projects/${projectId}/share-comments`).set(authHeader(admin.token))).body;
@@ -428,7 +403,7 @@ describe('commentaires côté cabinet', () => {
 
   it('marque un commentaire comme traité, puis le rouvre', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     const root = (await comment(guest.token, projectId, target(lotA))).body;
     const done = await request(app).put(`/api/projects/${projectId}/share-comments/${root.id}`).set(authHeader(admin.token)).send({ resolved: true });
     expect(done.status).toBe(200);
@@ -440,7 +415,7 @@ describe('commentaires côté cabinet', () => {
 
   it('réservé aux administrateurs et managers, et cloisonné par cabinet', async () => {
     const { tenantId, admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     const root = (await comment(guest.token, projectId, target(lotA))).body;
     const user = makeUser(tenantId, 'user');
     expect((await request(app).get(`/api/projects/${projectId}/share-comments`).set(authHeader(user.token))).status).toBe(403);
@@ -453,7 +428,7 @@ describe('commentaires côté cabinet', () => {
 
   it('un confrère ne peut pas atteindre les routes du cabinet (garde par défaut)', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     const res = await request(app).get(`/api/projects/${projectId}/share-comments`).set(authHeader(guest.token));
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('GUEST_FORBIDDEN');

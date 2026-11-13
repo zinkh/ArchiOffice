@@ -210,11 +210,25 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
       for (const p of (people || []) as any[]) ids.add(p.id);
       const list = [...ids];
 
-      const [clients, lots, cotraitants, stakeholders] = await Promise.all([
+      // Confrère invité sur l'affaire d'un cabinet : le partage porte la fiche choisie à l'invitation, et
+      // les partages plus anciens (adresse seule) se rattachent par l'adresse de la fiche.
+      const { data: fiches } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
+        .select('id, email, email_work, email_home, email_other').in('id', list);
+      const adresses = [...new Set(((fiches || []) as any[])
+        .flatMap(f => [f.email_work, f.email, f.email_home, f.email_other])
+        .filter((v: unknown): v is string => typeof v === 'string' && !!v.trim())
+        .map(v => v.trim().toLowerCase()))];
+      const partagesParFiche = tenantScopedFrom(supabaseAdmin, tenantId, 'project_shares').select('project_id, status').in('confrere_contact_id', list);
+      const partagesParAdresse = adresses.length
+        ? tenantScopedFrom(supabaseAdmin, tenantId, 'project_shares').select('project_id, status').in('email', adresses)
+        : Promise.resolve({ data: [] as any[] });
+
+      const [clients, lots, cotraitants, stakeholders, sharesById, sharesByMail] = await Promise.all([
         tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name').in('client_id', list),
         tenantScopedFrom(supabaseAdmin, tenantId, 'project_lots').select('project_id, lot_number, lot_title').in('contact_id', list),
         tenantScopedFrom(supabaseAdmin, tenantId, 'project_cotraitants').select('project_id, specialty').in('contact_id', list),
         tenantScopedFrom(supabaseAdmin, tenantId, 'project_stakeholders').select('project_id, role').in('contact_id', list),
+        partagesParFiche, partagesParAdresse,
       ]);
 
       const byProject = new Map<string, { id: string; name: string; roles: string[] }>();
@@ -229,6 +243,10 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
       for (const l of (lots.data || []) as any[]) add(l.project_id, ['Lot', l.lot_number, l.lot_title].filter(Boolean).join(' '));
       for (const c of (cotraitants.data || []) as any[]) add(c.project_id, c.specialty ? `Cotraitant, ${c.specialty}` : 'Cotraitant');
       for (const s of (stakeholders.data || []) as any[]) add(s.project_id, s.role || 'Intervenant');
+      // Colonne absente (instance non migrée) : `sharesById.data` est nul, seule l'adresse rapproche.
+      for (const s of [...((sharesById.data || []) as any[]), ...((sharesByMail.data || []) as any[])]) {
+        add(s.project_id, s.status === 'active' ? 'Confrère invité' : 'Ancien confrère invité');
+      }
 
       const missing = [...byProject.values()].filter(p => !p.name).map(p => p.id);
       if (missing.length) {

@@ -7,8 +7,9 @@ import { useTranslation } from 'react-i18next';
 import { IconArrowLeft } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import SharedDocument from '../components/SharedDocument';
+import { SharedAct, SharedReports, SharedReserves } from '../components/SharedChantier';
 
-interface Grant { kind: 'lots' | 'tasks' | 'documents' | 'cctp' | 'dpgf'; access: 'read' | 'comment' | 'write'; lotId?: string }
+interface Grant { kind: 'lots' | 'tasks' | 'documents' | 'cctp' | 'dpgf' | 'act' | 'reports' | 'reserves' | 'gpa'; access: 'read' | 'comment' | 'write' }
 interface Doc { id: string; name: string; category: string | null; phase: string | null; version: number | null; uploaded_at: string | null; description: string | null }
 interface Summary { shareId: string; projectId: string; projectName: string; projectCode: string | null; address: string | null; tenantName: string | null; grants: Grant[] }
 interface View {
@@ -125,6 +126,14 @@ function SharedDetail({ projectId }: { projectId: string }) {
   if (!view) return null;
   const tasksGrant = view.grants.find(g => g.kind === 'tasks');
   const canWrite = tasksGrant?.access === 'write' && !view.archived;
+  // Suivi de chantier : l'écriture est un droit par type, et jamais sur une affaire archivée.
+  const chantier = (kind: 'reports' | 'reserves' | 'gpa') => {
+    const grant = view.grants.find(g => g.kind === kind);
+    return grant ? { canWrite: grant.access === 'write' && !view.archived } : null;
+  };
+  const reportsRight = chantier('reports');
+  const reservesRight = chantier('reserves');
+  const gpaRight = chantier('gpa');
   const reload = () => loadTasks(view.grants).catch(e => setError(e?.message || t('share_error')));
   // Le lien est demandé au serveur à chaque ouverture (il expire) : le fichier n'est jamais
   // une adresse stockée côté page.
@@ -155,7 +164,7 @@ function SharedDetail({ projectId }: { projectId: string }) {
         </h1>
         {view.project.address && <p className="text-xs text-[var(--tblr-muted)]">{view.project.address}</p>}
         {view.archived && <p className="text-xs text-[var(--tblr-muted)] mt-1">{t('shared_archived')}</p>}
-        {!view.archived && !canWrite && <p className="text-xs text-[var(--tblr-muted)] mt-1">{t('shared_readonly')}</p>}
+        {!view.archived && !canWrite && !reportsRight?.canWrite && !reservesRight?.canWrite && !gpaRight?.canWrite && <p className="text-xs text-[var(--tblr-muted)] mt-1">{t('shared_readonly')}</p>}
       </div>
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
 
@@ -196,6 +205,11 @@ function SharedDetail({ projectId }: { projectId: string }) {
           </ul>
         </section>
       )}
+
+      {view.grants.some(g => g.kind === 'act') && <SharedAct projectId={projectId} />}
+      {reportsRight && <SharedReports projectId={projectId} canWrite={reportsRight.canWrite} />}
+      {reservesRight && <SharedReserves projectId={projectId} kind="reserves" canWrite={reservesRight.canWrite} />}
+      {gpaRight && <SharedReserves projectId={projectId} kind="gpa" canWrite={gpaRight.canWrite} />}
 
       {tasksGrant && (
         <section className="rounded-lg p-4 overflow-x-auto" style={cardStyle}>

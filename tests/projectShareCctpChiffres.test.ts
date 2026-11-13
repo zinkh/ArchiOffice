@@ -130,33 +130,33 @@ describe('vue CCTP : chiffres, fonctions pures', () => {
   });
 });
 
-describe('vue CCTP : chiffres, routes et droit unifié', () => {
-  it('un lot accordé en CCTP porte les chiffres, sans le prix des autres lots', async () => {
-    const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read', lotId: lotA }]);
+describe('vue CCTP : chiffres et droit par atelier', () => {
+  it('avec les ateliers CCTP et DPGF, la vue CCTP porte les chiffres de tous les lots', async () => {
+    const { admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }, { kind: 'dpgf', access: 'read' }]);
     const res = await view(guest.token, projectId, 'cctp');
     expect(res.status).toBe(200);
-    expect(res.body.lots).toHaveLength(1);
+    expect(res.body.lots).toHaveLength(2);
     expect(lignes(res.body)[0]).toMatchObject({ id: 'lig-a1', quantite: 27.6, prixUnitaire: 100, prixTotal: PRIX_TOTAL });
-    expect(JSON.stringify(res.body)).not.toContain('Fermettes');
-    expect(JSON.stringify(res.body)).not.toContain('"prixTotal":15000');
+    expect(JSON.stringify(res.body)).not.toContain('totalHT');
   });
 
-  it('un droit enregistré d\'un seul côté (DPGF) ouvre aussi le CCTP du lot', async () => {
-    const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'read', lotId: lotA }]);
-    const cctp = await view(guest.token, projectId, 'cctp');
-    expect(cctp.status).toBe(200);
-    expect(lignes(cctp.body)[0]).toMatchObject({ id: 'lig-a1', prixUnitaire: 100 });
+  it('un droit sur le DPGF seul n\'ouvre pas le CCTP : deux ateliers distincts', async () => {
+    const { admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'read' }]);
+    expect((await view(guest.token, projectId, 'cctp')).status).toBe(403);
+    expect((await view(guest.token, projectId, 'dpgf')).status).toBe(200);
   });
 
-  it('un confrère sans droit sur le lot ne voit aucun chiffre', async () => {
-    const { admin, projectId, lotA, lotB } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read', lotId: lotB }]);
+  it('sans l\'atelier DPGF, la vue CCTP ne porte aucun chiffre', async () => {
+    const { admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }]);
     const res = await view(guest.token, projectId, 'cctp');
-    expect(res.body.lots.map((l: any) => l.id)).toEqual(['lot-b']);
-    expect(JSON.stringify(res.body)).not.toContain('Semelles');
-    expect(lotA).toBeTruthy();
+    expect(res.status).toBe(200);
+    const raw = JSON.stringify(res.body);
+    expect(raw).not.toContain('"prixUnitaire"');
+    expect(raw).not.toContain('"prixTotal"');
+    expect(raw).not.toContain('Semelles' + 'Prix');
   });
 });
 
@@ -166,7 +166,7 @@ describe('proposer des chiffres depuis le CCTP', () => {
 
   it('le droit d\'écriture sur le lot suffit : quantité et prix, que le droit ait été donné côté CCTP ou DPGF', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const prix = await propose(guest.token, projectId, { lotId: lotA, targetType: 'ligne', targetId: 'lig-pm', field: 'prixUnitaire', value: '52' });
     expect(prix.status, JSON.stringify(prix.body)).toBe(201);
     expect(prix.body).toMatchObject({ field: 'prixUnitaire', baseValue: '0', proposedValue: '52', status: 'pending' });
@@ -174,21 +174,21 @@ describe('proposer des chiffres depuis le CCTP', () => {
 
   it('refusé en lecture ou en commentaire', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     const res = await propose(guest.token, projectId, { lotId: lotA, targetType: 'ligne', targetId: 'lig-pm', field: 'prixUnitaire', value: '52' });
     expect(res.status).toBe(403);
   });
 
   it('refusé pour un article réservé au CCTP, même avec le droit d\'écriture', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const res = await propose(guest.token, projectId, { lotId: lotA, targetType: 'ligne', targetId: 'lig-seul', field: 'prixUnitaire', value: '9' });
     expect(res.status).toBe(404);
   });
 
   it('un prix se propose sur un article qui a un métré ; sa quantité, elle, se modifie par le métré', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const prix = await propose(guest.token, projectId, { lotId: lotA, targetType: 'ligne', targetId: 'lig-a1', field: 'prixUnitaire', value: '110' });
     expect(prix.status, JSON.stringify(prix.body)).toBe(201);
     const quantite = await propose(guest.token, projectId, { lotId: lotA, targetType: 'ligne', targetId: 'lig-a1', field: 'quantite', value: '30' });

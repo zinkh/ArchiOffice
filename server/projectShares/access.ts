@@ -12,8 +12,11 @@
 export const GUEST_SYSTEM_ROLE = 'guest';
 export const GUEST_ROLE_LABEL = 'Collaborateur externe';
 
-/** Types de ressources partageables aujourd'hui (les autres suivront, voir ROADMAP.md). */
-export const SHARE_KINDS = ['lots', 'tasks', 'documents', 'cctp', 'dpgf'] as const;
+/**
+ * Ateliers partageables aujourd'hui (les autres suivront, voir ROADMAP.md). Un droit se donne PAR ATELIER,
+ * jamais par lot : aucun accès, lecture (et commentaire là où il existe), ou lecture et modification.
+ */
+export const SHARE_KINDS = ['lots', 'tasks', 'documents', 'cctp', 'dpgf', 'act', 'reports', 'reserves', 'gpa'] as const;
 export type ShareKind = (typeof SHARE_KINDS)[number];
 /** Du plus faible au plus fort : lire < commenter < écrire. Chaque niveau comprend les précédents. */
 export type ShareAccess = 'read' | 'comment' | 'write';
@@ -23,17 +26,20 @@ export type ShareAccess = 'read' | 'comment' | 'write';
  * Pour `tasks`, « écrire » modifie la tâche. Pour `cctp` et `dpgf`, « écrire » signifie PROPOSER :
  * l'invité n'écrit jamais dans le document, il dépose une proposition que le cabinet
  * valide (server/routes/projectShareProposals.ts). Le CCTP couvre les textes et titres, le DPGF
- * les quantités, prix et unités.
+ * les quantités, prix et unités. Pour `reports` (comptes rendus de chantier), `reserves` (réserves
+ * AOR) et `gpa` (réserves GPA), « écrire » modifie directement une liste blanche de champs de LA
+ * ligne visée (server/routes/projectShareChantier.ts) : chaque ligne est un enregistrement
+ * indépendant, pas un document JSON réécrit en bloc, une proposition n'y a pas d'intérêt.
  */
-export const WRITABLE_KINDS: readonly ShareKind[] = ['tasks', 'cctp', 'dpgf'];
+export const WRITABLE_KINDS: readonly ShareKind[] = ['tasks', 'cctp', 'dpgf', 'reports', 'reserves', 'gpa'];
 /** Types qu'un invité peut commenter (sans rien modifier). */
 export const COMMENTABLE_KINDS: readonly ShareKind[] = ['cctp', 'dpgf'];
 /**
- * Types dont le droit se donne LOT PAR LOT (clé : project_lots.id). Le CCTP et le DPGF
- * sont un seul document dont chaque lot porte textes ET prix : « tout le document »
- * n'existe donc pas comme droit, pour qu'un lot n'ouvre jamais les prix des autres.
+ * Plus aucun droit par lot : un atelier est accordé en entier. Les droits par lot d'avant (CCTP, DPGF)
+ * sont convertis par supabase/migrate_project_share_ateliers.sql, et la lecture ignore toute ligne qui
+ * porte encore un lot (refus par défaut : jamais un accès plus large que celui qui avait été accordé).
  */
-export const LOT_SCOPED_KINDS: readonly ShareKind[] = ['cctp', 'dpgf'];
+export const LOT_SCOPED_KINDS: readonly ShareKind[] = [];
 /** Borne de taille d'une liste de droits reçue d'un client. */
 export const MAX_GRANTS_PER_SHARE = 200;
 const ACCESS_RANK: Record<ShareAccess, number> = { read: 0, comment: 1, write: 2 };
@@ -41,7 +47,7 @@ const ACCESS_RANK: Record<ShareAccess, number> = { read: 0, comment: 1, write: 2
 /** Limites de la gratuité : invités actifs par affaire, et par cabinet (personnes distinctes). */
 export const SHARE_LIMITS = { guestsPerProject: 3, guestsPerTenant: 10 } as const;
 
-export interface ShareGrant { kind: ShareKind; access: ShareAccess; /** project_lots.id, pour les types par lot. */ lotId?: string }
+export interface ShareGrant { kind: ShareKind; access: ShareAccess }
 
 export interface ShareRow {
   id: string;
@@ -51,94 +57,67 @@ export interface ShareRow {
   email: string;
   status: 'active' | 'revoked';
   invited_by: string | null;
+  /** Fiche contact du confrère dans l'annuaire du cabinet (suivi des collaborations). Absente sur une instance non migrée. */
+  confrere_contact_id?: string | null;
   created_at?: string;
   revoked_at?: string | null;
 }
 
 export type LimitCheck = { ok: true } | { ok: false; code: string; message: string };
 
-/** Valide et normalise les droits reçus d'un client. Une même ressource n'y figure qu'une fois (la dernière gagne). */
+/**
+ * Valide et normalise les droits reçus d'un client. Un atelier n'y figure qu'une fois : en cas de doublon
+ * le niveau le plus haut l'emporte. Un `lotId` envoyé par un ancien client (agent, MCP) est ignoré : le droit
+ * vaut pour l'atelier entier, c'est au cabinet de décider de l'accorder ou non.
+ */
 export function normalizeGrants(input: unknown): { grants: ShareGrant[] } | { error: string } {
   if (!Array.isArray(input) || input.length === 0) {
     return { error: 'Accordez au moins un droit : sans droit, le confrère ne verrait rien.' };
   }
   if (input.length > MAX_GRANTS_PER_SHARE) return { error: 'Trop de droits dans une même demande.' };
-  // Clé = type + lot : un même type peut figurer pour plusieurs lots, une seule fois par lot.
-  const byKey = new Map<string, ShareGrant>();
+  const byKind = new Map<ShareKind, ShareGrant>();
   for (const raw of input) {
     const kind = raw?.kind;
     const access = raw?.access;
-    if (!SHARE_KINDS.includes(kind)) return { error: `Type de ressource non partageable : ${String(kind)}.` };
+    if (!SHARE_KINDS.includes(kind)) return { error: `Atelier non partageable : ${String(kind)}.` };
     if (access !== 'read' && access !== 'comment' && access !== 'write') {
       return { error: `Droit invalide pour ${kind} : « lecture », « commentaire » ou « écriture ».` };
     }
     if (access === 'write' && !WRITABLE_KINDS.includes(kind)) {
-      return { error: `L'écriture n'est pas disponible pour ${kind} : accordez la lecture.` };
+      return { error: `La modification n'est pas disponible pour ${kind} : accordez la lecture.` };
     }
     if (access === 'comment' && !COMMENTABLE_KINDS.includes(kind)) {
       return { error: `Les commentaires ne sont pas disponibles pour ${kind} : accordez la lecture.` };
     }
-    const scoped = LOT_SCOPED_KINDS.includes(kind);
-    const lotId = raw?.lotId;
-    if (scoped) {
-      if (typeof lotId !== 'string' || !lotId.trim() || lotId.length > 100) {
-        return { error: `Le droit sur ${kind} se donne lot par lot : désignez le lot.` };
-      }
-    } else if (lotId !== undefined && lotId !== null) {
-      return { error: `Le droit sur ${kind} ne se donne pas par lot.` };
-    }
-    const grant: ShareGrant = scoped ? { kind, access, lotId: lotId.trim() } : { kind, access };
-    byKey.set(`${kind}|${grant.lotId ?? ''}`, grant);
+    const current = byKind.get(kind);
+    if (!current || ACCESS_RANK[access] > ACCESS_RANK[current.access]) byKind.set(kind, { kind, access });
   }
-  return { grants: symmetrizeGrants([...byKey.values()]) };
-}
-
-/** Le CCTP et le DPGF : un seul document, un seul droit par lot. */
-export const DOCUMENT_KINDS: readonly ShareKind[] = ['cctp', 'dpgf'];
-
-/**
- * Un lot accordé l'est pour le CCTP ET le DPGF, au niveau le plus haut des deux droits (lecture <
- * commentaire < écriture). Le CCTP et le DPGF sont UN document dont chaque lot porte textes, quantités et
- * prix : un droit qui ne couvrirait qu'une moitié n'aurait pas de sens. Appliqué à l'écriture
- * (`normalizeGrants`) et à la LECTURE (`loadGrants`), pour que les droits enregistrés avant cette règle
- * (un type sans l'autre) se lisent comme leur équivalent unifié, sans migration de données.
- */
-export function symmetrizeGrants(grants: readonly ShareGrant[]): ShareGrant[] {
-  const best = new Map<string, ShareAccess>();
-  const others: ShareGrant[] = [];
-  for (const g of grants) {
-    if (DOCUMENT_KINDS.includes(g.kind)) {
-      if (!g.lotId) continue; // un droit par lot sans lot n'ouvre rien
-      const current = best.get(g.lotId);
-      if (!current || ACCESS_RANK[g.access] > ACCESS_RANK[current]) best.set(g.lotId, g.access);
-    } else {
-      others.push(g);
-    }
-  }
-  const lots = [...best].flatMap(([lotId, access]) => DOCUMENT_KINDS.map(kind => ({ kind, access, lotId })));
-  return [...others, ...lots];
+  return { grants: [...byKind.values()] };
 }
 
 /**
  * Le droit couvre-t-il l'accès demandé ? Chaque niveau comprend les précédents
- * (écrire implique commenter, qui implique lire). Pour un type par lot, `lotId` est
- * obligatoire : sans lui, rien n'est jamais accordé.
+ * (écrire implique commenter, qui implique lire). Le troisième paramètre n'existe que pour les appelants
+ * d'avant les ateliers : un lot ne change plus rien au droit.
  */
-export function allows(grants: readonly ShareGrant[], kind: ShareKind, access: ShareAccess, lotId?: string): boolean {
-  const scoped = LOT_SCOPED_KINDS.includes(kind);
-  if (scoped && !lotId) return false;
-  const grant = grants.find(g => g.kind === kind && (!scoped || g.lotId === lotId));
+export function allows(grants: readonly ShareGrant[], kind: ShareKind, access: ShareAccess, _lotId?: string): boolean {
+  const grant = grants.find(g => g.kind === kind);
   if (!grant) return false;
   return ACCESS_RANK[grant.access] >= ACCESS_RANK[access];
 }
 
-/** Les lots sur lesquels le niveau demandé est accordé, pour un type par lot. */
-export function grantedLotIds(grants: readonly ShareGrant[], kind: ShareKind, access: ShareAccess = 'read'): Set<string> {
-  const ids = new Set<string>();
-  for (const g of grants) {
-    if (g.kind === kind && g.lotId && ACCESS_RANK[g.access] >= ACCESS_RANK[access]) ids.add(g.lotId);
-  }
-  return ids;
+/**
+ * Les lots de l'affaire sur lesquels le niveau demandé est accordé : tous si l'atelier l'est, aucun sinon.
+ * Les vues CCTP et DPGF se construisent encore lot par lot (le document est découpé ainsi), mais le
+ * droit, lui, est celui de l'atelier.
+ */
+export async function lotIdsForAtelier(
+  supabaseAdmin: any, share: Pick<ShareRow, 'tenant_id' | 'project_id'>, grants: readonly ShareGrant[], kind: ShareKind, access: ShareAccess = 'read',
+): Promise<Set<string>> {
+  if (!allows(grants, kind, access)) return new Set();
+  const { data } = await supabaseAdmin.from('project_lots').select('id')
+    .eq('project_id', share.project_id).eq('tenant_id', share.tenant_id);
+  return new Set<string>((data || []).map((l: any) => l.id));
 }
 
 /** Les droits de plusieurs partages, indexés par partage. Table absente : aucun droit (jamais « tout »). */
@@ -152,16 +131,16 @@ export async function loadGrants(supabaseAdmin: any, shareIds: string[]): Promis
   if (error) return byShare;
   for (const row of data || []) {
     if (!SHARE_KINDS.includes(row.resource_kind)) continue;
-    const scoped = LOT_SCOPED_KINDS.includes(row.resource_kind);
-    // Un droit par lot sans lot est inutilisable : on l'ignore, il n'ouvre jamais « tout le document ».
-    if (scoped && !row.project_lot_id) continue;
+    // Un droit qui porte encore un lot date d'avant les ateliers : il n'ouvre rien tant que la migration
+    // (migrate_project_share_ateliers.sql) ne l'a pas converti, plutôt que d'ouvrir tout l'atelier par erreur.
+    if (row.project_lot_id) continue;
     const access: ShareAccess = row.access === 'write' ? 'write' : row.access === 'comment' ? 'comment' : 'read';
     const list = byShare.get(row.share_id) ?? [];
-    list.push(scoped ? { kind: row.resource_kind, access, lotId: row.project_lot_id } : { kind: row.resource_kind, access });
+    const current = list.find(g => g.kind === row.resource_kind);
+    if (!current) list.push({ kind: row.resource_kind, access });
+    else if (ACCESS_RANK[access] > ACCESS_RANK[current.access]) current.access = access;
     byShare.set(row.share_id, list);
   }
-  // Un lot du CCTP vaut pour le DPGF et inversement : les droits enregistrés d'un seul côté se lisent unifiés.
-  for (const [shareId, list] of byShare) byShare.set(shareId, symmetrizeGrants(list));
   return byShare;
 }
 
@@ -223,7 +202,7 @@ export async function replaceGrants(
   const { error } = await supabaseAdmin.from('project_share_grants').insert(
     grants.map(g => ({
       id: crypto.randomUUID(), share_id: share.id, tenant_id: share.tenant_id,
-      resource_kind: g.kind, access: g.access, project_lot_id: g.lotId ?? null,
+      resource_kind: g.kind, access: g.access, project_lot_id: null,
     })),
   );
   if (error) throw error;

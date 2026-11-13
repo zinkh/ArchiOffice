@@ -153,7 +153,7 @@ describe('chiffres : fonctions pures', () => {
 describe('proposer des chiffres', () => {
   it('droit d\'écriture sur le DPGF : une quantité avec virgule est enregistrée en nombre', async () => {
     const { tenantId, admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const res = await propose(guest.token, projectId, num(lotA, 'quantite', '8,5'));
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toMatchObject({ field: 'quantite', baseValue: '3', proposedValue: '8.5', status: 'pending' });
@@ -163,8 +163,8 @@ describe('proposer des chiffres', () => {
 
   it('le droit sur un lot vaut pour le CCTP et le DPGF : textes et chiffres, d\'un côté comme de l\'autre', async () => {
     const { admin, projectId, lotA } = setup();
-    const cctpSide = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
-    const dpgfSide = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const cctpSide = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
+    const dpgfSide = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     for (const guest of [cctpSide, dpgfSide]) {
       for (const [field, value] of [['quantite', '9'], ['prixUnitaire', '52'], ['unite', 'ml']]) {
         const res = await propose(guest.token, projectId, num(lotA, field, value));
@@ -177,7 +177,7 @@ describe('proposer des chiffres', () => {
 
   it('un droit en lecture ou en commentaire ne permet jamais de proposer, quelle que soit la moitié', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'comment', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     for (const field of ['quantite', 'prixUnitaire']) {
       const res = await propose(guest.token, projectId, num(lotA, field, '9'));
       expect(res.status, field).toBe(403);
@@ -187,7 +187,7 @@ describe('proposer des chiffres', () => {
 
   it('refuse les articles non modifiables et ceux que le confrère ne voit pas', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const parent = await propose(guest.token, projectId, num(lotA, 'prixUnitaire', '10', 'lig-a1'));
     expect(parent.status).toBe(400);
     expect(parent.body.code).toBe('PROPOSAL_NOT_ALLOWED');
@@ -199,7 +199,7 @@ describe('proposer des chiffres', () => {
 
   it('refuse un nombre invalide, hors limites ou inchangé, sans rien enregistrer', async () => {
     const { tenantId, admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     for (const bad of ['-5', 'abc', '', '1.23456', 1e12, null]) {
       expect((await propose(guest.token, projectId, num(lotA, 'prixUnitaire', bad))).status, String(bad)).toBe(400);
     }
@@ -211,7 +211,7 @@ describe('proposer des chiffres', () => {
 
   it('propose une unité, et refuse une unité vide ou trop longue', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     expect((await propose(guest.token, projectId, num(lotA, 'unite', 'ml'))).status).toBe(201);
     expect((await propose(guest.token, projectId, num(lotA, 'unite', '   '))).status).toBe(400);
     expect((await propose(guest.token, projectId, num(lotA, 'unite', 'x'.repeat(21)))).status).toBe(400);
@@ -222,7 +222,7 @@ describe('proposer des chiffres', () => {
 describe('appliquer des chiffres', () => {
   it('une quantité met à jour l\'article, le sous-total du lot et les totaux, et rien d\'autre', async () => {
     const { tenantId, admin, projectId, dpgfId, doc, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const proposal = (await propose(guest.token, projectId, num(lotA, 'quantite', '8,5'))).body;
     const res = await approve(admin.token, projectId, proposal.id);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -246,7 +246,7 @@ describe('appliquer des chiffres', () => {
 
   it('un prix unitaire sur un sous-article remonte jusqu\'au sous-total du lot', async () => {
     const { admin, projectId, dpgfId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const proposal = (await propose(guest.token, projectId, num(lotA, 'prixUnitaire', '4', 'lig-a1b'))).body;
     expect((await approve(admin.token, projectId, proposal.id)).status).toBe(200);
     const after = storedDoc(dpgfId);
@@ -257,7 +257,7 @@ describe('appliquer des chiffres', () => {
 
   it('une unité ne change que l\'unité : aucun total ne bouge', async () => {
     const { admin, projectId, dpgfId, doc, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const proposal = (await propose(guest.token, projectId, num(lotA, 'unite', 'ml'))).body;
     expect((await approve(admin.token, projectId, proposal.id)).status).toBe(200);
     const after = storedDoc(dpgfId);
@@ -268,7 +268,7 @@ describe('appliquer des chiffres', () => {
 
   it('est refusée, sans rien écrire, si l\'article a changé de nature entre-temps', async () => {
     const { admin, projectId, dpgfId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const proposal = (await propose(guest.token, projectId, num(lotA, 'quantite', '9'))).body;
     // Le cabinet a, depuis, ajouté des sous-articles à cet article : il n'a plus de quantité propre.
     const row = fakeSupabaseAdmin.getTable('dpgfs').find((d: any) => d.id === dpgfId)!;
@@ -287,7 +287,7 @@ describe('titre d\'un lot', () => {
 
   it('part de la liste des lots, s\'applique à la liste des lots et laisse le document intact', async () => {
     const { tenantId, admin, projectId, dpgfId, doc, lotA, lotB } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const res = await propose(guest.token, projectId, lotTitleProposal(lotA, 'Gros œuvre et VRD'));
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toMatchObject({ targetType: 'lot', baseValue: 'Gros œuvre', proposedValue: 'Gros œuvre et VRD' });
@@ -307,7 +307,7 @@ describe('titre d\'un lot', () => {
 
   it('est périmée si le titre a changé depuis : rien n\'est écrit', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const proposal = (await propose(guest.token, projectId, lotTitleProposal(lotA, 'Gros œuvre et VRD'))).body;
     fakeSupabaseAdmin.getTable('project_lots').find((l: any) => l.id === lotA)!.lot_title = 'Structure';
     const res = await approve(admin.token, projectId, proposal.id);
@@ -318,7 +318,7 @@ describe('titre d\'un lot', () => {
 
   it('n\'écrase pas un titre modifié pendant l\'application : écriture conditionnelle', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const proposal = (await propose(guest.token, projectId, lotTitleProposal(lotA, 'Gros œuvre et VRD'))).body;
     const original = fakeSupabaseAdmin.from.bind(fakeSupabaseAdmin);
     (fakeSupabaseAdmin as any).from = (table: string) => {
@@ -344,11 +344,11 @@ describe('titre d\'un lot', () => {
     expect(list.body[0].status).toBe('pending'); // rien n'est perdu : on peut réessayer
   });
 
-  it('exige le droit sur CE lot, et refuse un titre vide', async () => {
-    const { admin, projectId, lotA, lotB } = setup();
-    const other = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotB }]);
+  it('exige le droit de modification de l\'atelier, et refuse un titre vide', async () => {
+    const { admin, projectId, lotA } = setup();
+    const other = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'read' }, { kind: 'dpgf', access: 'read' }]);
     expect((await propose(other.token, projectId, lotTitleProposal(lotA, 'Nouveau titre'))).status).toBe(403);
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     expect((await propose(guest.token, projectId, lotTitleProposal(lotA, '   '))).status).toBe(400);
     expect((await propose(guest.token, projectId, lotTitleProposal(lotA, 'Gros œuvre'))).status).toBe(400); // inchangé
   });
@@ -357,7 +357,7 @@ describe('titre d\'un lot', () => {
 describe('aucune perte de donnée', () => {
   it('signale au cabinet une proposition appliquée puis effacée par un onglet périmé', async () => {
     const { admin, projectId, dpgfId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const proposal = (await propose(guest.token, projectId, num(lotA, 'quantite', '9'))).body;
     expect((await approve(admin.token, projectId, proposal.id)).status).toBe(200);
     const listed = async () => (await request(app).get(`/api/projects/${projectId}/share-proposals`).set(authHeader(admin.token))).body[0];
@@ -373,7 +373,7 @@ describe('aucune perte de donnée', () => {
 
   it('ne supprime jamais une proposition : remplacée, retirée, refusée ou périmée, elle reste en base', async () => {
     const { tenantId, admin, projectId, dpgfId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const ofTenant = () => fakeSupabaseAdmin.getTable('project_share_proposals').filter((p: any) => p.tenant_id === tenantId);
     const replaced = (await propose(guest.token, projectId, num(lotA, 'quantite', '4'))).body;
     const second = (await propose(guest.token, projectId, num(lotA, 'quantite', '5'))).body; // remplace la première
@@ -402,7 +402,7 @@ describe('article « pour mémoire »', () => {
   // lig-a3 : pour mémoire, quantité 1, unité ml, prix 0, montant 0. Lot A : sous-total 180, document 15 180 HT.
   async function pmProposals() {
     const ctx = setup();
-    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'dpgf', access: 'write', lotId: ctx.lotA }]);
+    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const make = async (field: string, value: string) => {
       const res = await propose(guest.token, ctx.projectId, num(ctx.lotA, field, value, 'lig-a3'));
       expect(res.status, `${field} ${JSON.stringify(res.body)}`).toBe(201);
@@ -479,7 +479,7 @@ describe('article « pour mémoire »', () => {
 
   it('un prix à 0 ne change rien : « pour mémoire » reste, la proposition est refusée comme inchangée', async () => {
     const { admin, projectId, lotA } = setup();
-    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
     const res = await propose(guest.token, projectId, num(lotA, 'prixUnitaire', '0', 'lig-a3'));
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('Aucun changement');
