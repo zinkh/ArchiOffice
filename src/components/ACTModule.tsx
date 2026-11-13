@@ -67,6 +67,13 @@ interface DCEDocument {
   lots_ids: string[];
   /** Documents de l'affaire joints à cette pièce (indice lu sur leur fiche). */
   document_ids?: string[];
+  /**
+   * Dossier partagé (zip, document ou lien externe) : accessible sur la page de dépôt de l'entreprise,
+   * jamais joint au mail ni repris dans le tableau d'indices.
+   */
+  partage?: boolean;
+  /** Liens externes (https) d'un dossier partagé. */
+  liens_externes?: Array<{ libelle: string; url: string }>;
 }
 
 interface EntrepriseConsultee {
@@ -584,8 +591,9 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     [lots],
   );
 
+  // Les dossiers partagés (zip, liens) n'entrent ni dans les pièces jointes du mail ni dans le tableau d'indices.
   const dcePieces = useMemo(
-    () => consultation.dce_documents.map(d => ({
+    () => consultation.dce_documents.filter(d => !d.partage).map(d => ({
       libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
       tous_lots: d.tous_lots,
       lots_ids: d.lots_ids,
@@ -594,6 +602,33 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     })),
     [consultation.dce_documents],
   );
+  const dcePartages = useMemo(
+    () => consultation.dce_documents.filter(d => d.partage).map(d => ({
+      id: d.id,
+      libelle: d.nom,
+      tous_lots: d.tous_lots,
+      lots_ids: d.lots_ids,
+      document_ids: d.document_ids ?? [],
+      liens_externes: d.liens_externes ?? [],
+    })),
+    [consultation.dce_documents],
+  );
+
+  /** Crée la pièce d'un dossier partagé pour les lots de l'entreprise (vide : tous les lots). */
+  const ajouterPartage = (partage: { libelle: string; documentId?: string; url?: string }, lotsIds: string[]): string => {
+    const id = crypto.randomUUID();
+    const piece: DCEDocument = {
+      id, nom: partage.libelle, type_doc: 'Autre', partage: true,
+      tous_lots: lotsIds.length === 0, lots_ids: lotsIds,
+      document_ids: partage.documentId ? [partage.documentId] : [],
+      liens_externes: partage.url ? [{ libelle: partage.libelle, url: partage.url }] : [],
+    };
+    update({ ...consultation, dce_documents: [...consultation.dce_documents, piece] });
+    return id;
+  };
+  const retirerPartage = (id: string) => {
+    update({ ...consultation, dce_documents: consultation.dce_documents.filter(d => d.id !== id) });
+  };
 
   // Documents de l'affaire proposés pour composer le DCE. Un échec de lecture
   // laisse la liste vide : les pièces restent des intitulés, comme avant.
@@ -995,6 +1030,10 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               entreprises={consultation.entreprises}
               onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
               dcePieces={dcePieces}
+              dcePartages={dcePartages}
+              onAjouterPartage={ajouterPartage}
+              onRetirerPartage={retirerPartage}
+              onDocumentDepose={() => setDocsVersion(v => v + 1)}
               documentsAffaire={documentsAffaire}
               projectId={projectId}
               depotDeadlineAt={depot.deadlineAt}

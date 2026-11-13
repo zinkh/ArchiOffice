@@ -23,6 +23,8 @@ import type { PieceMarcheGeneree } from '../lib/marchePieces';
 import { formaterDateHeure } from '../lib/depotAffichage';
 import { documentsAJoindre, lignesIndices, piecesDeEntreprise, type DocumentDce } from '../lib/dceIndices';
 import { genererTableauIndicesPdf } from '../lib/dceIndicesPdf';
+import DossierPartageDialog, { type NouveauPartage } from './act/DossierPartageDialog';
+import { ENTETE_DOSSIER_PARTAGE, ENTETE_DOSSIER_PARTAGE_LIENS, type ElementDossierPartage } from '../lib/dossierPartageMail';
 
 export type EntrepriseRow = EntrepriseSuivi & { corps_etat_codes?: string[] };
 
@@ -35,9 +37,26 @@ export interface PieceDce {
   type_doc?: string;
 }
 
+/** Dossier partagé (zip, document de l'affaire, lien externe) : une pièce du DCE qui ne part jamais en pièce jointe. */
+export interface PartageDce {
+  id: string;
+  libelle: string;
+  tous_lots: boolean;
+  lots_ids: string[];
+  document_ids?: string[];
+  liens_externes?: Array<{ libelle: string; url: string }>;
+}
+
 interface Props {
   projectName: string;
   lots: ProjectLot[];
+  /** Dossiers partagés de la consultation (hors pièces jointes), pour l'envoi du DCE. */
+  dcePartages?: PartageDce[];
+  /** Crée la pièce partagée pour ces lots (vide : tous les lots) et rend son identifiant. */
+  onAjouterPartage?: (partage: NouveauPartage, lotsIds: string[]) => string;
+  onRetirerPartage?: (id: string) => void;
+  /** Un fichier vient d'être déposé dans les documents de l'affaire : relire la liste. */
+  onDocumentDepose?: () => void;
   entreprises: EntrepriseRow[];
   onChange: (next: EntrepriseRow[]) => void;
   dcePieces: PieceDce[];
@@ -96,8 +115,12 @@ const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('fr-FR
 // ── Envoi du DCE par mail ────────────────────────────────────────────────────
 // Les comptes mail ne sont lus qu'à l'ouverture, pas à chaque affichage du tableau.
 
-function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPiecesMarche, deadlineAt, projectName, entreprise, lots, pieces, documents, onSent, onClose }: {
+function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPiecesMarche, deadlineAt, projectName, entreprise, lots, pieces, documents, partages, onAjouterPartage, onRetirerPartage, onDocumentDepose, onSent, onClose }: {
   projectId?: string;
+  partages: PartageDce[];
+  onAjouterPartage?: (partage: NouveauPartage, lotsIds: string[]) => string;
+  onRetirerPartage?: (id: string) => void;
+  onDocumentDepose?: () => void;
   /** Espace de dépôt utilisable : un lien personnel est alors créé et cité dans le message. */
   depotActif: boolean;
   depotIndisponible?: string;
@@ -117,6 +140,14 @@ function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPieces
   const lignes = lignesIndices(piecesEntreprise, documents);
   const aJoindre = documentsAJoindre(piecesEntreprise, documents);
   const lotsCourts = lotsEntreprise.map(l => `Lot ${l.lot_number}`).join(', ');
+
+  // Dossier partagé : seuls les éléments ajoutés pendant CE message sont cités et retirables ici ;
+  // les dossiers partagés plus tôt restent visibles sur la page de dépôt sans être redits.
+  const [ajoutes, setAjoutes] = useState<string[]>([]);
+  const [dialogueDossier, setDialogueDossier] = useState(false);
+  const elementsPartages: ElementDossierPartage[] = partages
+    .filter(p => ajoutes.includes(p.id))
+    .map(p => ({ id: p.id, libelle: p.libelle, url: p.liens_externes?.[0]?.url }));
 
   // Les fichiers du DCE et le tableau d'indices sont joints d'office ; la personne
   // peut en retirer. Un document illisible n'empêche pas le message : il est signalé.
@@ -197,18 +228,46 @@ function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPieces
     '',
     'Cordialement,',
   ].join('\n');
+  const depotDisponible = !!pretes.lienDepot;
+  const ajouterPartage = (p: NouveauPartage) => {
+    if (!onAjouterPartage) return;
+    const id = onAjouterPartage(p, entreprise.lots_ids);
+    setAjoutes(prev => [...prev, id]);
+    setDialogueDossier(false);
+  };
   return (
-    <MailComposeModal
-      accounts={accounts}
-      initialFiles={pretes.fichiers}
-      initial={{
-        to: destinatairesEntreprise(entreprise).join(', '),
-        subject: `Consultation des entreprises — ${projectName}${lotsCourts ? ` — ${lotsCourts}` : ''}`,
-        body,
-      }}
-      onSent={onSent}
-      onClose={onClose}
-    />
+    <>
+      <MailComposeModal
+        accounts={accounts}
+        initialFiles={pretes.fichiers}
+        initial={{
+          to: destinatairesEntreprise(entreprise).join(', '),
+          subject: `Consultation des entreprises — ${projectName}${lotsCourts ? ` — ${lotsCourts}` : ''}`,
+          body,
+        }}
+        dossierPartage={onAjouterPartage && projectId ? {
+          elements: elementsPartages,
+          entete: depotDisponible ? ENTETE_DOSSIER_PARTAGE : ENTETE_DOSSIER_PARTAGE_LIENS,
+          ancre: 'Nous restons à votre disposition',
+          avertissement: depotDisponible ? undefined
+            : `L'espace de dépôt n'est pas disponible${depotIndisponible ? ` (${depotIndisponible})` : ''} : seuls les liens externes seront accessibles à l'entreprise. Un fichier ajouté reste dans les documents de l'affaire sans être accessible depuis ce message.`,
+          onOuvrir: () => setDialogueDossier(true),
+          onRetirer: (id: string) => { onRetirerPartage?.(id); setAjoutes(prev => prev.filter(x => x !== id)); },
+        } : undefined}
+        onSent={onSent}
+        onClose={onClose}
+      />
+      {dialogueDossier && projectId && (
+        <DossierPartageDialog
+          projectId={projectId}
+          documents={documents}
+          dejaPartages={partages.filter(p => ajoutes.includes(p.id)).flatMap(p => p.document_ids ?? [])}
+          onAjouter={ajouterPartage}
+          onDocumentDepose={() => onDocumentDepose?.()}
+          onClose={() => setDialogueDossier(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -219,6 +278,7 @@ export default function ACTEntreprisesTable({
   corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact, onSyncEmails,
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
   depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null, genererPiecesMarche,
+  dcePartages = [], onAjouterPartage, onRetirerPartage, onDocumentDepose,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -744,6 +804,7 @@ export default function ACTEntreprisesTable({
         <DceMailDialog
           projectId={projectId} depotActif={!!depot?.actif} depotIndisponible={depot?.indisponible} genererPiecesMarche={genererPiecesMarche} deadlineAt={depotDeadlineAt}
           projectName={projectName} entreprise={entrepriseMail} lots={lots} pieces={dcePieces} documents={documentsAffaire}
+          partages={dcePartages} onAjouterPartage={onAjouterPartage} onRetirerPartage={onRetirerPartage} onDocumentDepose={onDocumentDepose}
           onClose={() => setMailPour(null)}
           onSent={() => patch(entrepriseMail.id, {
             dce_transmis_le: entrepriseMail.dce_transmis_le || today, envoyer_dce: true, ne_repond_pas: false,

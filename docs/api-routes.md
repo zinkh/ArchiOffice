@@ -586,11 +586,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/proposals/:id/signature/sync` | [server/routes/signatures.ts:110](../server/routes/signatures.ts#L110) |
 | POST | `/api/proposals/import` | [server/routes/proposals.ts:270](../server/routes/proposals.ts#L270) |
 | GET | `/api/public/chantier/:token` | [server/routes/panneaux.ts:179](../server/routes/panneaux.ts#L179) |
-| GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:162](../server/routes/consultationDepotPublic.ts#L162) |
-| DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:437](../server/routes/consultationDepotPublic.ts#L437) |
-| POST | `/api/public/depot/:token/fichiers` | [server/routes/consultationDepotPublic.ts:300](../server/routes/consultationDepotPublic.ts#L300) |
-| GET | `/api/public/depot/:token/pieces/:docId` | [server/routes/consultationDepotPublic.ts:229](../server/routes/consultationDepotPublic.ts#L229) |
-| POST | `/api/public/depot/:token/saisie` | [server/routes/consultationDepotPublic.ts:398](../server/routes/consultationDepotPublic.ts#L398) |
+| GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:167](../server/routes/consultationDepotPublic.ts#L167) |
+| DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:442](../server/routes/consultationDepotPublic.ts#L442) |
+| POST | `/api/public/depot/:token/fichiers` | [server/routes/consultationDepotPublic.ts:305](../server/routes/consultationDepotPublic.ts#L305) |
+| GET | `/api/public/depot/:token/pieces/:docId` | [server/routes/consultationDepotPublic.ts:234](../server/routes/consultationDepotPublic.ts#L234) |
+| POST | `/api/public/depot/:token/saisie` | [server/routes/consultationDepotPublic.ts:403](../server/routes/consultationDepotPublic.ts#L403) |
 | GET | `/api/public/doe/:token` | [server/routes/doeAtelierPublic.ts:94](../server/routes/doeAtelierPublic.ts#L94) |
 | DELETE | `/api/public/doe/:token/documents/:id` | [server/routes/doeAtelierPublic.ts:243](../server/routes/doeAtelierPublic.ts#L243) |
 | POST | `/api/public/doe/:token/fichiers` | [server/routes/doeAtelierPublic.ts:144](../server/routes/doeAtelierPublic.ts#L144) |
@@ -652,7 +652,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | PUT | `/api/rfis/:id` | [server/routes/rfis.ts:46](../server/routes/rfis.ts#L46) |
 | GET | `/api/rnb-buildings` | [server/routes/geoProxy.ts:945](../server/routes/geoProxy.ts#L945) |
 | GET | `/api/search` | [server/routes/globalSearch.ts:14](../server/routes/globalSearch.ts#L14) |
-| POST | `/api/send-email` | [server/routes/sendEmail.ts:31](../server/routes/sendEmail.ts#L31) |
+| POST | `/api/send-email` | [server/routes/sendEmail.ts:32](../server/routes/sendEmail.ts#L32) |
 | GET | `/api/settings` | [server/routes/settings.ts:65](../server/routes/settings.ts#L65) |
 | PUT | `/api/settings` | [server/routes/settings.ts:96](../server/routes/settings.ts#L96) |
 | DELETE | `/api/settings/tenant-deletion` | [server/routes/settings.ts:269](../server/routes/settings.ts#L269) |

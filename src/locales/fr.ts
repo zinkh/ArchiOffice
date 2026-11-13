@@ -1352,6 +1352,8 @@ export default {
       "settings_mail_signature_title": "Signature de courrier",
       "settings_mail_signature_desc": "Ajoutée automatiquement en bas de chaque nouveau message ou réponse rédigé depuis l'application. Vous pouvez toujours la modifier ou la retirer avant l'envoi.",
       "settings_mail_signature_placeholder": "Prénom Nom\nArchitecte D.E.\nTél. 00 00 00 00 00",
+      "settings_mail_signature_fallback_hint": "Tant que ce champ reste vide, la signature du cabinet (nom, agence, adresse, contact) est posée d'office sous vos messages. L'aperçu ci-dessus en donne le contenu.",
+      "settings_mail_signature_use_agency": "Utiliser la signature du cabinet",
       "settings_personal_contacts_desc": "Un contact personnel n'est jamais visible par le reste du cabinet — ce réglage ne concerne que l'affichage des vôtres dans votre propre liste.",
       "settings_show_personal_contacts": "Afficher mes contacts personnels dans la liste",
       "siret": "SIRET",

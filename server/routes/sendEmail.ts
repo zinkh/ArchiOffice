@@ -21,6 +21,7 @@ import { sendViaAccount } from '../mailSend';
 import { sanitizeEmailAttachments } from '../emailAttachments';
 import { resolveEmailSender } from '../emailSender';
 import { applyMailSignature } from '../mailSignature';
+import { signatureParDefaut } from '../../src/lib/mailSignatureCabinet';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -46,8 +47,19 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
       const tenantId = await getTenantId(req.user.id);
 
       // Signature personnelle de l'expéditeur, ajoutée à tout envoi (sauf si le corps la contient déjà).
-      const { data: signatureRow } = await supabaseAdmin.from('profiles').select('mail_signature').eq('id', req.user.id).maybeSingle();
-      const { text, html } = applyMailSignature({ text: req.body.text, html: req.body.html }, (signatureRow as any)?.mail_signature);
+      // Sans signature personnelle, celle du cabinet (nom, agence, adresse, contact tirés des réglages).
+      const { data: signatureRow } = await supabaseAdmin.from('profiles').select('mail_signature, name').eq('id', req.user.id).maybeSingle();
+      let signature: string = (signatureRow as any)?.mail_signature ?? '';
+      if (!signature.trim()) {
+        const { data: identite } = await supabaseAdmin.from('settings')
+          .select('agency_name, address, phone, email, architect_name').eq('tenant_id', tenantId).maybeSingle();
+        signature = signatureParDefaut({
+          nom: (identite as any)?.architect_name || (signatureRow as any)?.name,
+          agencyName: (identite as any)?.agency_name, address: (identite as any)?.address,
+          phone: (identite as any)?.phone, email: (identite as any)?.email,
+        });
+      }
+      const { text, html } = applyMailSignature({ text: req.body.text, html: req.body.html }, signature);
 
       if (!attachments.length) {
         const { data: defaultAccount } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
