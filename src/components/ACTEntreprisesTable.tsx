@@ -49,6 +49,8 @@ interface Props {
   onChangeCorpsEtat: (e: EntrepriseRow, next: string[]) => void;
   onSelectContact: (rowId: string, contact: Contact) => void;
   onCreateContact: (rowId: string, name: string) => void;
+  /** Appelé à la sortie des champs d'adresses : reporte les adresses saisies sur la fiche de l'entreprise. */
+  onSyncEmails?: (e: EntrepriseRow) => void;
   corpsEtatCodesFromContact: (contact: Contact) => string[];
   /** Qualifications des fiches contacts, par identifiant de contact. */
   qualifications?: Record<string, Qualification[]>;
@@ -214,7 +216,7 @@ function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPieces
 
 export default function ACTEntreprisesTable({
   projectName, lots, entreprises, onChange, dcePieces, documentsAffaire = [], entrepriseContacts,
-  corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact,
+  corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact, onSyncEmails,
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
   depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null, genererPiecesMarche,
 }: Props) {
@@ -331,12 +333,14 @@ export default function ACTEntreprisesTable({
         type="email" aria-label="Email de l'entreprise"
         placeholder="email@entreprise.fr" value={e.email || ''}
         onChange={ev => patch(e.id, { email: ev.target.value })}
+        onBlur={() => onSyncEmails?.(e)}
       />
       <input
         className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
         type="text" aria-label="Autres adresses e-mail de l'entreprise"
         placeholder="Autres adresses (séparées par une virgule)" value={e.emails_supplementaires || ''}
         onChange={ev => patch(e.id, { emails_supplementaires: ev.target.value })}
+        onBlur={() => onSyncEmails?.(e)}
       />
       {e.contact_id && (
         <div className="mt-1 px-1">

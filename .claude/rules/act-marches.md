@@ -42,6 +42,11 @@ migration).
   contacts « Entreprise » dont un corps d'état recoupe l'intitulé du lot
   (`suggererContacts`, rapprochement par radicaux de 5 lettres : une
   suggestion que l'architecte confirme, pas une affectation).
+- **Adresses reportées sur la fiche contact** : à la sortie des champs « e-mail » et « autres adresses » d'une
+  ligne liée à une fiche (`contact_id`), `syncEmailsToContact` (`ACTModule.tsx`) écrit les adresses saisies sur
+  la fiche (`completerEmailsContact`, `actEntreprises.ts`, testée). Seuls les emplacements VIDES sont remplis
+  (`email_work`, `email`, `email_home`, `email_other`), jamais d'écrasement ni de doublon (casse ignorée) ; au-delà
+  de quatre adresses, le surplus reste sur la ligne de consultation. Aucune migration.
 - **Envoi du DCE** : le bouton de ligne ouvre `MailComposeModal` (prop
   `initial`) prérempli avec les lots de l'entreprise et les pièces du DCE qui
   la concernent ; à l'envoi, `dce_transmis_le` est posée. Les pièces du DCE

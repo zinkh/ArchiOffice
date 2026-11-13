@@ -254,6 +254,37 @@ export function listeAPlat<T extends EntrepriseSuivi>(
     });
 }
 
+type ChampsEmailContact = {
+  email?: string | null;
+  email_work?: string | null;
+  email_home?: string | null;
+  email_other?: string | null;
+};
+
+/**
+ * Adresses saisies sur la ligne de consultation à reporter sur la fiche contact.
+ * Ne remplit que les emplacements VIDES (pro, e-mail, perso, autre) : une adresse
+ * déjà présente sur la fiche n'est jamais écrasée ni dupliquée (casse ignorée).
+ * Rend `null` quand il n'y a rien à ajouter. Au-delà de quatre adresses, le
+ * surplus reste sur la ligne de consultation (la fiche n'a que quatre champs).
+ */
+export function completerEmailsContact(
+  contact: ChampsEmailContact,
+  e: Pick<EntrepriseSuivi, 'email' | 'emails_supplementaires'>,
+): Partial<Record<keyof ChampsEmailContact, string>> | null {
+  const present = new Set(
+    [contact.email, contact.email_work, contact.email_home, contact.email_other]
+      .map(a => (a ?? '').trim().toLowerCase()).filter(Boolean),
+  );
+  const aAjouter = destinatairesEntreprise(e).filter(a => !present.has(a.toLowerCase()));
+  if (aAjouter.length === 0) return null;
+  const emplacements: (keyof ChampsEmailContact)[] = ['email_work', 'email', 'email_home', 'email_other'];
+  const libres = emplacements.filter(k => !(contact[k] ?? '').trim());
+  const patch: Partial<Record<keyof ChampsEmailContact, string>> = {};
+  aAjouter.forEach((adresse, i) => { if (libres[i]) patch[libres[i]] = adresse; });
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
 /**
  * Destinataires d'un message à l'entreprise : l'e-mail du contact d'abord, puis
  * les adresses supplémentaires saisies sur la ligne, sans doublon (casse ignorée).

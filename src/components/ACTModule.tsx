@@ -20,6 +20,7 @@ import {
 } from '../lib/actExport';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
 import ACTEntreprisesTable from './ACTEntreprisesTable';
+import { completerEmailsContact } from '../lib/actEntreprises';
 import { EntrepriseSearchDialog, type EntrepriseChoisie } from './EntrepriseSearchDialog';
 import { EntrepriseAddForm, type NouvelleEntreprise } from './EntrepriseAddForm';
 import { useQualifications } from '../hooks/useQualifications';
@@ -318,6 +319,22 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
       setExtraContacts(prev => [...prev.filter(c => c.id !== contactId), { ...contact, corps_etat: next }]);
     } catch (err) { console.error('Échec de la synchronisation du corps d\'état vers le contact:', err); }
   }, [allContacts, corpsEtat]);
+
+  /**
+   * Reporte sur la fiche contact les adresses saisies sur la ligne (e-mail et
+   * autres adresses), sans écraser ce que la fiche contient déjà.
+   */
+  const syncEmailsToContact = useCallback(async (e: EntrepriseConsultee) => {
+    if (!e.contact_id) return;
+    const contact = allContacts.find(c => c.id === e.contact_id);
+    if (!contact) return;
+    const patch = completerEmailsContact(contact, e);
+    if (!patch) return;
+    try {
+      await apiFetch(`/api/contacts/${contact.id}`, { method: 'PUT', body: JSON.stringify(patch) });
+      setExtraContacts(prev => [...prev.filter(c => c.id !== contact.id), { ...contact, ...patch }]);
+    } catch (err) { console.error('Échec de la synchronisation des adresses vers le contact:', err); }
+  }, [allContacts]);
 
   // Q&R form
   const [showQRForm, setShowQRForm] = useState(false);
@@ -1005,6 +1022,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                 updateEntreprise(rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
               }}
               onCreateContact={(rowId, name) => setContactModalFor({ rowId, name })}
+              onSyncEmails={e => void syncEmailsToContact(e as EntrepriseConsultee)}
             />
           </div>
         </div>
