@@ -639,3 +639,24 @@ TEXTE du CCTP : client de `POST /api/projects/:id/cctp/textes` (`server/routes/d
   `dry_run` et renvoie `needs_confirmation` (ancien et nouveau texte) avant `confirm: true`. `append_texte` ajoute à la suite.
 - **Marqueur « en cours »** posé par une personne : 409, `forcer: true` seulement sur demande explicite.
 - Quantités et prix restent à `manage_dpgf` : cet outil n'en écrit jamais.
+
+### Lecture paginée du CCTP, du DPGF et du BPU (`read_cctp`, `read_dpgf`, `read_bpu`)
+
+Incident de novembre 2026 : « articles incomplets en lecture MCP ». `read_cctp` plafonnait un lot à 60 articles et chaque texte à
+1 200 caractères, sans le dire : les chapitres suivants sortaient avec `articles: []` et le modèle prenait la tranche pour le tout.
+`read_dpgf` et `read_bpu` s'arrêtaient à 120 lignes avec un simple `tronque`. Les trois outils (`projectDocTools.ts`, exposés au MCP
+par `buildAgentTools(MCP_CAPS)`) suivent désormais une règle commune, à ne pas défaire : **une lecture coupée se dit et se reprend**.
+
+- **Totaux exacts, toujours** : `nb_articles_total` / `nb_articles_retournes` (CCTP), `nb_lignes_total` / `nb_lignes_retournees`
+  (DPGF), `nb_articles_lot_total` / `nb_articles_retournes` (BPU). Tous les articles sont comptés, même ceux qui ne sont pas rendus.
+- **Pagination** : le CCTP rend ses articles dans un budget de 60 000 caractères par appel (`MAX_CHARS_PER_CALL`, environ 15 000
+  jetons), le DPGF et le BPU dans la limite de 300 lignes (`MAX_LIGNES_PER_LOT`). Au-delà, `tronque: true` et
+  `suite: { offset, consigne }` : rappeler l'outil avec le même `lot` et cet `offset`, jusqu'à ce que `tronque` disparaisse. Un
+  modèle ne conclut jamais sur une lecture `tronque`.
+- **`read_cctp` : deux paramètres de plus** : `chapitre` (numéro ou titre, pour ne lire que lui) et `article` (numéro, avec `lot` :
+  texte intégral jusqu'à 30 000 caractères, `MAX_FULL_ARTICLE_CHARS`). Un texte coupé à 1 200 caractères en lecture de lot porte
+  `longueur_totale` et `texte_complet`, qui nomme l'appel à faire pour le lire en entier.
+- **Ce que compte `offset`** : les articles terminaux pour le CCTP et le BPU (une ligne à sous-articles ne compte pas), toutes les
+  lignes y compris les parents pour le DPGF. Pour le CCTP, il est relatif aux chapitres sélectionnés.
+- Tests : `tests/agentAutonomy.test.ts` (lot de 151 articles relu page par page jusqu'au dernier, chapitre seul, article entier).
+  Toute nouvelle limite sur une lecture doit livrer, avec elle, son total et sa reprise.
