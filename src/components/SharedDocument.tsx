@@ -13,7 +13,7 @@ import type { Ligne as LigneDocument } from '../types/dpgf';
 type Mode = 'cctp' | 'dpgf';
 type TargetType = 'lot' | 'chapitre' | 'ligne';
 
-export interface SharedGrant { kind: string; access: 'read' | 'comment' | 'write'; lotId?: string }
+export interface SharedGrant { kind: string; access: 'read' | 'comment' | 'write' }
 
 interface Ligne {
   id: string; numero: string | null; designation: string | null; unite: string | null; localisation: string | null;
@@ -389,14 +389,15 @@ export default function SharedDocument({ projectId, mode, grants, archived }: {
 
   const pendingCount = proposals.filter(p => p.status === 'pending').length;
   const pendingLimit = proposals[0]?.limit ?? 50;
-  // Le CCTP et le DPGF sont un seul document et un seul droit par lot : l'un ou l'autre vaut pour les deux.
-  const documentGrant = (g: SharedGrant) => g.kind === 'cctp' || g.kind === 'dpgf';
-  const canProposeAny = !archived && grants.some(g => documentGrant(g) && g.access === 'write');
+  // Un droit par atelier : le CCTP et le DPGF sont deux ateliers distincts. Un texte se propose avec le droit
+  // du CCTP, une quantité ou un prix avec celui du DPGF, quelle que soit la vue d'où on les modifie.
+  const canWriteAtelier = (kind: string) => !archived && grants.some(g => g.kind === kind && g.access === 'write');
+  const canProposeAny = canWriteAtelier('cctp') || canWriteAtelier('dpgf');
 
   const ctx: NodeCtx = {
     mode, comments, proposals,
     batiments: doc?.multiBatiments ? doc.batiments : undefined,
-    canProposeKind: (lot) => !archived && grants.some(g => documentGrant(g) && g.lotId === lot.projectLotId && g.access === 'write'),
+    canProposeKind: (_lot, kind) => canWriteAtelier(kind),
     propose: async (target, value) => {
       await apiFetch(`/api/shared/projects/${projectId}/proposals`, { method: 'POST', body: JSON.stringify({ ...target, value }) });
       await loadProposals();
@@ -405,7 +406,7 @@ export default function SharedDocument({ projectId, mode, grants, archived }: {
       await apiFetch(`/api/shared/projects/${projectId}/proposals/${proposalId}`, { method: 'DELETE' });
       await loadProposals();
     },
-    canCommentLot: lot => !archived && grants.some(g => documentGrant(g) && g.lotId === lot.projectLotId && (g.access === 'comment' || g.access === 'write')),
+    canCommentLot: () => !archived && grants.some(g => g.kind === mode && (g.access === 'comment' || g.access === 'write')),
     post: async (target, body) => {
       await apiFetch(`/api/shared/projects/${projectId}/comments`, { method: 'POST', body: JSON.stringify({ resourceKind: mode, ...target, body }) });
       await loadComments();

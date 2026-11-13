@@ -4,11 +4,11 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-846 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+858 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
-| GET | `*` | [server.ts:1460](../server.ts#L1460) |
+| GET | `*` | [server.ts:1464](../server.ts#L1464) |
 | GET | `/.well-known/oauth-authorization-server` | [packages/archioffice-agents/src/server/mcp/oauthRoutes.ts:46](../packages/archioffice-agents/src/server/mcp/oauthRoutes.ts#L46) |
 | GET | `/.well-known/oauth-protected-resource` | [packages/archioffice-agents/src/server/mcp/oauthRoutes.ts:59](../packages/archioffice-agents/src/server/mcp/oauthRoutes.ts#L59) |
 | POST | `/admin/users` | [server/offlineGateway.ts:113](../server/offlineGateway.ts#L113) |
@@ -137,14 +137,14 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/chorus-pro/status` | [server/routes/chorusPro.ts:102](../server/routes/chorusPro.ts#L102) |
 | GET | `/api/chorus-pro/status/:invoiceId` | [server/routes/chorusPro.ts:225](../server/routes/chorusPro.ts#L225) |
 | POST | `/api/chorus-pro/test` | [server/routes/chorusPro.ts:132](../server/routes/chorusPro.ts#L132) |
-| GET | `/api/contact-categories` | [server/routes/contacts.ts:266](../server/routes/contacts.ts#L266) |
-| POST | `/api/contact-categories` | [server/routes/contacts.ts:276](../server/routes/contacts.ts#L276) |
-| DELETE | `/api/contact-categories/:id` | [server/routes/contacts.ts:290](../server/routes/contacts.ts#L290) |
+| GET | `/api/contact-categories` | [server/routes/contacts.ts:284](../server/routes/contacts.ts#L284) |
+| POST | `/api/contact-categories` | [server/routes/contacts.ts:294](../server/routes/contacts.ts#L294) |
+| DELETE | `/api/contact-categories/:id` | [server/routes/contacts.ts:308](../server/routes/contacts.ts#L308) |
 | GET | `/api/contacts` | [server/routes/contacts.ts:98](../server/routes/contacts.ts#L98) |
 | POST | `/api/contacts` | [server/routes/contacts.ts:119](../server/routes/contacts.ts#L119) |
 | POST | `/api/contacts/:contactId/qualifications` | [server/routes/qualifications.ts:43](../server/routes/qualifications.ts#L43) |
 | POST | `/api/contacts/:contactId/qualifications/rge-sync` | [server/routes/qualifications.ts:139](../server/routes/qualifications.ts#L139) |
-| DELETE | `/api/contacts/:id` | [server/routes/contacts.ts:246](../server/routes/contacts.ts#L246) |
+| DELETE | `/api/contacts/:id` | [server/routes/contacts.ts:264](../server/routes/contacts.ts#L264) |
 | PUT | `/api/contacts/:id` | [server/routes/contacts.ts:157](../server/routes/contacts.ts#L157) |
 | GET | `/api/contacts/:id/projects` | [server/routes/contacts.ts:201](../server/routes/contacts.ts#L201) |
 | POST | `/api/contacts/merge` | [server/routes/contactMerge.ts:40](../server/routes/contactMerge.ts#L40) |
@@ -248,7 +248,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/gpa-reserves` | [server/routes/gpaReserves.ts:36](../server/routes/gpaReserves.ts#L36) |
 | DELETE | `/api/gpa-reserves/:id` | [server/routes/gpaReserves.ts:71](../server/routes/gpaReserves.ts#L71) |
 | PUT | `/api/gpa-reserves/:id` | [server/routes/gpaReserves.ts:84](../server/routes/gpaReserves.ts#L84) |
-| GET | `/api/health` | [server.ts:1036](../server.ts#L1036) |
+| GET | `/api/health` | [server.ts:1038](../server.ts#L1038) |
 | GET | `/api/historical-monuments` | [server/routes/geoProxy.ts:739](../server/routes/geoProxy.ts#L739) |
 | GET | `/api/hourly-costs` | [server/routes/timeTracking.ts:191](../server/routes/timeTracking.ts#L191) |
 | PUT | `/api/hourly-costs/:userId` | [server/routes/timeTracking.ts:199](../server/routes/timeTracking.ts#L199) |
@@ -478,16 +478,19 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/projects/:id/phase-history` | [server/routes/projectPhaseHistory.ts:23](../server/routes/projectPhaseHistory.ts#L23) |
 | GET | `/api/projects/:id/phase-notes` | [server/routes/projectPhaseNotes.ts:75](../server/routes/projectPhaseNotes.ts#L75) |
 | POST | `/api/projects/:id/phase-notes` | [server/routes/projectPhaseNotes.ts:93](../server/routes/projectPhaseNotes.ts#L93) |
-| GET | `/api/projects/:id/share-comments` | [server/routes/projectShareDocuments.ts:188](../server/routes/projectShareDocuments.ts#L188) |
-| PUT | `/api/projects/:id/share-comments/:commentId` | [server/routes/projectShareDocuments.ts:231](../server/routes/projectShareDocuments.ts#L231) |
-| POST | `/api/projects/:id/share-comments/:commentId/reply` | [server/routes/projectShareDocuments.ts:210](../server/routes/projectShareDocuments.ts#L210) |
+| GET | `/api/projects/:id/share-act-proposals` | [server/routes/projectShareActProposals.ts:259](../server/routes/projectShareActProposals.ts#L259) |
+| POST | `/api/projects/:id/share-act-proposals/:proposalId/approve` | [server/routes/projectShareActProposals.ts:290](../server/routes/projectShareActProposals.ts#L290) |
+| POST | `/api/projects/:id/share-act-proposals/:proposalId/reject` | [server/routes/projectShareActProposals.ts:333](../server/routes/projectShareActProposals.ts#L333) |
+| GET | `/api/projects/:id/share-comments` | [server/routes/projectShareDocuments.ts:189](../server/routes/projectShareDocuments.ts#L189) |
+| PUT | `/api/projects/:id/share-comments/:commentId` | [server/routes/projectShareDocuments.ts:232](../server/routes/projectShareDocuments.ts#L232) |
+| POST | `/api/projects/:id/share-comments/:commentId/reply` | [server/routes/projectShareDocuments.ts:211](../server/routes/projectShareDocuments.ts#L211) |
 | GET | `/api/projects/:id/share-proposals` | [server/routes/projectShareProposals.ts:287](../server/routes/projectShareProposals.ts#L287) |
 | POST | `/api/projects/:id/share-proposals/:proposalId/approve` | [server/routes/projectShareProposals.ts:363](../server/routes/projectShareProposals.ts#L363) |
 | POST | `/api/projects/:id/share-proposals/:proposalId/reject` | [server/routes/projectShareProposals.ts:437](../server/routes/projectShareProposals.ts#L437) |
-| GET | `/api/projects/:id/shares` | [server/routes/projectShares.ts:140](../server/routes/projectShares.ts#L140) |
-| POST | `/api/projects/:id/shares` | [server/routes/projectShares.ts:164](../server/routes/projectShares.ts#L164) |
-| DELETE | `/api/projects/:id/shares/:shareId` | [server/routes/projectShares.ts:280](../server/routes/projectShares.ts#L280) |
-| PUT | `/api/projects/:id/shares/:shareId` | [server/routes/projectShares.ts:263](../server/routes/projectShares.ts#L263) |
+| GET | `/api/projects/:id/shares` | [server/routes/projectShares.ts:151](../server/routes/projectShares.ts#L151) |
+| POST | `/api/projects/:id/shares` | [server/routes/projectShares.ts:174](../server/routes/projectShares.ts#L174) |
+| DELETE | `/api/projects/:id/shares/:shareId` | [server/routes/projectShares.ts:305](../server/routes/projectShares.ts#L305) |
+| PUT | `/api/projects/:id/shares/:shareId` | [server/routes/projectShares.ts:291](../server/routes/projectShares.ts#L291) |
 | PUT | `/api/projects/:id/stakeholders` | [server/routes/projectStakeholders.ts:41](../server/routes/projectStakeholders.ts#L41) |
 | POST | `/api/projects/:id/unarchive` | [server/routes/projectArchive.ts:302](../server/routes/projectArchive.ts#L302) |
 | GET | `/api/projects/:projectId/act` | [server/routes/actData.ts:13](../server/routes/actData.ts#L13) |
@@ -656,18 +659,27 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/settings/tenant-deletion` | [server/routes/settings.ts:241](../server/routes/settings.ts#L241) |
 | POST | `/api/settings/tenant-deletion` | [server/routes/settings.ts:252](../server/routes/settings.ts#L252) |
 | GET | `/api/settings/tenant-export` | [server/routes/settings.ts:225](../server/routes/settings.ts#L225) |
-| GET | `/api/shared/projects` | [server/routes/projectShares.ts:318](../server/routes/projectShares.ts#L318) |
-| GET | `/api/shared/projects/:id` | [server/routes/projectShares.ts:343](../server/routes/projectShares.ts#L343) |
-| GET | `/api/shared/projects/:id/comments` | [server/routes/projectShareDocuments.ts:117](../server/routes/projectShareDocuments.ts#L117) |
-| POST | `/api/shared/projects/:id/comments` | [server/routes/projectShareDocuments.ts:132](../server/routes/projectShareDocuments.ts#L132) |
-| GET | `/api/shared/projects/:id/documents` | [server/routes/projectShares.ts:366](../server/routes/projectShares.ts#L366) |
-| GET | `/api/shared/projects/:id/documents/:docId/download` | [server/routes/projectShares.ts:381](../server/routes/projectShares.ts#L381) |
+| GET | `/api/shared/projects` | [server/routes/projectShares.ts:343](../server/routes/projectShares.ts#L343) |
+| GET | `/api/shared/projects/:id` | [server/routes/projectShares.ts:368](../server/routes/projectShares.ts#L368) |
+| GET | `/api/shared/projects/:id/act` | [server/routes/projectShareChantier.ts:256](../server/routes/projectShareChantier.ts#L256) |
+| GET | `/api/shared/projects/:id/act-proposals` | [server/routes/projectShareActProposals.ts:177](../server/routes/projectShareActProposals.ts#L177) |
+| POST | `/api/shared/projects/:id/act-proposals` | [server/routes/projectShareActProposals.ts:187](../server/routes/projectShareActProposals.ts#L187) |
+| DELETE | `/api/shared/projects/:id/act-proposals/:proposalId` | [server/routes/projectShareActProposals.ts:231](../server/routes/projectShareActProposals.ts#L231) |
+| GET | `/api/shared/projects/:id/comments` | [server/routes/projectShareDocuments.ts:118](../server/routes/projectShareDocuments.ts#L118) |
+| POST | `/api/shared/projects/:id/comments` | [server/routes/projectShareDocuments.ts:133](../server/routes/projectShareDocuments.ts#L133) |
+| GET | `/api/shared/projects/:id/documents` | [server/routes/projectShares.ts:391](../server/routes/projectShares.ts#L391) |
+| GET | `/api/shared/projects/:id/documents/:docId/download` | [server/routes/projectShares.ts:406](../server/routes/projectShares.ts#L406) |
 | GET | `/api/shared/projects/:id/proposals` | [server/routes/projectShareProposals.ts:254](../server/routes/projectShareProposals.ts#L254) |
 | POST | `/api/shared/projects/:id/proposals` | [server/routes/projectShareProposals.ts:175](../server/routes/projectShareProposals.ts#L175) |
 | DELETE | `/api/shared/projects/:id/proposals/:proposalId` | [server/routes/projectShareProposals.ts:269](../server/routes/projectShareProposals.ts#L269) |
-| GET | `/api/shared/projects/:id/tasks` | [server/routes/projectShares.ts:402](../server/routes/projectShares.ts#L402) |
-| POST | `/api/shared/projects/:id/tasks` | [server/routes/projectShares.ts:431](../server/routes/projectShares.ts#L431) |
-| PUT | `/api/shared/projects/:id/tasks/:taskId` | [server/routes/projectShares.ts:449](../server/routes/projectShares.ts#L449) |
+| GET | `/api/shared/projects/:id/reports` | [server/routes/projectShareChantier.ts:169](../server/routes/projectShareChantier.ts#L169) |
+| PUT | `/api/shared/projects/:id/reports/:reportId` | [server/routes/projectShareChantier.ts:192](../server/routes/projectShareChantier.ts#L192) |
+| GET | `/api/shared/projects/:id/reports/:reportId/notes` | [server/routes/projectShareChantier.ts:180](../server/routes/projectShareChantier.ts#L180) |
+| POST | `/api/shared/projects/:id/reports/:reportId/notes` | [server/routes/projectShareChantier.ts:210](../server/routes/projectShareChantier.ts#L210) |
+| PUT | `/api/shared/projects/:id/reports/:reportId/notes/:noteId` | [server/routes/projectShareChantier.ts:233](../server/routes/projectShareChantier.ts#L233) |
+| GET | `/api/shared/projects/:id/tasks` | [server/routes/projectShares.ts:427](../server/routes/projectShares.ts#L427) |
+| POST | `/api/shared/projects/:id/tasks` | [server/routes/projectShares.ts:456](../server/routes/projectShares.ts#L456) |
+| PUT | `/api/shared/projects/:id/tasks/:taskId` | [server/routes/projectShares.ts:474](../server/routes/projectShares.ts#L474) |
 | PUT | `/api/signatures/config` | [server/routes/signatures.ts:52](../server/routes/signatures.ts#L52) |
 | GET | `/api/signatures/status` | [server/routes/signatures.ts:45](../server/routes/signatures.ts#L45) |
 | POST | `/api/situations` | [server/routes/situations.ts:112](../server/routes/situations.ts#L112) |
@@ -837,7 +849,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/local-login` | [server/localAuthRoutes.ts:58](../server/localAuthRoutes.ts#L58) |
 | POST | `/local-setup` | [server/localAuthRoutes.ts:24](../server/localAuthRoutes.ts#L24) |
 | GET | `/local-status` | [server/localAuthRoutes.ts:20](../server/localAuthRoutes.ts#L20) |
-| GET | `/manifest.webmanifest` | [server.ts:1437](../server.ts#L1437) |
+| GET | `/manifest.webmanifest` | [server.ts:1441](../server.ts#L1441) |
 | DELETE | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:69](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L69) |
 | GET | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:68](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L68) |
 | POST | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:30](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L30) |
@@ -892,5 +904,7 @@ Ces expressions ne sont pas transformées en endpoints supposés.
 | POST | \`${BASE}/nodes/:id/restore\` | [server/routes/desktopSync.ts:499](../server/routes/desktopSync.ts#L499) |
 | POST | \`${BASE}/nodes/:id/bump-indice\` | [server/routes/desktopSync.ts:512](../server/routes/desktopSync.ts#L512) |
 | POST | \`${BASE}/nodes/:id/link\` | [server/routes/desktopSync.ts:524](../server/routes/desktopSync.ts#L524) |
+| GET | \`/api/shared/projects/:id/${set.path}\` | [server/routes/projectShareChantier.ts:276](../server/routes/projectShareChantier.ts#L276) |
+| PUT | \`/api/shared/projects/:id/${set.path}/:reserveId\` | [server/routes/projectShareChantier.ts:290](../server/routes/projectShareChantier.ts#L290) |
 | GET | \`/api/shared/projects/:id/${mode}\` | [server/routes/projectShareDocuments.ts:97](../server/routes/projectShareDocuments.ts#L97) |
 | POST | \`/api/tender-rss-sources/${connector}/preview\` | [server/routes/tenderRss.ts:157](../server/routes/tenderRss.ts#L157) |

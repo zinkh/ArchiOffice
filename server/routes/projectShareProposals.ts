@@ -183,7 +183,7 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
       let value = parsed.input.value;
       const kind = FIELD_KIND[field];
       if (!allows(grants, kind, 'write', lotId)) {
-        return res.status(403).json({ error: 'Vous n\'avez pas le droit de proposer cette modification sur ce lot.', code: 'SHARE_FORBIDDEN' });
+        return res.status(403).json({ error: 'Vous n\'avez pas le droit de proposer cette modification dans cet atelier.', code: 'SHARE_FORBIDDEN' });
       }
       if (await isProjectArchived(supabaseAdmin, share.tenant_id, share.project_id)) {
         return res.status(409).json({ error: 'Affaire archivée : lecture seule.', code: 'PROJECT_ARCHIVED' });

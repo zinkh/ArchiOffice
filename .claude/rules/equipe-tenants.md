@@ -275,6 +275,17 @@ partage (`project_shares`, une ligne par affaire × personne, statut `active` ou
 `read` ou `write`). **Aucun droit par défaut** : ce qui n'est pas accordé est
 invisible. `supabase/migrate_project_shares.sql`, idempotente, RLS posée.
 
+**Le confrère se choisit dans les contacts du cabinet** : `POST /api/projects/:id/shares` reçoit un `contact_id`
+(l'écran ne propose que l'annuaire, `ProjectSharesPanel.tsx`) ; l'adresse et le nom viennent de la fiche
+(`contactEmail` : professionnelle d'abord), jamais du corps, une fiche sans adresse est refusée (400
+`CONTACT_NO_EMAIL`), une fiche d'un autre cabinet ou personnelle d'un collègue aussi (même réponse). Une adresse seule
+reste acceptée pour les agents et anciens clients. La fiche est gardée sur le partage (`project_shares.confrere_contact_id`,
+`supabase/migrate_project_shares_contact.sql`, clé simple en `SET NULL`, listée dans `v_refs` de `merge_contacts`) et
+alimente le suivi : `GET /api/contacts/:id/projects` ajoute les affaires partagées avec la fiche (rôle « Confrère
+invité », ou « Ancien confrère invité » si le partage est retiré), rapprochées par la fiche puis, pour les partages plus
+anciens, par l'adresse. Colonne absente (instance non migrée) : le partage se crée sans le lien, la fiche se rapproche par
+l'adresse.
+
 **Gratuité avec limites** (`SHARE_LIMITS`, `server/projectShares/access.ts`) : 3
 invités actifs par affaire, 10 personnes distinctes par cabinet, refus en 402
 (`SHARE_LIMIT_PROJECT`, `SHARE_LIMIT_TENANT`) **avant** toute création de compte.
@@ -314,10 +325,60 @@ d'appartenance de l'affaire par `assertTenantEntity`. Retirer vide les droits
 d'abord (un échec laisse un partage fermé), puis supprime l'adhésion `guest`
 devenue inutile ; l'adhésion d'un vrai membre n'est jamais touchée.
 
-**Droits branchés aujourd'hui** : `lots` (lecture, sans le contact de
-l'entreprise), `tasks` (lecture ou écriture), `documents` (lecture seule), `cctp`
-et `dpgf` (par lot : lecture, commentaire, ou « écriture » qui signifie PROPOSER,
-voir « Écriture par proposition » plus bas). Autres types : voir ROADMAP.md.
+**Droits par ATELIER, jamais par lot** (décision de l'architecte, `server/projectShares/access.ts`).
+Un droit se donne pour un atelier entier, avec les niveaux « Aucun accès », « Lecture et commentaire »
+(là où les commentaires existent : CCTP, DPGF) ou « Lecture » (ailleurs), et « Lecture et modification »
+(là où la modification est branchée : `WRITABLE_KINDS`). Ateliers branchés : `lots` (lecture, sans le contact
+de l'entreprise), `tasks` (lecture ou modification), `documents` (lecture seule), `cctp` et `dpgf`
+(**deux ateliers distincts** : lecture, commentaire, ou « modification » qui signifie PROPOSER, voir
+« Écriture par proposition » plus bas), `act` (lecture, ou « modification » qui signifie PROPOSER, voir « Modification de l'ACT par proposition »), `reports` (comptes rendus de chantier),
+`reserves` (réserves AOR) et `gpa` (réserves GPA), ces trois derniers en lecture ou modification directe.
+Autres types : voir ROADMAP.md.
+
+- **Plus aucun lot dans les droits** : `normalizeGrants` ignore un `lotId` envoyé par un ancien client (agent, MCP) et
+  ne garde qu'un niveau par atelier (le plus haut l'emporte) ; `allows(grants, kind, access)` n'a plus de paramètre
+  de lot qui compte ; `lotIdsForAtelier` rend TOUS les lots de l'affaire quand l'atelier est accordé, car les vues
+  CCTP et DPGF se construisent encore lot par lot (le document est découpé ainsi) et les commentaires et propositions
+  gardent le lot de l'élément visé.
+- **CCTP et DPGF séparés** : un texte ou un titre se propose avec le droit du CCTP, une quantité, un prix, une unité ou un
+  métré avec celui du DPGF (`FIELD_KIND`), quelle que soit la vue d'où on le modifie. **La vue CCTP ne porte les
+  chiffres (quantité, prix, métré) que si l'atelier DPGF est lui aussi partagé** ; sans lui, le confrère lit les textes
+  et jamais les prix. C'est ce qui permet de montrer l'un sans les prix de l'autre.
+- **Les droits par lot d'avant** (`project_share_grants.project_lot_id` renseigné) sont ignorés à la lecture (refus par
+  défaut, jamais un accès plus large) et convertis par `supabase/migrate_project_share_ateliers.sql`, **à appliquer
+  APRÈS le déploiement de ce code** : un atelier n'est accordé en entier que si TOUS les lots de l'affaire l'étaient
+  (le seul partage de production : 11 lots sur 11, donc aucun élargissement). Un partage partiel perd cet accès et le
+  cabinet le redonne par atelier.
+- **Fichier `server/routes/projectShareChantier.ts`** : comptes rendus, réserves et ACT. Réponses construites champ par
+  champ (`REPORT_FIELDS`, `NOTE_FIELDS`, `RESERVE_FIELDS`, `guestActView` dans `server/projectShares/actView.ts`) :
+  jamais présences, suivi des lots (pénalités), intervenants, photos, position sur le plan, e-mails ni fiches contact
+  des entreprises, fichiers du DCE et des offres, négociations détaillées, colonnes financières des marchés. La
+  « modification » est DIRECTE mais bornée à une liste blanche de champs de la ligne visée (un compte rendu : météo,
+  température, prochaine réunion, notes ; une rubrique : texte, statut, échéances, société ; une réserve : statut,
+  description, réponse de suivi, échéance, jamais son intitulé, son lot ou son plan) et tracée dans le journal d'activité
+  (« confrère externe »). Un compte rendu **diffusé** n'est plus modifiable (409 `REPORT_LOCKED`). La ligne visée doit
+  appartenir à l'affaire partagée (introuvable sinon), jamais d'écriture sur une affaire archivée (409). Lever une
+  réserve AOR prévient les webhooks (`reserve.resolved`) comme le fait le cabinet. Écrans : `SharedChantier.tsx`
+  (`SharedReports`, `SharedReserves`, `SharedAct`), enregistrement à la sortie du champ.
+- **Modification de l'ACT par proposition** (`project_share_act_proposals`, `supabase/migrate_project_share_act_proposals.sql`,
+  `server/routes/projectShareActProposals.ts`, `tests/projectShareActProposals.test.ts`). La consultation (`act_data.consultation`)
+  est un seul bloc JSON réécrit en entier par l'éditeur de l'ACT et porte les montants des entreprises : un confrère n'y écrit
+  JAMAIS, le droit « modification » de l'atelier `act` signifie « proposer ». **Champs proposables, liste fermée**
+  (`ACT_FIELDS`, doublée par un CHECK en base) : sur une offre, `montant_base`, `note_technique`, `conforme`, `motif_nc` ; sur une
+  entreprise consultée, `relance_le`, `ne_repond_pas`. Jamais les attributions, les marchés, les négociations, les coordonnées ni
+  les fichiers. Refusé : le montant d'une offre saisie poste par poste (`mode_saisie = 'postes'`, il est déduit des prix),
+  une valeur inchangée, un élément absent de la consultation de CETTE affaire (404), un nombre négatif ou au-delà de 1e9
+  (`parseNumberValue`, virgule admise), une affaire archivée (409). Une proposition sur le même champ remplace la précédente
+  (50 en attente au plus par confrère, 409 `PROPOSAL_LIMIT`). **Approuver est le seul moment où la consultation est écrite**,
+  avec deux garde-fous : la valeur actuelle doit être celle que le confrère a vue (`base_value`), sinon `outdated` et rien
+  n'est écrit ; l'écriture est conditionnelle à `act_data.updated_at` lu, un enregistrement concurrent donne 409
+  `PROPOSAL_CONFLICT`. Une ligne de proposition n'est jamais supprimée. **Limite connue** : l'éditeur de l'ACT garde la
+  consultation en mémoire et la réécrit en entier ; un onglet ACT resté ouvert AVANT l'approbation peut effacer la
+  modification à son prochain enregistrement (l'écran du cabinet le dit : « rechargez l'onglet ACT »). Pas de révision de
+  la consultation comme `dpgfs.revision` : à faire si le cas se présente. Écrans : `SharedAct` (confrère, saisie à la
+  sortie du champ, « Mes propositions », retrait) et `ShareActProposalsInbox.tsx` (cabinet).
+- **Pas encore fait** : photos des comptes rendus et des réserves,
+  création d'une réserve ou d'un compte rendu par un confrère, commentaires sur les ateliers autres que CCTP et DPGF.
 
 **Documents** : le droit couvre les documents de l'affaire (`resource_type =
 'projects'`), pas les pièces de devis, d'appel d'offres ou de bibliothèque
@@ -333,7 +394,7 @@ Le panneau laisse ce droit désactivé par défaut : l'onglet Documents peut
 contenir des contrats ou des pièces d'honoraires, et c'est au cabinet de le
 décider. Pas de dépôt par l'invité (pas de droit `write` pour ce type).
 
-**CCTP et DPGF, lot par lot** (`supabase/migrate_project_share_lots_comments.sql`).
+**CCTP et DPGF : un document découpé en lots** (`supabase/migrate_project_share_lots_comments.sql`). *Le droit ne se donne plus par lot mais par atelier, voir « Droits par ATELIER » plus haut : ce qui suit sur les droits par lot est l'historique, la construction des vues par lot reste exacte.*
 Le CCTP et le DPGF sont UN document (`dpgfs.data`, arbre lots > chapitres >
 lignes) dont chaque lot porte le texte du CCTP (`cctpDescription`) ET les prix.
 Le droit sur `cctp` ou `dpgf` se donne donc **par lot** (`project_share_grants
@@ -442,14 +503,8 @@ qu'il n'est pas ajouté à cette liste. Le métré (`metre`) en fait partie.
   La restauration d'un instantané relit le document ET la révision (`reload`). `drifted` reste
   pour les approbations écrasées avant cette protection. Limite : un document chargé depuis la
   copie locale (API indisponible) n'a pas de révision et s'enregistre sans condition.
-- **Un seul droit par lot pour le CCTP et le DPGF** (décision de l'architecte) : un lot accordé
-  l'est pour les DEUX documents, au niveau le plus haut des deux droits (`symmetrizeGrants`,
-  `access.ts`). Appliqué à l'écriture (`normalizeGrants` enregistre les deux types) ET à la
-  lecture (`loadGrants`) : un droit enregistré d'un seul côté avant cette règle se lit unifié,
-  sans migration de données (il ouvre donc aussi l'autre moitié du lot). Le panneau de partage
-  (`ProjectSharesPanel`) n'a plus qu'un sélecteur par lot ; `SharedDocument` traite les deux
-  types comme une famille. `allows`/`grantedLotIds` ne changent pas.
-- **Chiffres dans la vue CCTP** : sur un lot accordé, la vue CCTP porte `quantite`, `pourMemoire`,
+- **CCTP et DPGF : deux ateliers, deux droits** (remplace l'ancien « un seul droit par lot », `symmetrizeGrants` est supprimé) : un lot n'est plus accordé pour les deux documents d'un coup. Voir « Droits par ATELIER ».
+- **Chiffres dans la vue CCTP** : quand l'atelier DPGF est partagé (sans lui, aucun chiffre), la vue CCTP porte `quantite`, `pourMemoire`,
   `prixUnitaire`, `prixTotal` et le métré (`quantiteDetails` en liste blanche : `id`, `libelle`,
   `expression`, `quantite`, `niveau`, `local`, jamais la note interne ni le bâtiment ou la phase)
   (`guestDocumentView(..., chiffresLotIds)`, `CCTP_CHIFFRES_FIELDS`, `METRE_FIELDS`) ; la vue

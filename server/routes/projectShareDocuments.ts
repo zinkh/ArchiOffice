@@ -17,7 +17,7 @@ import { withProjectLotTitles } from '../proLotTitles';
 import { isProjectArchived } from './projectArchive';
 import { makeRequireSharer } from '../projectShares/requireSharer';
 import {
-  COMMENTABLE_KINDS, activeShareFor, allows, grantedLotIds,
+  COMMENTABLE_KINDS, activeShareFor, allows, lotIdsForAtelier,
   type ShareGrant, type ShareKind, type ShareRow,
 } from '../projectShares/access';
 import { guestDocumentView, nodeLabels, parseDocument, visibleNodes, type DocumentMode, type NodeType } from '../projectShares/documentView';
@@ -98,15 +98,16 @@ export function registerProjectShareDocumentRoutes(app: Express, { supabaseAdmin
       try {
         const found = await guestShare(req, res);
         if (!found) return;
-        const lotIds = grantedLotIds(found.grants, mode, 'read');
-        if (!lotIds.size) {
-          return res.status(403).json({ error: 'Ce document n\'est pas partagé avec vous.', code: 'SHARE_FORBIDDEN' });
+        // Le droit est celui de l'atelier (CCTP ou DPGF), jamais d'un lot : tous les lots de l'affaire s'ouvrent.
+        if (!allows(found.grants, mode, 'read')) {
+          return res.status(403).json({ error: 'Cet atelier n\'est pas partagé avec vous.', code: 'SHARE_FORBIDDEN' });
         }
+        const lotIds = await lotIdsForAtelier(supabaseAdmin, found.share, found.grants, mode, 'read');
         const doc = await loadDocument(found.share.tenant_id, found.share.project_id);
         if (!doc) return res.status(404).json({ error: 'Document introuvable.' });
-        // CCTP : quantité, prix, montant et métré sur les lots accordés (le droit vaut pour le CCTP et le
-        // DPGF, où il les voit déjà), pour les consulter et les proposer depuis le CCTP.
-        const chiffresLotIds = mode === 'cctp' ? grantedLotIds(found.grants, 'dpgf', 'read') : new Set<string>();
+        // CCTP : quantité, prix, montant et métré seulement si l'atelier DPGF est lui aussi partagé. Sans
+        // lui, le confrère lit les textes du CCTP et jamais les prix.
+        const chiffresLotIds = mode === 'cctp' ? await lotIdsForAtelier(supabaseAdmin, found.share, found.grants, 'dpgf', 'read') : new Set<string>();
         res.json(guestDocumentView(doc, mode, lotIds, chiffresLotIds));
       } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${mode}]`, e); }
     });
@@ -143,7 +144,7 @@ export function registerProjectShareDocumentRoutes(app: Express, { supabaseAdmin
       const parsed = readCommentBody(req.body?.body);
       if ('error' in parsed) return res.status(400).json({ error: parsed.error });
       if (!allows(grants, resourceKind, 'comment', lotId)) {
-        return res.status(403).json({ error: 'Vous n\'avez pas le droit de commenter ce lot.', code: 'SHARE_FORBIDDEN' });
+        return res.status(403).json({ error: 'Vous n\'avez pas le droit de commenter cet atelier.', code: 'SHARE_FORBIDDEN' });
       }
       if (await isProjectArchived(supabaseAdmin, share.tenant_id, share.project_id)) {
         return res.status(409).json({ error: 'Affaire archivée : lecture seule.', code: 'PROJECT_ARCHIVED' });

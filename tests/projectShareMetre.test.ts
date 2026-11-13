@@ -68,7 +68,7 @@ const FACADES = [{ libelle: 'Façade Est', expression: '10' }, { libelle: 'Faça
 
 async function guestEcrivain() {
   const ctx = setup();
-  const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write', lotId: ctx.lotA }]);
+  const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
   return { ...ctx, guest };
 }
 
@@ -130,7 +130,7 @@ describe('proposer un métré', () => {
 
   it('refusé sans le droit d\'écriture', async () => {
     const ctx = setup();
-    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'dpgf', access: 'comment', lotId: ctx.lotA }]);
+    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'comment' }, { kind: 'dpgf', access: 'comment' }]);
     const res = await propose(guest.token, ctx.projectId, metre(ctx.lotA, 'lig-a1', FACADES));
     expect(res.status).toBe(403);
   });

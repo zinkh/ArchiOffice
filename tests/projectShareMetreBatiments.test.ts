@@ -64,7 +64,7 @@ async function inviteGuest(adminToken: string, projectId: string, grants: any[])
 
 async function guestEcrivain() {
   const ctx = setup();
-  const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write', lotId: ctx.lotA }]);
+  const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'cctp', access: 'write' }, { kind: 'dpgf', access: 'write' }]);
   return { ...ctx, guest };
 }
 

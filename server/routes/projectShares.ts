@@ -23,7 +23,7 @@ import {
   addMembership, getMemberRole, listMemberships, removeMembership,
 } from '../tenantMemberships';
 import {
-  COMMENTABLE_KINDS, GUEST_ROLE_LABEL, GUEST_SYSTEM_ROLE, LOT_SCOPED_KINDS, SHARE_KINDS, SHARE_LIMITS, WRITABLE_KINDS,
+  COMMENTABLE_KINDS, GUEST_ROLE_LABEL, GUEST_SYSTEM_ROLE, SHARE_KINDS, SHARE_LIMITS, WRITABLE_KINDS,
   activeShareFor, activeSharesOfTenant, allows, checkShareLimits, loadGrants,
   normalizeGrants, replaceGrants,
   type ShareGrant, type ShareRow,
@@ -56,6 +56,25 @@ const DOCUMENT_SELECT = DOCUMENT_FIELDS.join(', ');
 function pick(row: any, keys: readonly string[]): Record<string, any> {
   return Object.fromEntries(keys.map(k => [k, row?.[k] ?? null]));
 }
+
+/** Première adresse utilisable d'une fiche contact (professionnelle d'abord), en minuscules, ou ''. */
+export function contactEmail(contact: any): string {
+  for (const key of ['email_work', 'email', 'email_home', 'email_other']) {
+    const v = typeof contact?.[key] === 'string' ? contact[key].trim().toLowerCase() : '';
+    if (v) return v;
+  }
+  return '';
+}
+
+/** Nom affiché d'une fiche : « Prénom Nom », à défaut la société. */
+export function contactDisplayName(contact: any): string {
+  const person = [contact?.first_name, contact?.last_name].filter((v: unknown) => typeof v === 'string' && v.trim()).join(' ').trim();
+  return (person || (typeof contact?.company_name === 'string' ? contact.company_name.trim() : '')).slice(0, 120);
+}
+
+/** Colonne absente (instance non migrée) : le partage reste possible, sans le lien vers la fiche. */
+const isMissingContactColumn = (error: any) =>
+  !!error && (error.code === '42703' || error.code === 'PGRST204') && /confrere_contact_id/.test(String(error.message || ''));
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -106,15 +125,6 @@ export function readTaskFields(body: any, mode: 'create' | 'update'): { fields: 
 export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
   const requireSharer = makeRequireSharer(supabaseAdmin, getTenantId);
 
-  /** Les lots désignés dans les droits doivent être ceux de CETTE affaire : l'identifiant d'un lot d'un autre cabinet n'ouvre rien. */
-  async function lotsBelong(tenantId: string, projectId: string, grants: ShareGrant[]): Promise<boolean> {
-    const lotIds = [...new Set(grants.flatMap(g => (g.lotId ? [g.lotId] : [])))];
-    if (!lotIds.length) return true;
-    const { data } = await supabaseAdmin.from('project_lots').select('id')
-      .eq('project_id', projectId).eq('tenant_id', tenantId).in('id', lotIds);
-    return (data || []).length === lotIds.length;
-  }
-
   const fail = (res: any, label: string, e: any) => {
     if (e?.status) return res.status(e.status).json({ error: e.message, code: e.code });
     console.error(label, e);
@@ -131,6 +141,7 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
     }
     return shares.map(s => ({
       id: s.id, userId: s.user_id, email: s.email, name: names.get(s.user_id) ?? null,
+      contactId: s.confrere_contact_id ?? null,
       createdAt: s.created_at ?? null, grants: grants.get(s.id) ?? [],
     }));
   }
@@ -145,7 +156,7 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
       }
       const active = await activeSharesOfTenant(supabaseAdmin, tenantId);
       const onProject = active.filter(s => s.project_id === req.params.id);
-      // Les lots de l'affaire : c'est parmi eux que se choisissent les droits par lot (CCTP, DPGF).
+      // Les lots de l'affaire servent aux libellés des commentaires et des propositions (plus à choisir des droits).
       const { data: lots } = await supabaseAdmin.from('project_lots').select('id, lot_number, lot_title')
         .eq('project_id', req.params.id).eq('tenant_id', tenantId);
       res.json({
@@ -155,7 +166,6 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
         kinds: SHARE_KINDS,
         writableKinds: WRITABLE_KINDS,
         commentableKinds: COMMENTABLE_KINDS,
-        lotScopedKinds: LOT_SCOPED_KINDS,
         lots: (lots || []).map((l: any) => pick(l, LOT_FIELDS)),
       });
     } catch (e: any) { fail(res, '[GET /api/projects/:id/shares]', e); }
@@ -165,16 +175,29 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
     try {
       const tenantId = await requireSharer(req.user.id);
       const projectId = req.params.id;
-      const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+      // Le confrère se choisit dans les contacts du cabinet (`contact_id`) : son adresse et son nom viennent
+      // de la fiche, jamais du corps, et la fiche porte ensuite le suivi des opérations en collaboration.
+      // Une adresse seule reste acceptée (agents, anciens clients) ; l'écran, lui, ne propose que les contacts.
+      let contact: any = null;
+      const contactId = typeof req.body?.contact_id === 'string' && req.body.contact_id.trim() ? req.body.contact_id.trim() : null;
+      if (contactId) {
+        const { data } = await supabaseAdmin.from('contacts').select('*').eq('id', contactId).eq('tenant_id', tenantId).maybeSingle();
+        // Même réponse pour une fiche inexistante, d'un autre cabinet ou personnelle d'un collègue.
+        if (!data || (data.is_personal && data.owner_user_id && data.owner_user_id !== req.user.id)) {
+          return res.status(400).json({ error: 'Contact introuvable pour ce cabinet.' });
+        }
+        contact = data;
+      }
+      const email = contact ? contactEmail(contact) : (typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '');
+      if (contact && !email) {
+        return res.status(400).json({ error: 'Cette fiche contact n\'a pas d\'adresse e-mail : ajoutez-en une à la fiche avant d\'inviter le confrère.', code: 'CONTACT_NO_EMAIL' });
+      }
       if (!isValidEmail(email)) return res.status(400).json({ error: 'Adresse e-mail invalide.' });
       const parsed = normalizeGrants(req.body?.grants);
       if ('error' in parsed) return res.status(400).json({ error: parsed.error });
 
       const { data: project } = await supabaseAdmin.from('projects').select('id, name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
       if (!project) return res.status(404).json({ error: 'Affaire introuvable.' });
-      if (!(await lotsBelong(tenantId, projectId, parsed.grants))) {
-        return res.status(400).json({ error: 'Un lot désigné n\'appartient pas à cette affaire.' });
-      }
 
       const { data: existingProfile } = await supabaseAdmin.from('profiles').select('id, name').eq('email', email).maybeSingle();
       if (existingProfile?.id === req.user.id) return res.status(400).json({ error: 'Vous ne pouvez pas vous inviter vous-même.' });
@@ -210,7 +233,7 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
           invalidateGuestRoleCache(userId);
         }
       } else {
-        const name = (typeof req.body?.name === 'string' && req.body.name.trim()) || email.split('@')[0];
+        const name = (contact && contactDisplayName(contact)) || (typeof req.body?.name === 'string' && req.body.name.trim()) || email.split('@')[0];
         const { data: linkData, error: authErr } = await supabaseAdmin.auth.admin.generateLink({
           type: 'invite', email, options: { data: { name }, redirectTo: `${appUrl}/reset-password` },
         });
@@ -225,16 +248,21 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
       }
 
       let share: any;
+      const withContact = contact ? { confrere_contact_id: contact.id } : {};
       if (previous) {
-        const { data, error } = await supabaseAdmin.from('project_shares')
-          .update({ status: 'active', revoked_at: null, invited_by: req.user.id, email })
-          .eq('id', previous.id).select().single();
+        const patch = { status: 'active', revoked_at: null, invited_by: req.user.id, email };
+        let { data, error } = await supabaseAdmin.from('project_shares').update({ ...patch, ...withContact }).eq('id', previous.id).select().single();
+        if (error && contact && isMissingContactColumn(error)) {
+          ({ data, error } = await supabaseAdmin.from('project_shares').update(patch).eq('id', previous.id).select().single());
+        }
         if (error) throw error;
         share = data;
       } else {
-        const { data, error } = await supabaseAdmin.from('project_shares')
-          .insert({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: projectId, user_id: userId, email, status: 'active', invited_by: req.user.id })
-          .select().single();
+        const row = { id: crypto.randomUUID(), tenant_id: tenantId, project_id: projectId, user_id: userId, email, status: 'active', invited_by: req.user.id };
+        let { data, error } = await supabaseAdmin.from('project_shares').insert({ ...row, ...withContact }).select().single();
+        if (error && contact && isMissingContactColumn(error)) {
+          ({ data, error } = await supabaseAdmin.from('project_shares').insert(row).select().single());
+        }
         if (error) throw error;
         share = data;
       }
@@ -269,9 +297,6 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
         .eq('id', req.params.shareId).eq('tenant_id', tenantId).eq('project_id', req.params.id).maybeSingle();
       if (!share) return res.status(404).json({ error: 'Partage introuvable.' });
       if (share.status !== 'active') return res.status(409).json({ error: 'Ce partage a été retiré : invitez de nouveau la personne.' });
-      if (!(await lotsBelong(tenantId, req.params.id, parsed.grants))) {
-        return res.status(400).json({ error: 'Un lot désigné n\'appartient pas à cette affaire.' });
-      }
       await replaceGrants(supabaseAdmin, share, parsed.grants);
       res.json((await shareView([share as ShareRow]))[0]);
     } catch (e: any) { fail(res, '[PUT /api/projects/:id/shares/:shareId]', e); }

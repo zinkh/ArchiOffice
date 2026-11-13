@@ -31,6 +31,8 @@ import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectShareRoutes } from "./server/routes/projectShares";
 import { registerProjectShareDocumentRoutes } from "./server/routes/projectShareDocuments";
 import { registerProjectShareProposalRoutes } from "./server/routes/projectShareProposals";
+import { registerProjectShareChantierRoutes } from "./server/routes/projectShareChantier";
+import { registerProjectShareActProposalRoutes } from "./server/routes/projectShareActProposals";
 import { guestAccessGuard } from "./server/guestAccessGuard";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
 import { registerProjectPhaseNotesRoutes } from "./server/routes/projectPhaseNotes";
@@ -1171,6 +1173,8 @@ export async function createApp() {
   registerProjectShareRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectShareDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectShareProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectShareChantierRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectShareActProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseNotesRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerProjectArchiveRoutes(app, { supabaseAdmin, getTenantId, getUserName, requireRole, storeBusinessFile, checkQuota });
