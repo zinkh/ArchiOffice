@@ -65,10 +65,10 @@ html:has(.aol) { scroll-behavior: smooth; }
 .aol .aol-btn-white-ink:hover { background: var(--aol-ink); color: #fff; }
 .aol .aol-btn-blue { background: var(--aol-blue); color: #fff; }
 .aol .aol-btn-blue:hover { background: #fff; color: var(--aol-ink); }
-.aol-btn-md { font-size: 16px; padding: 15px 28px; }
-.aol-btn-outline.aol-btn-md { padding: 14px 26px; }
-.aol-btn-lg { font-size: 17px; padding: 17px 30px; min-height: 52px; }
-.aol-btn-outline.aol-btn-lg { padding: 16px 28px; }
+.aol-btn-md { font-size: 14px; padding: 10px 20px; }
+.aol-btn-outline.aol-btn-md { padding: 9px 19px; }
+.aol-btn-lg { font-size: 14px; padding: 11px 22px; min-height: 42px; }
+.aol-btn-outline.aol-btn-lg { padding: 10px 21px; }
 
 .aol .aol-btn-hero { background: var(--aol-blue); color: #fff; }
 .aol .aol-btn-hero:hover { background: var(--aol-blue-dark); color: #fff; box-shadow: 0 12px 28px rgba(31,106,168,.32); }
@@ -85,7 +85,7 @@ html:has(.aol) { scroll-behavior: smooth; }
 .aol-nav a, .aol-header-login { transition: color .2s ease; }
 .aol .aol-nav a:hover, .aol .aol-header-login:hover { color: var(--aol-blue); }
 .aol-header-actions { display: flex; align-items: center; gap: 14px; flex-shrink: 0; font-family: var(--aol-display); font-size: 15px; font-weight: 600; }
-.aol-header-cta { font-size: 15px; padding: 12px 24px; }
+.aol-header-cta { font-size: 13px; padding: 9px 18px; }
 @media (hover: hover) { .aol-header-cta:hover:not(:active) { transform: translateY(-1px); } }
 
 .aol-burger {
@@ -225,7 +225,7 @@ html:has(.aol) { scroll-behavior: smooth; }
 .aol-news { scroll-margin-top: 96px; padding: 0 24px clamp(72px,9vw,128px); }
 .aol-news .aol-section-head { gap: 16px; margin-bottom: 40px; }
 .aol-news .aol-section-head h2 { font-size: clamp(24px,3vw,36px); }
-.aol-news-head-btn { font-size: 15px; padding: 12px 24px; }
+.aol-news-head-btn { font-size: 13px; padding: 9px 18px; }
 .aol-news-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,280px),1fr)); gap: 24px; }
 .aol-article { height: 100%; background: #fff; border-radius: 24px; padding: 28px; display: flex; flex-direction: column; gap: 14px; min-height: 230px; }
 .aol-article .aol-eyebrow { letter-spacing: .14em; font-weight: 400; }
@@ -264,15 +264,15 @@ html:has(.aol) { scroll-behavior: smooth; }
 .aol-tier-desc { margin-top: 12px !important; font-size: 14px; color: var(--aol-muted); }
 .aol-tier.is-popular .aol-tier-desc { color: var(--aol-muted-on-dark); }
 .aol-tier ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 12px; margin: 26px 0 0; flex: 1; font-size: 15px; }
-.aol-tier .aol-btn { margin-top: 30px; font-size: 15px; padding: 14px 22px; }
-.aol-tier .aol-btn-blue { padding: 15px 22px; }
+.aol-tier .aol-btn { margin-top: 30px; font-size: 14px; padding: 10px 20px; }
+.aol-tier .aol-btn-blue { padding: 11px 20px; }
 
 /* ---------- CTA final ---------- */
 .aol-final { padding: 0 24px clamp(72px,9vw,120px); }
 .aol-final-card { max-width: 1280px; margin: 0 auto; background: var(--aol-blue); border-radius: clamp(20px,4vw,40px); padding: clamp(32px,6vw,88px); display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,300px),1fr)); gap: 40px; align-items: center; color: #fff; }
 .aol-final-card h2 { font-family: var(--aol-display); font-size: clamp(28px,3.8vw,52px); line-height: 1.02; letter-spacing: -.04em; font-weight: 800; text-wrap: pretty; }
 .aol-final-card > div > p:first-child { font-size: 18px; line-height: 1.6; }
-.aol-final-card .aol-btn { margin-top: 30px; font-size: 17px; padding: 16px 30px; }
+.aol-final-card .aol-btn { margin-top: 30px; font-size: 14px; padding: 11px 22px; }
 .aol-final-note { margin-top: 16px !important; font-size: 13px; }
 
 /* ---------- Footer ---------- */
