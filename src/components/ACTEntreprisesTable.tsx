@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   IconSearch, IconSend, IconLink, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus,
 } from '@tabler/icons-react';
@@ -50,7 +50,7 @@ interface Props {
   onSelectContact: (rowId: string, contact: Contact) => void;
   onCreateContact: (rowId: string, name: string) => void;
   /** Appelé à la sortie des champs d'adresses : reporte les adresses saisies sur la fiche de l'entreprise. */
-  onSyncEmails?: (e: EntrepriseRow) => void;
+  onSyncEmails?: (e: EntrepriseRow, avant: string[]) => void;
   corpsEtatCodesFromContact: (contact: Contact) => string[];
   /** Qualifications des fiches contacts, par identifiant de contact. */
   qualifications?: Record<string, Qualification[]>;
@@ -243,6 +243,18 @@ export default function ACTEntreprisesTable({
     return () => { cancelAnimationFrame(raf); clearTimeout(fin); };
   }, [miseEnAvant]);
 
+  // Adresses de la ligne au moment où l'on entre dans un champ d'adresse : une adresse
+  // corrigée remplace l'ancienne sur la fiche contact (voir completerEmailsContact).
+  const adressesAvant = useRef<Record<string, string[]>>({});
+  const entrerAdresses = (e: EntrepriseRow) => {
+    if (!adressesAvant.current[e.id]) adressesAvant.current[e.id] = destinatairesEntreprise(e);
+  };
+  const quitterAdresses = (e: EntrepriseRow) => {
+    const avant = adressesAvant.current[e.id] ?? [];
+    delete adressesAvant.current[e.id];
+    onSyncEmails?.(e, avant);
+  };
+
   const patch = (id: string, p: Partial<EntrepriseRow>) =>
     onChange(entreprises.map(e => (e.id === id ? { ...e, ...p } : e)));
   const patchMany = (ids: Set<string>, p: (e: EntrepriseRow) => Partial<EntrepriseRow>) =>
@@ -333,14 +345,16 @@ export default function ACTEntreprisesTable({
         type="email" aria-label="Email de l'entreprise"
         placeholder="email@entreprise.fr" value={e.email || ''}
         onChange={ev => patch(e.id, { email: ev.target.value })}
-        onBlur={() => onSyncEmails?.(e)}
+        onFocus={() => entrerAdresses(e)}
+        onBlur={() => quitterAdresses(e)}
       />
       <input
         className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
         type="text" aria-label="Autres adresses e-mail de l'entreprise"
         placeholder="Autres adresses (séparées par une virgule)" value={e.emails_supplementaires || ''}
         onChange={ev => patch(e.id, { emails_supplementaires: ev.target.value })}
-        onBlur={() => onSyncEmails?.(e)}
+        onFocus={() => entrerAdresses(e)}
+        onBlur={() => quitterAdresses(e)}
       />
       {e.contact_id && (
         <div className="mt-1 px-1">

@@ -263,25 +263,36 @@ type ChampsEmailContact = {
 
 /**
  * Adresses saisies sur la ligne de consultation à reporter sur la fiche contact.
- * Ne remplit que les emplacements VIDES (pro, e-mail, perso, autre) : une adresse
- * déjà présente sur la fiche n'est jamais écrasée ni dupliquée (casse ignorée).
- * Rend `null` quand il n'y a rien à ajouter. Au-delà de quatre adresses, le
- * surplus reste sur la ligne de consultation (la fiche n'a que quatre champs).
+ * - Une adresse CORRIGÉE (présente avant la saisie, absente après) remplace
+ *   l'ancienne là où elle se trouve sur la fiche ; `avant` est la liste des
+ *   adresses de la ligne avant la saisie. Une adresse simplement supprimée de la
+ *   ligne reste sur la fiche : la fiche ne perd rien sans remplaçante.
+ * - Les autres nouvelles adresses vont dans les emplacements VIDES (pro, e-mail,
+ *   perso, autre) ; une adresse déjà sur la fiche n'est jamais dupliquée (casse ignorée).
+ * Rend `null` quand il n'y a rien à changer. Au-delà de quatre adresses, le surplus
+ * reste sur la ligne de consultation (la fiche n'a que quatre champs).
  */
 export function completerEmailsContact(
   contact: ChampsEmailContact,
   e: Pick<EntrepriseSuivi, 'email' | 'emails_supplementaires'>,
+  avant: string[] = [],
 ): Partial<Record<keyof ChampsEmailContact, string>> | null {
-  const present = new Set(
-    [contact.email, contact.email_work, contact.email_home, contact.email_other]
-      .map(a => (a ?? '').trim().toLowerCase()).filter(Boolean),
-  );
-  const aAjouter = destinatairesEntreprise(e).filter(a => !present.has(a.toLowerCase()));
-  if (aAjouter.length === 0) return null;
-  const emplacements: (keyof ChampsEmailContact)[] = ['email_work', 'email', 'email_home', 'email_other'];
-  const libres = emplacements.filter(k => !(contact[k] ?? '').trim());
+  const cle = (a?: string | null) => (a ?? '').trim().toLowerCase();
+  const champs: (keyof ChampsEmailContact)[] = ['email_work', 'email', 'email_home', 'email_other'];
+  const apres = destinatairesEntreprise(e);
+  const present = new Set(champs.map(k => cle(contact[k])).filter(Boolean));
+  const gardees = new Set(apres.map(cle));
+  const remplacables = avant.filter(a => !gardees.has(cle(a)) && present.has(cle(a)));
+  const aAjouter = apres.filter(a => !present.has(cle(a)));
   const patch: Partial<Record<keyof ChampsEmailContact, string>> = {};
-  aAjouter.forEach((adresse, i) => { if (libres[i]) patch[libres[i]] = adresse; });
+  const restantes: string[] = [];
+  for (const adresse of aAjouter) {
+    const ancienne = remplacables.shift();
+    const champ = ancienne ? champs.find(k => cle(contact[k]) === cle(ancienne) && !(k in patch)) : undefined;
+    if (champ) patch[champ] = adresse; else restantes.push(adresse);
+  }
+  const libres = champs.filter(k => !cle(contact[k]) && !(k in patch));
+  restantes.forEach((adresse, i) => { if (libres[i]) patch[libres[i]] = adresse; });
   return Object.keys(patch).length > 0 ? patch : null;
 }
 

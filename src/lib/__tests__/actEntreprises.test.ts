@@ -193,3 +193,20 @@ describe('completerEmailsContact', () => {
     )).toBeNull();
   });
 });
+
+describe('completerEmailsContact : adresse corrigée', () => {
+  it('remplace l\'ancienne adresse là où elle se trouve sur la fiche', () => {
+    expect(completerEmailsContact(
+      { email_work: 'faute@x.fr', email: 'faute@x.fr', email_other: 'autre@x.fr' },
+      { email: 'bon@x.fr', emails_supplementaires: 'autre@x.fr' },
+      ['faute@x.fr', 'autre@x.fr'],
+    )).toEqual({ email_work: 'bon@x.fr' });
+  });
+  it('garde l\'ancienne adresse quand elle est seulement supprimée de la ligne', () => {
+    expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: '' }, ['a@x.fr'])).toBeNull();
+  });
+  it('sans ancienne adresse sur la fiche, la nouvelle va dans un emplacement libre', () => {
+    expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: 'b@x.fr' }, ['z@x.fr']))
+      .toEqual({ email: 'b@x.fr' });
+  });
+});

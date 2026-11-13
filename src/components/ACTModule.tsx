@@ -20,7 +20,7 @@ import {
 } from '../lib/actExport';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
 import ACTEntreprisesTable from './ACTEntreprisesTable';
-import { completerEmailsContact } from '../lib/actEntreprises';
+import { completerEmailsContact, destinatairesEntreprise } from '../lib/actEntreprises';
 import { EntrepriseSearchDialog, type EntrepriseChoisie } from './EntrepriseSearchDialog';
 import { EntrepriseAddForm, type NouvelleEntreprise } from './EntrepriseAddForm';
 import { useQualifications } from '../hooks/useQualifications';
@@ -320,21 +320,63 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     } catch (err) { console.error('Échec de la synchronisation du corps d\'état vers le contact:', err); }
   }, [allContacts, corpsEtat]);
 
+  // Lignes dont la fiche est en cours de création : évite deux fiches si l'on quitte deux champs d'affilée.
+  const fichesEnCreation = useRef(new Set<string>());
+
   /**
-   * Reporte sur la fiche contact les adresses saisies sur la ligne (e-mail et
-   * autres adresses), sans écraser ce que la fiche contient déjà.
+   * Reporte sur la fiche contact les adresses saisies sur la ligne (e-mail et autres adresses) :
+   * une adresse corrigée remplace l'ancienne, les nouvelles complètent les champs vides.
+   * Une ligne sans fiche en reçoit une : celle d'une entreprise déjà connue (même adresse,
+   * puis même nom) est reprise, sinon une fiche « Entreprise » est créée.
    */
-  const syncEmailsToContact = useCallback(async (e: EntrepriseConsultee) => {
-    if (!e.contact_id) return;
+  const syncEmailsToContact = useCallback(async (e: EntrepriseConsultee, avant: string[]) => {
+    const adresses = destinatairesEntreprise(e);
+    if (!e.contact_id) {
+      const nom = (e.nom || '').trim();
+      if (!nom || adresses.length === 0 || fichesEnCreation.current.has(e.id)) return;
+      const cle = (a?: string | null) => (a ?? '').trim().toLowerCase();
+      const connue = entrepriseContacts.find(c =>
+        [c.email, c.email_work, c.email_home, c.email_other].some(a => cle(a) && adresses.some(x => cle(x) === cle(a))))
+        ?? entrepriseContacts.find(c => cle(c.company_name) === cle(nom));
+      if (connue) {
+        updateEntreprise(e.id, { contact_id: connue.id, corps_etat_codes: e.corps_etat_codes?.length ? e.corps_etat_codes : corpsEtatCodesFromContact(connue) });
+        const patch = completerEmailsContact(connue, e);
+        if (patch) {
+          try {
+            await apiFetch(`/api/contacts/${connue.id}`, { method: 'PUT', body: JSON.stringify(patch) });
+            setExtraContacts(prev => [...prev.filter(c => c.id !== connue.id), { ...connue, ...patch }]);
+          } catch (err) { console.error('Échec de la synchronisation des adresses vers le contact:', err); }
+        }
+        return;
+      }
+      fichesEnCreation.current.add(e.id);
+      try {
+        const id = crypto.randomUUID();
+        const emails = completerEmailsContact({}, e) ?? {};
+        const corps = (e.corps_etat_codes || []).map(code => corpsEtat.find(ce => ce.code === code)?.libelle).filter((l): l is string => !!l);
+        const fiche = {
+          id, first_name: '', last_name: '', company_name: nom, category: CONTACT_CATEGORY_ENTREPRISE,
+          ...emails, ...(corps.length > 0 ? { corps_etat: corps } : {}),
+        };
+        await apiFetch('/api/contacts', { method: 'POST', body: JSON.stringify(fiche) });
+        setExtraContacts(prev => [...prev, { ...fiche, email: emails.email || emails.email_work || '', phone: '' } as unknown as Contact]);
+        updateEntreprise(e.id, { contact_id: id });
+      } catch (err) {
+        console.error('Échec de la création de la fiche entreprise:', err);
+      } finally {
+        fichesEnCreation.current.delete(e.id);
+      }
+      return;
+    }
     const contact = allContacts.find(c => c.id === e.contact_id);
     if (!contact) return;
-    const patch = completerEmailsContact(contact, e);
+    const patch = completerEmailsContact(contact, e, avant);
     if (!patch) return;
     try {
       await apiFetch(`/api/contacts/${contact.id}`, { method: 'PUT', body: JSON.stringify(patch) });
       setExtraContacts(prev => [...prev.filter(c => c.id !== contact.id), { ...contact, ...patch }]);
     } catch (err) { console.error('Échec de la synchronisation des adresses vers le contact:', err); }
-  }, [allContacts]);
+  }, [allContacts, entrepriseContacts, corpsEtat, corpsEtatCodesFromContact]);
 
   // Q&R form
   const [showQRForm, setShowQRForm] = useState(false);
@@ -1022,7 +1064,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                 updateEntreprise(rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
               }}
               onCreateContact={(rowId, name) => setContactModalFor({ rowId, name })}
-              onSyncEmails={e => void syncEmailsToContact(e as EntrepriseConsultee)}
+              onSyncEmails={(e, avant) => void syncEmailsToContact(e as EntrepriseConsultee, avant)}
             />
           </div>
         </div>
