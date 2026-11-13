@@ -214,24 +214,52 @@ interface SharedActView {
   lots: Array<{ id: string; name: string | null }>;
   documents: Array<{ id: string; nom: string | null; type_doc: string | null }>;
   entreprises: Array<{ id: string; nom: string | null; lots_ids: string[]; dce_transmis_le: string | null; relance_le: string | null; offre_recue_le: string | null; ne_repond_pas: boolean }>;
-  offres: Array<{ id: string; lot_id: string | null; entreprise_id: string | null; montant_base: number | null; conforme: boolean; motif_nc: string | null }>;
+  offres: Array<{ id: string; lot_id: string | null; entreprise_id: string | null; montant_base: number | null; note_technique: number | null; conforme: boolean; motif_nc: string | null }>;
   attributions: Array<{ lot_id: string | null; entreprise_id: string | null; montant: number | null; directe: boolean }>;
   questions: Array<{ id: string; question: string | null; reponse: string | null; date_question: string | null }>;
   marches: Array<{ id: string; entreprise_nom: string | null; lot_numero: string | null; lot_titre: string | null; montant_ht: number | null; statut: string | null; statut_signature: string | null }>;
 }
 
+interface ActProposal {
+  id: string; targetType: 'offre' | 'entreprise'; targetId: string; field: string;
+  baseValue: string; proposedValue: string; status: 'pending' | 'applied' | 'rejected' | 'withdrawn' | 'outdated'; decisionNote: string | null;
+}
+
 const euros = (v: number | null) => (v == null ? '' : new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v));
 
-/** Atelier ACT d'un confrère : consultation, offres, attributions et marchés, en lecture seule. */
-export function SharedAct({ projectId }: { projectId: string }) {
+/**
+ * Atelier ACT d'un confrère : consultation, offres, attributions et marchés. La modification est une PROPOSITION :
+ * le confrère n'écrit jamais dans la consultation, le cabinet approuve (server/routes/projectShareActProposals.ts).
+ */
+export function SharedAct({ projectId, canPropose }: { projectId: string; canPropose: boolean }) {
   const { t } = useTranslation();
   const [view, setView] = useState<SharedActView | null>(null);
+  const [proposals, setProposals] = useState<ActProposal[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const base = `/api/shared/projects/${projectId}/act-proposals`;
+
+  const loadProposals = useCallback(async () => {
+    try { setProposals(await apiFetch<ActProposal[]>(base)); } catch { setProposals([]); }
+  }, [base]);
 
   useEffect(() => {
     setView(null); setError(null);
     apiFetch<SharedActView>(`/api/shared/projects/${projectId}/act`).then(setView).catch(e => setError(e?.message || t('share_error')));
-  }, [projectId, t]);
+    void loadProposals();
+  }, [projectId, t, loadProposals]);
+
+  const propose = async (targetType: 'offre' | 'entreprise', targetId: string, field: string, value: string | boolean) => {
+    try {
+      await apiFetch(base, { method: 'POST', body: JSON.stringify({ targetType, targetId, field, value }) });
+      setError(null); setNotice(t('shared_act_proposed'));
+      await loadProposals();
+    } catch (e: any) { setNotice(null); setError(e?.message || t('share_error')); }
+  };
+
+  const withdraw = async (id: string) => {
+    try { await apiFetch(`${base}/${id}`, { method: 'DELETE' }); await loadProposals(); } catch (e: any) { setError(e?.message || t('share_error')); }
+  };
 
   if (!view) return error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null;
 
@@ -239,10 +267,15 @@ export function SharedAct({ projectId }: { projectId: string }) {
   const company = (id: string | null) => view.entreprises.find(e => e.id === id)?.nom ?? id ?? '';
   const empty = !view.entreprises.length && !view.offres.length && !view.marches.length;
   const heading = 'text-xs font-bold text-[var(--tblr-text)] mb-1';
+  const pending = proposals.filter(p => p.status === 'pending');
+  const pendingOn = (type: string, id: string, field: string) => pending.find(p => p.targetType === type && p.targetId === id && p.field === field);
 
   return (
     <section className="rounded-lg p-4 space-y-4" style={cardStyle}>
       <h2 className="text-sm font-bold text-[var(--tblr-text)]">{t('shared_act_title')}</h2>
+      {canPropose && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_act_propose_hint')}</p>}
+      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+      {notice && <p role="status" className="text-xs text-[var(--tblr-muted)]">{notice}</p>}
       {empty && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_act_empty')}</p>}
 
       {view.entreprises.length > 0 && (
@@ -254,11 +287,26 @@ export function SharedAct({ projectId }: { projectId: string }) {
                 <tr key={e.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <td className="py-1.5 pr-3 font-medium text-[var(--tblr-text)]">{e.nom}</td>
                   <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">{e.lots_ids.map(lotName).join(', ')}</td>
-                  <td className="py-1.5 text-[var(--tblr-muted)]">
+                  <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">
                     {e.ne_repond_pas ? t('shared_act_no_answer')
                       : e.offre_recue_le ? t('shared_act_offer_received', { date: e.offre_recue_le })
                       : e.dce_transmis_le ? t('shared_act_dce_sent', { date: e.dce_transmis_le }) : ''}
                   </td>
+                  {canPropose && (
+                    <td className="py-1.5 whitespace-nowrap">
+                      <label className="inline-flex items-center gap-1 mr-3">
+                        <input
+                          key={`nr-${e.id}-${e.ne_repond_pas}`} type="checkbox" defaultChecked={e.ne_repond_pas}
+                          onChange={ev => propose('entreprise', e.id, 'ne_repond_pas', ev.target.checked)} aria-label={t('shared_act_no_answer')}
+                        />
+                        {t('shared_act_no_answer')}
+                      </label>
+                      <CommitField
+                        key={`rl-${e.id}-${e.relance_le}`} value={e.relance_le} label={t('shared_act_relance')} disabled={!!pendingOn('entreprise', e.id, 'relance_le')}
+                        type="date" onCommit={v => propose('entreprise', e.id, 'relance_le', v)}
+                      />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -276,7 +324,22 @@ export function SharedAct({ projectId }: { projectId: string }) {
                   <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">{lotName(o.lot_id)}</td>
                   <td className="py-1.5 pr-3 font-medium text-[var(--tblr-text)]">{company(o.entreprise_id)}</td>
                   <td className="py-1.5 pr-3 whitespace-nowrap">{euros(o.montant_base)}</td>
-                  <td className="py-1.5 text-[var(--tblr-muted)]">{o.conforme ? '' : `${t('shared_act_non_conform')}${o.motif_nc ? ` : ${o.motif_nc}` : ''}`}</td>
+                  <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">{o.conforme ? '' : `${t('shared_act_non_conform')}${o.motif_nc ? ` : ${o.motif_nc}` : ''}`}</td>
+                  {canPropose && (
+                    <td className="py-1.5 whitespace-nowrap">
+                      <CommitField
+                        key={`mb-${o.id}-${o.montant_base}`} value={o.montant_base == null ? '' : String(o.montant_base)} label={t('shared_act_field_montant_base')}
+                        disabled={!!pendingOn('offre', o.id, 'montant_base')} onCommit={v => propose('offre', o.id, 'montant_base', v)}
+                      />
+                      <label className="inline-flex items-center gap-1 mt-1">
+                        <input
+                          key={`cf-${o.id}-${o.conforme}`} type="checkbox" defaultChecked={o.conforme}
+                          onChange={ev => propose('offre', o.id, 'conforme', ev.target.checked)} aria-label={t('shared_act_field_conforme')}
+                        />
+                        {t('shared_act_field_conforme')}
+                      </label>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -327,6 +390,25 @@ export function SharedAct({ projectId }: { projectId: string }) {
               <li key={q.id}>
                 <span className="text-[var(--tblr-text)]">{q.question}</span>
                 {q.reponse && <span className="block text-[var(--tblr-muted)]">{q.reponse}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {proposals.length > 0 && (
+        <div>
+          <h3 className={heading}>{t('shared_act_my_proposals')}</h3>
+          <ul className="space-y-1.5 text-xs">
+            {proposals.slice(0, 20).map(p => (
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-2" style={{ borderTop: '1px solid var(--tblr-border)', paddingTop: '0.375rem' }}>
+                <span className="text-[var(--tblr-text)]">
+                  {t(`shared_act_field_${p.field}`)} : {p.baseValue || '—'} → {p.proposedValue || '—'}
+                  <span className="text-[var(--tblr-muted)]"> · {t(`share_status_${p.status}`)}{p.decisionNote ? ` · ${p.decisionNote}` : ''}</span>
+                </span>
+                {p.status === 'pending' && canPropose && (
+                  <button type="button" onClick={() => withdraw(p.id)} className="px-2 py-1 font-bold rounded-lg bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)]">{t('shared_act_withdraw')}</button>
+                )}
               </li>
             ))}
           </ul>

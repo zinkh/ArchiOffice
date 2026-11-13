@@ -26,12 +26,13 @@ export type ShareAccess = 'read' | 'comment' | 'write';
  * Pour `tasks`, « écrire » modifie la tâche. Pour `cctp` et `dpgf`, « écrire » signifie PROPOSER :
  * l'invité n'écrit jamais dans le document, il dépose une proposition que le cabinet
  * valide (server/routes/projectShareProposals.ts). Le CCTP couvre les textes et titres, le DPGF
- * les quantités, prix et unités. Pour `reports` (comptes rendus de chantier), `reserves` (réserves
+ * les quantités, prix et unités. Pour `act`, « écrire » signifie aussi PROPOSER (server/routes/projectShareActProposals.ts :
+ * la consultation est un seul bloc JSON, avec les montants des entreprises). Pour `reports` (comptes rendus de chantier), `reserves` (réserves
  * AOR) et `gpa` (réserves GPA), « écrire » modifie directement une liste blanche de champs de LA
  * ligne visée (server/routes/projectShareChantier.ts) : chaque ligne est un enregistrement
  * indépendant, pas un document JSON réécrit en bloc, une proposition n'y a pas d'intérêt.
  */
-export const WRITABLE_KINDS: readonly ShareKind[] = ['tasks', 'cctp', 'dpgf', 'reports', 'reserves', 'gpa'];
+export const WRITABLE_KINDS: readonly ShareKind[] = ['tasks', 'cctp', 'dpgf', 'act', 'reports', 'reserves', 'gpa'];
 /** Types qu'un invité peut commenter (sans rien modifier). */
 export const COMMENTABLE_KINDS: readonly ShareKind[] = ['cctp', 'dpgf'];
 /**

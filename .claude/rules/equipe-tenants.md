@@ -331,7 +331,7 @@ Un droit se donne pour un atelier entier, avec les niveaux « Aucun accès », �
 (là où la modification est branchée : `WRITABLE_KINDS`). Ateliers branchés : `lots` (lecture, sans le contact
 de l'entreprise), `tasks` (lecture ou modification), `documents` (lecture seule), `cctp` et `dpgf`
 (**deux ateliers distincts** : lecture, commentaire, ou « modification » qui signifie PROPOSER, voir
-« Écriture par proposition » plus bas), `act` (lecture seule), `reports` (comptes rendus de chantier),
+« Écriture par proposition » plus bas), `act` (lecture, ou « modification » qui signifie PROPOSER, voir « Modification de l'ACT par proposition »), `reports` (comptes rendus de chantier),
 `reserves` (réserves AOR) et `gpa` (réserves GPA), ces trois derniers en lecture ou modification directe.
 Autres types : voir ROADMAP.md.
 
@@ -360,7 +360,24 @@ Autres types : voir ROADMAP.md.
   appartenir à l'affaire partagée (introuvable sinon), jamais d'écriture sur une affaire archivée (409). Lever une
   réserve AOR prévient les webhooks (`reserve.resolved`) comme le fait le cabinet. Écrans : `SharedChantier.tsx`
   (`SharedReports`, `SharedReserves`, `SharedAct`), enregistrement à la sortie du champ.
-- **Pas encore fait** : modification de l'ACT par un confrère (lecture seule), photos des comptes rendus et des réserves,
+- **Modification de l'ACT par proposition** (`project_share_act_proposals`, `supabase/migrate_project_share_act_proposals.sql`,
+  `server/routes/projectShareActProposals.ts`, `tests/projectShareActProposals.test.ts`). La consultation (`act_data.consultation`)
+  est un seul bloc JSON réécrit en entier par l'éditeur de l'ACT et porte les montants des entreprises : un confrère n'y écrit
+  JAMAIS, le droit « modification » de l'atelier `act` signifie « proposer ». **Champs proposables, liste fermée**
+  (`ACT_FIELDS`, doublée par un CHECK en base) : sur une offre, `montant_base`, `note_technique`, `conforme`, `motif_nc` ; sur une
+  entreprise consultée, `relance_le`, `ne_repond_pas`. Jamais les attributions, les marchés, les négociations, les coordonnées ni
+  les fichiers. Refusé : le montant d'une offre saisie poste par poste (`mode_saisie = 'postes'`, il est déduit des prix),
+  une valeur inchangée, un élément absent de la consultation de CETTE affaire (404), un nombre négatif ou au-delà de 1e9
+  (`parseNumberValue`, virgule admise), une affaire archivée (409). Une proposition sur le même champ remplace la précédente
+  (50 en attente au plus par confrère, 409 `PROPOSAL_LIMIT`). **Approuver est le seul moment où la consultation est écrite**,
+  avec deux garde-fous : la valeur actuelle doit être celle que le confrère a vue (`base_value`), sinon `outdated` et rien
+  n'est écrit ; l'écriture est conditionnelle à `act_data.updated_at` lu, un enregistrement concurrent donne 409
+  `PROPOSAL_CONFLICT`. Une ligne de proposition n'est jamais supprimée. **Limite connue** : l'éditeur de l'ACT garde la
+  consultation en mémoire et la réécrit en entier ; un onglet ACT resté ouvert AVANT l'approbation peut effacer la
+  modification à son prochain enregistrement (l'écran du cabinet le dit : « rechargez l'onglet ACT »). Pas de révision de
+  la consultation comme `dpgfs.revision` : à faire si le cas se présente. Écrans : `SharedAct` (confrère, saisie à la
+  sortie du champ, « Mes propositions », retrait) et `ShareActProposalsInbox.tsx` (cabinet).
+- **Pas encore fait** : photos des comptes rendus et des réserves,
   création d'une réserve ou d'un compte rendu par un confrère, commentaires sur les ateliers autres que CCTP et DPGF.
 
 **Documents** : le droit couvre les documents de l'affaire (`resource_type =

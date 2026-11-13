@@ -9,6 +9,7 @@ import { IconTrash, IconUsersGroup } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import ShareCommentsInbox, { type InboxLot } from './ShareCommentsInbox';
 import ShareProposalsInbox from './ShareProposalsInbox';
+import ShareActProposalsInbox from './ShareActProposalsInbox';
 
 type Access = 'none' | 'read' | 'comment' | 'write';
 /** Un atelier de l'affaire : un droit par atelier, jamais par lot. */
@@ -32,9 +33,9 @@ type GrantState = Record<Atelier, Access>;
 /** Les ateliers dans l'ordre de l'affaire. */
 const ATELIERS: Atelier[] = ['lots', 'tasks', 'documents', 'cctp', 'dpgf', 'act', 'reports', 'reserves', 'gpa'];
 /** Ateliers dont la modification est SOUMISE À VALIDATION (le confrère propose, le cabinet approuve). */
-const PROPOSAL_ATELIERS: Atelier[] = ['cctp', 'dpgf'];
+const PROPOSAL_ATELIERS: Atelier[] = ['cctp', 'dpgf', 'act'];
 /** Niveaux de repli quand le serveur ne dit pas ce qui est modifiable ou commentable (instance plus ancienne). */
-const FALLBACK_WRITABLE: Atelier[] = ['tasks', 'cctp', 'dpgf', 'reports', 'reserves', 'gpa'];
+const FALLBACK_WRITABLE: Atelier[] = ['tasks', 'cctp', 'dpgf', 'act', 'reports', 'reserves', 'gpa'];
 const FALLBACK_COMMENTABLE: Atelier[] = ['cctp', 'dpgf'];
 
 const emptyState = (): GrantState => ({ lots: 'read', tasks: 'read', documents: 'none', cctp: 'none', dpgf: 'none', act: 'none', reports: 'none', reserves: 'none', gpa: 'none' });
@@ -259,6 +260,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
       )}
 
       <ShareProposalsInbox projectId={projectId} lots={lots} />
+      <ShareActProposalsInbox projectId={projectId} />
       <ShareCommentsInbox projectId={projectId} lots={lots} />
 
       <form onSubmit={submit} className="px-4 py-3 space-y-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>

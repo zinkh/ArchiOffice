@@ -90,7 +90,8 @@ describe('droits par atelier : fonctions pures', () => {
     expect('error' in normalizeGrants([{ kind: 'documents', access: 'comment' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'documents', access: 'write' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'lots', access: 'write' }])).toBe(true);
-    expect('error' in normalizeGrants([{ kind: 'act', access: 'write' }])).toBe(true);
+    expect('error' in normalizeGrants([{ kind: 'act', access: 'write' }])).toBe(false); // l'ACT se modifie par proposition
+    expect('error' in normalizeGrants([{ kind: 'act', access: 'comment' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'cctp', access: 'write' }])).toBe(false);
     expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'comment' }])).toBe(false);
     expect('error' in normalizeGrants([{ kind: 'act', access: 'read' }])).toBe(false);

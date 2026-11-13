@@ -1,7 +1,8 @@
 // Partage d'une affaire avec un confrère : ateliers de suivi (comptes rendus de chantier, réserves AOR, réserves GPA, ACT).
 //
 // Quatre ateliers, `reports`, `reserves`, `gpa` et `act`, chacun avec un droit d'atelier (jamais par lot) : lecture,
-// et « écriture » là où elle est branchée (comptes rendus et réserves ; l'ACT est en lecture seule). Contrairement au
+// et « écriture » là où elle est branchée : directe pour les comptes rendus et les réserves, PAR PROPOSITION pour l'ACT
+// (server/routes/projectShareActProposals.ts). Ce fichier ne porte que la lecture de l'ACT. Contrairement au
 // CCTP et au DPGF (un seul document JSON que l'éditeur réécrit en bloc, d'où l'écriture par proposition),
 // chaque ligne ici est un enregistrement indépendant : « écrire » modifie DIRECTEMENT, mais seulement
 // une liste blanche de champs de la ligne visée, et laisse une trace dans le journal d'activité.

@@ -296,10 +296,10 @@ describe('atelier ACT partagé', () => {
     expect((await request(app).get(`/api/shared/projects/${projectId}-autre/act`).set(authHeader(reader.token))).status).toBe(404);
   });
 
-  it('l\'ACT n\'a pas de modification : accorder l\'écriture est refusé', async () => {
+  it('l\'ACT n\'a pas de commentaire : accorder « commentaire » est refusé', async () => {
     const { admin, projectId } = setup();
     const res = await request(app).post(`/api/projects/${projectId}/shares`).set(authHeader(admin.token))
-      .send({ email: newEmail(), grants: [{ kind: 'act', access: 'write' }] });
+      .send({ email: newEmail(), grants: [{ kind: 'act', access: 'comment' }] });
     expect(res.status).toBe(400);
   });
 });

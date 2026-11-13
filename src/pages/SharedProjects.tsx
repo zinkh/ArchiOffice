@@ -206,7 +206,7 @@ function SharedDetail({ projectId }: { projectId: string }) {
         </section>
       )}
 
-      {view.grants.some(g => g.kind === 'act') && <SharedAct projectId={projectId} />}
+      {view.grants.some(g => g.kind === 'act') && <SharedAct projectId={projectId} canPropose={view.grants.some(g => g.kind === 'act' && g.access === 'write') && !view.archived} />}
       {reportsRight && <SharedReports projectId={projectId} canWrite={reportsRight.canWrite} />}
       {reservesRight && <SharedReserves projectId={projectId} kind="reserves" canWrite={reservesRight.canWrite} />}
       {gpaRight && <SharedReserves projectId={projectId} kind="gpa" canWrite={gpaRight.canWrite} />}
