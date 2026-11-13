@@ -52,7 +52,7 @@ import {
 } from '../lib/comparatifPrix';
 import type { Lot as LotDocument, OffreDocument } from '../types/dpgf';
 import { lignesIndices, type DocumentDce } from '../lib/dceIndices';
-import DceFichiersPicker from './act/DceFichiersPicker';
+import DceMatrice from './act/DceMatrice';
 import DceVersementPro from './act/DceVersementPro';
 import { genererPiecesMarchePdf } from '../lib/marchePieces';
 import { rattacherPieces, type SpecPieceDce } from '../lib/dceVersement';
@@ -911,71 +911,18 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
             </div>
             <DceVersementPro projectId={projectId} projectName={projectName} lots={lots} dce={consultation.dce_documents}
               documentsAffaire={documentsAffaire} onVerser={verserAuDce} />
-            <div className="p-5 space-y-3">
-              {consultation.dce_documents.length === 0 && (
-                <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun document DCE. Cliquez sur "Ajouter" pour commencer.</p>
-              )}
-              {consultation.dce_documents.map((doc, idx) => (
-                <div key={doc.id} className="flex items-start gap-3 p-3 rounded-lg bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)]">
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <select
-                      className="px-2.5 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                      value={doc.type_doc}
-                      onChange={e => {
-                        const docs = [...consultation.dce_documents];
-                        docs[idx] = { ...doc, type_doc: e.target.value as DCEDocument['type_doc'], nom: TYPE_DOC_LABELS[e.target.value] || '' };
-                        update({ ...consultation, dce_documents: docs });
-                      }}
-                    >
-                      {Object.entries(TYPE_DOC_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                    </select>
-                    <input
-                      className="px-2.5 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Intitulé précis"
-                      value={doc.nom}
-                      onChange={e => {
-                        const docs = [...consultation.dce_documents];
-                        docs[idx] = { ...doc, nom: e.target.value };
-                        update({ ...consultation, dce_documents: docs });
-                      }}
-                    />
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <label className="flex items-center gap-1.5 text-xs text-[var(--tblr-muted)] cursor-pointer">
-                        <input type="checkbox" checked={doc.tous_lots} onChange={e => {
-                          const docs = [...consultation.dce_documents];
-                          docs[idx] = { ...doc, tous_lots: e.target.checked };
-                          update({ ...consultation, dce_documents: docs });
-                        }} className="rounded w-3.5 h-3.5" />
-                        Tous les lots
-                      </label>
-                      {!doc.tous_lots && lots.map(lot => (
-                        <label key={lot.id} className="flex items-center gap-1 text-xs text-[var(--tblr-muted)] cursor-pointer">
-                          <input type="checkbox"
-                            checked={doc.lots_ids.includes(lot.id)}
-                            onChange={e => {
-                              const docs = [...consultation.dce_documents];
-                              const ids = e.target.checked ? [...doc.lots_ids, lot.id] : doc.lots_ids.filter(i => i !== lot.id);
-                              docs[idx] = { ...doc, lots_ids: ids };
-                              update({ ...consultation, dce_documents: docs });
-                            }}
-                            className="rounded w-3.5 h-3.5"
-                          />
-                          Lot {lot.lot_number}
-                        </label>
-                      ))}
-                    </div>
-                    <div className="sm:col-span-3">
-                      <DceFichiersPicker documents={documentsAffaire} value={doc.document_ids ?? []} label={`Documents joints à ${doc.nom || 'la pièce'}`}
-                        onChange={ids => {
-                          const docs = [...consultation.dce_documents];
-                          docs[idx] = { ...doc, document_ids: ids };
-                          update({ ...consultation, dce_documents: docs });
-                        }} />
-                    </div>
-                  </div>
-                  <button onClick={() => update({ ...consultation, dce_documents: consultation.dce_documents.filter(d => d.id !== doc.id) })} className="p-1 text-zinc-300 hover:text-red-500 transition-colors flex-shrink-0 mt-1"><IconTrash size={13} /></button>
-                </div>
-              ))}
+            <div className="p-5">
+              <DceMatrice
+                pieces={consultation.dce_documents}
+                lots={lots}
+                documentsAffaire={documentsAffaire}
+                typeLabels={TYPE_DOC_LABELS}
+                onChange={dce_documents => update({ ...consultation, dce_documents })}
+                onAjouter={() => {
+                  const newDoc: DCEDocument = { id: crypto.randomUUID(), nom: '', type_doc: 'RC', tous_lots: true, lots_ids: [] };
+                  update({ ...consultation, dce_documents: [...consultation.dce_documents, newDoc] });
+                }}
+              />
             </div>
           </div>
 
