@@ -21,6 +21,9 @@
     "clean": "rm -rf dist dist-api dist-server release",
     "lint": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:ui": "playwright test --ui",
     "test:watch": "vitest",
     "eval:agents": "tsx scripts/eval-agents.ts",
     "electron:build": "npm run build && npm run build:server && electron-builder",
@@ -114,6 +117,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/archiver": "^8.0.0",
     "@types/d3": "^7.4.3",
