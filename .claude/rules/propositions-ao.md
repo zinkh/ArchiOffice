@@ -231,6 +231,26 @@ Section 04 de la modale (`Proposals.tsx`, composant `src/components/proposal/Ter
 - **MAF** : le calcul est affiché sous le calcul des honoraires (TVA/TTC), selon le type de mission choisi en section 04.
 - **Envoyer au client** (action de la liste) : `ProposalExportModal` (`intent: 'send'`) génère le PDF sans le télécharger (`exportProposalPdf(..., { download: false })`) et ouvre `SendProposalMail` (`MailComposeModal` avec `initialFiles`) ; une proposition en brouillon passe à « Envoyée » une fois le message parti.
 
+### Conversion en affaire, archivage automatique et rappel téléphonique à un mois
+
+- **Import des chiffres à l'acceptation** (`PUT /api/proposals/:id`, `projectFinancials`, `server/routes/proposals.ts`, testé) :
+  `proposals.amount` est le net HT des **honoraires**, il devient `projects.remuneration` ; le **budget** de l'affaire est le montant des
+  travaux (`construction_cost`), à défaut les honoraires ; `projects.surface` reprend `surface_plancher` (déjà recalculée pour une
+  réhabilitation avec extension). Une valeur absente reste vide, rien n'est inventé. Avant ce correctif le budget valait les honoraires et
+  surface et coût des travaux restaient vides.
+- **Une proposition convertie est archivée d'office** (`archived_at`, `archive_reason = 'converted'`, `next_follow_up_at` vidé) : elle
+  n'attend plus de réponse, donc ni relance ni rappel. « Restaurer » depuis le suivi client la rouvre. La migration
+  `supabase/migrate_proposal_callback.sql` a rattrapé les propositions déjà acceptées.
+- **Rappel téléphonique après 30 jours** (`server/proposalCallbacks.ts`, cycle de 6 h réglable par `PROPOSAL_CALLBACKS_INTERVAL_HOURS`,
+  `proposalCallbackDue` dans `src/lib/proposalFollowUp.ts`) : une proposition `Sent` sans réponse, ni signature, ni archivage crée un appel
+  SORTANT dans le journal des appels (`phone_calls`, `callback_due` = jour du passage) ET la tâche liée (`buildTaskFromCall`), attribués
+  au premier administrateur du cabinet, qui est notifié (`/appels?open=<id>`). **Une seule fois** : `proposals.callback_call_id` est pris
+  par une mise à jour conditionnelle (deux processus ne créent pas deux appels) et reste posé même quand l'appel est traité. Un échec
+  libère la prise, le cycle suivant réessaie. Cabinets suspendus ignorés ; colonne ou table absente = aucun rappel, sans bruit.
+- **Écran** : filtre « À rappeler · 30 jours », pastille « À rappeler » dans la ligne, alerte et lien « Ouvrir l'appel » dans le suivi client.
+  Le bouton « Suivi client » est une icône (téléphone) comme les autres actions. La fenêtre d'export ouverte depuis « Envoyer » ou
+  « Signature » n'a plus le bouton PDF : le téléchargement se fait depuis l'icône PDF de la liste.
+
 ### Honoraires d'une proposition : arrondi, remise, PC seul
 
 Logique pure dans `src/lib/proposalFees.ts` (testée, `__tests__/proposalFees.test.ts`), migration `supabase/migrate_proposal_fees_discount.sql`.

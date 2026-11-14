@@ -1136,6 +1136,9 @@ export interface Proposal {
   last_reminder_at?: string | null;
   next_follow_up_at?: string | null;
   reminder_count?: number;
+  /** Appel de relance téléphonique créé au bout d'un mois sans réponse (journal des appels). */
+  callback_call_id?: string | null;
+  callback_created_at?: string | null;
   signature_provider?: 'firma' | 'docuseal' | 'zoho' | null;
   signature_request_id?: string | null;
   signature_status?: string | null;

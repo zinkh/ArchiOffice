@@ -13,6 +13,24 @@ import { erreurTranchesJson, donneesPourContrat, totauxParTranche, tranchesActiv
 import { serializeProposalIllustrations } from '../../src/lib/proposalIllustrations';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 
+/**
+ * Chiffres de l'affaire créée à l'acceptation d'une proposition.
+ * `amount` d'une proposition est le net HT des honoraires : il devient la rémunération de
+ * l'affaire. Le budget est celui de l'opération (montant des travaux), à défaut les honoraires.
+ * La surface est la surface de plancher, déjà recalculée pour une réhabilitation avec extension.
+ */
+export function projectFinancials(p: { amount?: number | null; construction_cost?: number | string | null; surface_plancher?: string | null }) {
+  const works = Number(p.construction_cost);
+  const fees = Number(p.amount);
+  const surface = String(p.surface_plancher ?? '').trim();
+  return {
+    budget: works > 0 ? works : (fees > 0 ? fees : null),
+    construction_cost: works > 0 ? works : null,
+    remuneration: fees > 0 ? fees : null,
+    surface: surface || null,
+  };
+}
+
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
@@ -122,7 +140,7 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
         }
         const { error: projErr } = await supabaseAdmin.from('projects').insert({
           id: projectId, tenant_id: tenantId,
-          name: p.title, client: clientName, status: 'Planning', budget: p.amount, description: p.description,
+          name: p.title, client: clientName, status: 'Planning', ...projectFinancials(p), description: p.description,
           start_date: new Date().toISOString().split('T')[0],
           end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
           address: p.adresse_terrain ? `${p.adresse_terrain}, ${p.cp_ville_terrain || ''}` : '',
@@ -202,6 +220,12 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
         } catch (err) {
           console.error('Failed to auto-create ContratMOE from accepted proposal:', err);
         }
+        // Une proposition convertie est rangée d'elle-même : elle n'attend plus de réponse
+        // du client, donc ni relance ni rappel téléphonique. « Restaurer » la rouvre.
+        const { error: archiveErr } = await supabaseAdmin.from('proposals')
+          .update({ archived_at: new Date().toISOString(), archive_reason: 'converted', next_follow_up_at: null })
+          .eq('id', id).eq('tenant_id', tenantId);
+        if (archiveErr) console.error('Failed to archive converted proposal:', archiveErr.message);
         dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.accepted', { id, title: p.title, amount: p.amount, client_id: p.client_id || null, project_id: projectId });
       } else if (p.status === 'Rejected' && oldProposal?.status !== 'Rejected') {
         dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.declined', { id, title: p.title, amount: p.amount, client_id: p.client_id || null });
