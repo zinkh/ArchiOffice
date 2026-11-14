@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173);
+const braveExecutablePath = process.env.PLAYWRIGHT_BRAVE_EXECUTABLE_PATH;
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`;
 
 export default defineConfig({
@@ -19,6 +20,10 @@ export default defineConfig({
   projects: [
     { name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
+    ...(braveExecutablePath ? [
+      { name: 'brave-desktop', use: { ...devices['Desktop Chrome'], launchOptions: { executablePath: braveExecutablePath } } },
+      { name: 'brave-mobile', use: { ...devices['Pixel 7'], launchOptions: { executablePath: braveExecutablePath } } },
+    ] : []),
   ],
   webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : {
     command: `npx vite --host 127.0.0.1 --port ${port} --strictPort`,
