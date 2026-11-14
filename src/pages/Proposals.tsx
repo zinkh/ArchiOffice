@@ -4,7 +4,7 @@ import { contactPatchFromProposal, fillMissingClientFields } from '../lib/propos
 import * as React from 'react';
 import { useState, useEffect, useId, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract, IconChevronDown, IconSend, IconPhoneCall } from '@tabler/icons-react';
+import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconContract, IconChevronDown, IconSend, IconPhoneCall } from '@tabler/icons-react';
 import { AnimatePresence } from 'motion/react';
 import { ModalShell } from '../components/ui/ModalShell';
 import { formatCurrency, cn } from '../lib/utils';
@@ -827,7 +827,6 @@ export default function Proposals() {
                 <button onClick={() => setFollowUpProposal(p)} title={t('proposal_fu_title')} aria-label={t('proposal_fu_title')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconPhoneCall size={15} /></button>
                 <button disabled={!!p.archived_at} onClick={() => handleEditClick(p)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconEdit size={15} /></button>
                 <button disabled={!!p.archived_at} onClick={() => openExport(p, 'send')} title={t('proposals_send_to_client')} aria-label={t('proposals_send_to_client')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconSend size={15} /></button>
-                <button onClick={() => openExport(p, 'export')} title={t('prop_a_export_pdf')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
                 {!p.archived_at && p.status !== 'Accepted' && <button onClick={() => handleUpdateStatus(p, 'Accepted')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-success)', background: 'rgba(47,179,135,0.1)' }}><IconCircleCheck size={15} /></button>}
               </div>
             )}
@@ -931,13 +930,6 @@ export default function Proposals() {
                         aria-label={t('proposals_send_to_client')}
                       >
                         <IconSend size={20} />
-                      </button>
-                      <button
-                        onClick={() => openExport(proposal, 'export')}
-                        className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                        title={t('pdf_generator')}
-                      >
-                        <IconFileTypePdf size={20} />
                       </button>
                       <button
                         onClick={() => navigate('/contrats', { state: { fromProposal: proposal } })}

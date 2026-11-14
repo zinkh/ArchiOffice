@@ -1388,26 +1388,24 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
               onClick={handleSend}
               aria-label={t(intent === 'sign' ? 'proposal_sign_send' : 'proposals_send_to_client')}
               disabled={isPreparingMail || isGenerating}
-              className={intent !== 'export'
+              className={intent === 'send'
                 ? 'flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'
                 : 'flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'}
             >
               <IconSend size={16} />
               <span className="hidden sm:inline">{isPreparingMail ? t('proposals_send_preparing') : t(intent === 'sign' ? 'proposal_sign_send' : 'proposals_send_to_client')}</span>
             </button>
-            {/* Ouverte depuis « Envoyer » ou « Signature », la fenêtre n'a qu'une action : le PDF
-                se télécharge depuis le bouton PDF de la liste (intent « export »). */}
-            {intent === 'export' && (
-              <button
-                onClick={handleExport}
-                aria-label={t('proposals_export_pdf')}
-                disabled={isGenerating || isPreparingMail}
-                className="flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition"
-              >
-                <IconDownload size={16} />
-                <span className="hidden sm:inline">{isGenerating ? t('proposals_export_generating') : t('proposals_export_pdf')}</span>
-              </button>
-            )}
+            <button
+              onClick={handleExport}
+              aria-label={t('proposals_export_pdf')}
+              disabled={isGenerating || isPreparingMail}
+              className={intent === 'send'
+                ? 'flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'
+                : 'flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'}
+            >
+              <IconDownload size={16} />
+              <span className="hidden sm:inline">{isGenerating ? t('proposals_export_generating') : t('proposals_export_pdf')}</span>
+            </button>
             <button onClick={onClose} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 rounded-lg transition-colors">
               <IconX size={20} />
             </button>

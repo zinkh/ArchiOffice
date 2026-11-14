@@ -256,8 +256,8 @@ Section 04 de la modale (`Proposals.tsx`, composant `src/components/proposal/Ter
   par une mise à jour conditionnelle (deux processus ne créent pas deux appels) et reste posé même quand l'appel est traité. Un échec
   libère la prise, le cycle suivant réessaie. Cabinets suspendus ignorés ; colonne ou table absente = aucun rappel, sans bruit.
 - **Écran** : filtre « À rappeler · 30 jours », pastille « À rappeler » dans la ligne, alerte et lien « Ouvrir l'appel » dans le suivi client.
-  Le bouton « Suivi client » est une icône (téléphone) comme les autres actions. La fenêtre d'export ouverte depuis « Envoyer » ou
-  « Signature » n'a plus le bouton PDF : le téléchargement se fait depuis l'icône PDF de la liste.
+  Le bouton « Suivi client » est une icône (téléphone) comme les autres actions. La liste n'a plus d'icône PDF : le PDF se télécharge
+  depuis le bouton PDF de la fenêtre ouverte par « Envoyer » (la fenêtre garde ses deux boutons, Envoyer et PDF).
 
 ### Honoraires d'une proposition : arrondi, remise, PC seul
 
