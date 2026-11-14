@@ -88,6 +88,10 @@ export interface LlmChatParams {
    *  (Mistral). Par défaut celui du chat ; une rédaction longue (CCTP) le
    *  relève. */
   timeoutMs?: number;
+  /** Plafond de jetons en sortie pour cet appel (une réponse courte ne doit pas
+   *  pouvoir s'étendre sur des milliers de jetons). Pris en compte par Mistral ;
+   *  les autres adaptateurs gardent leur plafond propre. */
+  maxTokens?: number;
   /** Début STABLE du premier message utilisateur (pièces d'une affaire, par
    *  exemple), à faire mettre en cache par le fournisseur quand plusieurs
    *  appels successifs le partagent : il est placé devant `content` du premier
