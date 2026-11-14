@@ -3,14 +3,15 @@ import {
   IconPlus, IconX, IconCheck, IconClock, IconSend, IconBan,
   IconFileText, IconTrash, IconPencil, IconDownload, IconFilter,
   IconContract, IconCurrencyEuro, IconBuildingSkyscraper, IconUsers,
-  IconAlertTriangle, IconFileImport,
+  IconAlertTriangle, IconFileImport, IconInfoCircle, IconListCheck, IconScale,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchJson, apiFetch } from '../lib/api';
-import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project, ProjectTemplate } from '../types';
+import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project, ProjectTemplate, Proposal } from '../types';
 import { contratDefaultsFromTemplate, summarizeTemplate } from '../lib/projectTemplates';
 import { contratFieldsFromProject } from '../lib/contratFromProject';
+import { contratFieldsFromProposal, estPropositionValidee } from '../lib/contratFromProposal';
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -301,6 +302,7 @@ function ContratModal({
   contacts,
   projects,
   templates,
+  proposals,
   onSave,
   onClose,
   onContactCreated,
@@ -309,6 +311,7 @@ function ContratModal({
   contacts: Contact[];
   projects: Project[];
   templates: ProjectTemplate[];
+  proposals: Proposal[];
   onSave: (c: Partial<ContratMOE>) => Promise<void>;
   onClose: () => void;
   onContactCreated: (c: Contact) => void;
@@ -334,8 +337,18 @@ function ContratModal({
   const [pendingContactTarget, setPendingContactTarget] = useState<{ type: 'cotraitant' | 'sous_traitant'; id: string } | null>(null);
   const [tab, setTab] = useState<'general' | 'missions' | 'honoraires' | 'equipe' | 'clauses'>('general');
   const [templateId, setTemplateId] = useState('');
+  const [proposalId, setProposalId] = useState('');
+  const validatedProposals = proposals.filter(estPropositionValidee);
 
-  const set = (key: keyof ContratMOE, val: any) => setForm(f => ({ ...f, [key]: val }));
+  // Une proposition validée remplit le contrat d'un geste : client, intitulé, adresse
+  // des travaux, surface, budget, honoraires, répartition des missions et équipe.
+  const applyProposal = (id: string) => {
+    setProposalId(id);
+    const proposal = validatedProposals.find(p => p.id === id);
+    if (proposal) setForm(f => ({ ...f, ...contratFieldsFromProposal(proposal) }));
+  };
+
+  const set =(key: keyof ContratMOE, val: any) => setForm(f => ({ ...f, [key]: val }));
 
   const missions = form.missions_list || DEFAULT_MISSIONS;
 
@@ -435,11 +448,11 @@ function ContratModal({
   // qui n'existent qu'une fois le forfait (ou le taux) renseigné dans
   // l'onglet Honoraires.
   const TABS = [
-    { id: 'general', label: 'Général' },
-    { id: 'honoraires', label: 'Honoraires' },
-    { id: 'missions', label: 'Missions' },
-    { id: 'equipe', label: 'Équipe MOE' },
-    { id: 'clauses', label: 'Clauses' },
+    { id: 'general', label: 'Général', icon: IconInfoCircle },
+    { id: 'honoraires', label: 'Honoraires', icon: IconCurrencyEuro },
+    { id: 'missions', label: 'Missions', icon: IconListCheck },
+    { id: 'equipe', label: 'Équipe MOE', icon: IconUsers },
+    { id: 'clauses', label: 'Clauses', icon: IconScale },
   ] as const;
 
   // Montant total des honoraires du contrat (base de calcul de la part de
@@ -529,20 +542,34 @@ function ContratModal({
           </div>
 
           {/* Tabs */}
-          <div className="flex border-b px-6" style={{ borderColor: 'var(--tblr-border)' }}>
-            {TABS.map(t => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={cn('px-4 py-3 text-sm font-medium border-b-2 transition-colors', tab === t.id
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]'
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
+          {/* Sous 640 px, les cinq onglets se réduisent à leur icône et se partagent la
+              largeur (aucun débordement) ; l'onglet actif garde son libellé. Dès 640 px, le
+              texte revient, avec défilement horizontal en dernier recours. */}
+          <div role="tablist" className="flex border-b px-2 sm:px-6 overflow-x-auto" style={{ borderColor: 'var(--tblr-border)' }}>
+            {TABS.map(t => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-label={t.label}
+                  title={t.label}
+                  onClick={() => setTab(t.id)}
+                  className={cn(
+                    'flex items-center justify-center gap-1.5 min-h-11 px-3 sm:px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap max-sm:flex-1 sm:flex-none',
+                    active
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]',
+                  )}
+                >
+                  <Icon size={18} className="shrink-0" aria-hidden="true" />
+                  <span className={cn(active ? 'max-sm:inline' : 'max-sm:hidden')}>{t.label}</span>
+                </button>
+              );
+            })}
           </div>
 
           <form onSubmit={handleSubmit}>
@@ -566,6 +593,21 @@ function ContratModal({
                           </p>
                         ) : null;
                       })()}
+                    </Field>
+                  )}
+                  {validatedProposals.length > 0 && (
+                    <Field label="Proposition validée">
+                      <select className={inputCls} style={inputStyle} value={proposalId} onChange={e => applyProposal(e.target.value)}>
+                        <option value="">— Aucune —</option>
+                        {validatedProposals.map(p => (
+                          <option key={p.id} value={p.id}>
+                            {[p.reference, p.title, p.client_name].filter(Boolean).join(' · ') || p.id}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                        Client, intitulé, adresse, surface, budget, honoraires, répartition des missions et équipe sont repris de la proposition.
+                      </p>
                     </Field>
                   )}
                   <div className="grid grid-cols-2 gap-4">
@@ -1129,15 +1171,7 @@ function ContratModal({
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
-function proposalToContrat(p: any): Partial<ContratMOE> {
-  const cotraitants: ContratCotraitant[] = (p.specialties_list || []).map((s: any) => ({
-    id: crypto.randomUUID(),
-    contact_id: s.contact_id || undefined,
-    contact_name: s.contact_name || s.specialty_name || '',
-    specialty: s.specialty_name || '',
-    fee_pct: 0,
-    montant_honoraires: 0,
-  }));
+function proposalToContrat(p: Proposal): Partial<ContratMOE> {
   return {
     type_contrat: 'construction_neuve',
     type_moa: 'prive',
@@ -1147,12 +1181,9 @@ function proposalToContrat(p: any): Partial<ContratMOE> {
     clause_mediation: true,
     clause_propriete_intellectuelle: true,
     missions_list: DEFAULT_MISSIONS,
-    intitule_projet: p.title || '',
-    client_id: p.client_id || undefined,
-    budget_previsionnel: p.construction_cost || undefined,
-    montant_honoraires: p.amount || undefined,
-    cotraitants,
+    cotraitants: [],
     sous_traitants: [],
+    ...contratFieldsFromProposal(p),
   };
 }
 
@@ -1164,6 +1195,7 @@ export default function Contrats() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContrat, setEditingContrat] = useState<ContratMOE | null>(null);
@@ -1174,17 +1206,20 @@ export default function Contrats() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, contacts, projects, templates] = await Promise.all([
+      const [c, contacts, projects, templates, proposals] = await Promise.all([
         fetchJson<ContratMOE[]>('/api/contrats_moe'),
         fetchJson<Contact[]>('/api/contacts'),
         fetchJson<Project[]>('/api/projects'),
         // Les modèles sont un confort : leur absence n'empêche pas d'ouvrir les contrats.
         fetchJson<ProjectTemplate[]>('/api/project-templates').catch(() => [] as ProjectTemplate[]),
+        // Les propositions validées alimentent le contrat : leur absence n'empêche pas d'ouvrir les contrats.
+        fetchJson<Proposal[]>('/api/proposals').catch(() => [] as Proposal[]),
       ]);
       setContrats(c);
       setContacts(contacts);
       setProjects(projects);
       setTemplates(templates);
+      setProposals(Array.isArray(proposals) ? proposals : []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -1444,6 +1479,7 @@ export default function Contrats() {
             contacts={contacts}
             projects={projects}
             templates={templates}
+            proposals={proposals}
             onSave={handleSave}
             onClose={closeModal}
             onContactCreated={(c) => setContacts(prev => [...prev, c])}
