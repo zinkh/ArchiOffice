@@ -53,6 +53,7 @@ const NOMIC_EXTRACT_TIMEOUT_MS = 170_000;
 const LLM_GENERATION_TIMEOUT_MS = 270_000;
 // Un seul poste : sous le délai des passerelles (~60 s), pour que l'erreur soit la nôtre.
 const POSTE_TIMEOUT_MS = 50_000;
+const POSTE_MAX_TOKENS = 4_000;
 // Texte des pièces gardé en mémoire entre l'appel « plan » et les appels « lot »
 // d'une même génération : sans lui chaque lot relirait (et réOCRiserait) les
 // plans. Perdu au redémarrage ou sur un autre conteneur : on relit, sans autre
@@ -465,6 +466,8 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
         ...(prefix ? { cachePrefix: prefix, cacheKey } : {}),
         messages: [{ role: 'user', content: task, ...(images.length ? { images } : {}) }],
         timeoutMs,
+        // Un poste tient en 8 000 caractères (~2 500 jetons) : inutile d'en autoriser 16 000.
+        ...(timeoutMs === POSTE_TIMEOUT_MS ? { maxTokens: POSTE_MAX_TOKENS } : {}),
       });
     } catch (e) {
       await refundAiCredit(tenantId, reservedCents).catch(() => {});
