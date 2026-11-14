@@ -1,0 +1,62 @@
+name: Brave browser diagnostics
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'e2e/brave-diagnostics.spec.ts'
+      - 'playwright.config.ts'
+      - '.github/workflows/brave-diagnostics.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  brave-diagnostic:
+    name: Brave diagnostic (public pages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_BASE_URL: https://www.archioffice.fr
+      PLAYWRIGHT_BRAVE_EXECUTABLE_PATH: /usr/bin/brave-browser
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Authenticate GitHub Packages
+        run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
+
+      - name: Install Node dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Install Brave from the official signed APT repository
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y curl
+          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+          sudo curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+          sudo apt-get update -y
+          sudo apt-get install -y brave-browser
+          brave-browser --version
+          test -x "$PLAYWRIGHT_BRAVE_EXECUTABLE_PATH"
+
+      - name: Install browser runtime dependencies
+        run: npx playwright install-deps chromium
+
+      - name: Diagnose public pages with actual Brave
+        run: npx playwright test e2e/brave-diagnostics.spec.ts --project=brave-desktop --project=brave-mobile
+
+      - name: Upload JSON diagnostics, screenshots and traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: brave-diagnostics
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
