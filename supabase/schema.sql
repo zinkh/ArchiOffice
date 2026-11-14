@@ -1931,3 +1931,15 @@ ALTER TABLE proposals ADD COLUMN IF NOT EXISTS callback_call_id TEXT;
 ALTER TABLE proposals ADD COLUMN IF NOT EXISTS callback_created_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS proposals_callback_due_idx ON proposals (tenant_id, sent_at)
   WHERE status = 'Sent' AND archived_at IS NULL AND callback_call_id IS NULL;
+
+-- Affaire créée à l'acceptation d'une proposition : informations reprises et lien d'origine
+-- (supabase/migrate_project_from_proposal.sql)
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS source_proposal_id TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS operation_nature TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS surface_existante TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS surface_rehabilitee TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_erp BOOLEAN;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS parcelles_selection TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS illustrations TEXT;
+CREATE INDEX IF NOT EXISTS idx_projects_source_proposal ON projects(tenant_id, source_proposal_id)
+  WHERE source_proposal_id IS NOT NULL;

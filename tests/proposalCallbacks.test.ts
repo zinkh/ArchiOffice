@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { fakeSupabaseAdmin, makeTenant } from './testServer';
 import { executerRappelsPropositions } from '../server/proposalCallbacks';
-import { projectFinancials } from '../server/routes/proposals';
+import { projectFinancials } from '../src/lib/proposalToProject';
 import { proposalCallbackDue, PROPOSAL_CALLBACK_DAYS } from '../src/lib/proposalFollowUp';
 
 const DAY = 86400000;

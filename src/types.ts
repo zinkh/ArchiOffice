@@ -412,6 +412,14 @@ export interface Project {
   maf_intercalaire?: MafIntercalaire;
   taux_mission?: number;
   part_interet?: number;
+  /** Proposition dont l'affaire est issue (archivée à la conversion) : honoraires, planning, faisabilité et pièces y restent lisibles. */
+  source_proposal_id?: string | null;
+  operation_nature?: string | null;
+  surface_existante?: string | null;
+  surface_rehabilitee?: string | null;
+  is_erp?: boolean | null;
+  parcelles_selection?: string | null;
+  illustrations?: string | null;
 
   // Context fields used by the ProjectDetail overview
   secteur_abf?: string;

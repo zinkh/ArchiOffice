@@ -13,23 +13,7 @@ import { erreurTranchesJson, donneesPourContrat, totauxParTranche, tranchesActiv
 import { serializeProposalIllustrations } from '../../src/lib/proposalIllustrations';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 
-/**
- * Chiffres de l'affaire créée à l'acceptation d'une proposition.
- * `amount` d'une proposition est le net HT des honoraires : il devient la rémunération de
- * l'affaire. Le budget est celui de l'opération (montant des travaux), à défaut les honoraires.
- * La surface est la surface de plancher, déjà recalculée pour une réhabilitation avec extension.
- */
-export function projectFinancials(p: { amount?: number | null; construction_cost?: number | string | null; surface_plancher?: string | null }) {
-  const works = Number(p.construction_cost);
-  const fees = Number(p.amount);
-  const surface = String(p.surface_plancher ?? '').trim();
-  return {
-    budget: works > 0 ? works : (fees > 0 ? fees : null),
-    construction_cost: works > 0 ? works : null,
-    remuneration: fees > 0 ? fees : null,
-    surface: surface || null,
-  };
-}
+import { projectRowFromProposal } from '../../src/lib/proposalToProject';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -138,28 +122,14 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
           const { data: clientData } = await supabaseAdmin.from('contacts').select('first_name, last_name').eq('id', p.client_id).eq('tenant_id', tenantId).single();
           if (clientData) clientName = `${clientData.first_name || ''} ${clientData.last_name || ''}`.trim();
         }
-        const { error: projErr } = await supabaseAdmin.from('projects').insert({
-          id: projectId, tenant_id: tenantId,
-          name: p.title, client: clientName, status: 'Planning', ...projectFinancials(p), description: p.description,
-          start_date: new Date().toISOString().split('T')[0],
-          end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          address: p.adresse_terrain ? `${p.adresse_terrain}, ${p.cp_ville_terrain || ''}` : '',
-          reference: p.reference, projet_detail: p.projet_detail, is_entreprise: p.is_entreprise,
-          nom_societe: p.nom_societe, rcs: p.rcs, representant: p.representant, qualite: p.qualite,
-          adresse_client: p.adresse_client, cp_client: p.cp_client, ville_client: p.ville_client,
-          telephone: p.telephone, portable: p.portable, email_client: p.email_client,
-          adresse_terrain: p.adresse_terrain, cp_ville_terrain: p.cp_ville_terrain,
-          ban_id_terrain: p.ban_id_terrain, city_code_terrain: p.city_code_terrain,
-          ref_cadastrale: p.ref_cadastrale, zone_plu: p.zone_plu, surface_parcelle: p.surface_parcelle,
-          nom_etablissement: p.nom_etablissement, avant_trav: p.avant_trav, apres_trav: p.apres_trav,
-          type_et_cat: p.type_et_cat, type_projet: p.type_projet, categorie_projet: p.categorie_projet,
-          surface_plancher: p.surface_plancher, surface_plancher_ext: p.surface_plancher_ext,
-          surface_erp: p.surface_erp, surface_ert: p.surface_ert,
-          effectif_public: p.effectif_public, effectif_personnel: p.effectif_personnel,
-          ind: p.ind, date_modification: p.date_modification,
-          maf_intercalaire: p.maf_intercalaire, taux_mission: p.taux_mission, part_interet: p.part_interet
-        });
+        // Toutes les informations de la proposition passent dans l'affaire (src/lib/proposalToProject.ts).
+        // La ligne enregistrée complète le corps de la requête : un champ absent du formulaire n'est pas perdu.
+        const { error: projErr } = await supabaseAdmin.from('projects').insert(
+          projectRowFromProposal({ ...oldProposal, ...p, id }, { projectId, tenantId, clientName, today: new Date() }),
+        );
         if (projErr) throw projErr;
+        // Les réunions préparées sur la proposition rejoignent l'affaire (le lien à la proposition reste).
+        await supabaseAdmin.from('meetings').update({ project_id: projectId }).eq('proposal_id', id).eq('tenant_id', tenantId).is('project_id', null);
         // Copy specialties to cotraitants
         if (specialties_list && Array.isArray(specialties_list) && specialties_list.length > 0) {
           const cots = specialties_list.map((spec: any) => ({ id: crypto.randomUUID(), project_id: projectId, tenant_id: tenantId, specialty: spec.specialty_name, contact_id: spec.contact_id || null }));

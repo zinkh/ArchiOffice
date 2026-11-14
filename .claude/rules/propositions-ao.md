@@ -233,11 +233,19 @@ Section 04 de la modale (`Proposals.tsx`, composant `src/components/proposal/Ter
 
 ### Conversion en affaire, archivage automatique et rappel téléphonique à un mois
 
-- **Import des chiffres à l'acceptation** (`PUT /api/proposals/:id`, `projectFinancials`, `server/routes/proposals.ts`, testé) :
-  `proposals.amount` est le net HT des **honoraires**, il devient `projects.remuneration` ; le **budget** de l'affaire est le montant des
-  travaux (`construction_cost`), à défaut les honoraires ; `projects.surface` reprend `surface_plancher` (déjà recalculée pour une
-  réhabilitation avec extension). Une valeur absente reste vide, rien n'est inventé. Avant ce correctif le budget valait les honoraires et
-  surface et coût des travaux restaient vides.
+- **Toutes les informations passent dans l'affaire à l'acceptation** (`PUT /api/proposals/:id`, `src/lib/proposalToProject.ts`
+  `projectRowFromProposal`, testé par `tests/proposalToProject.test.ts`) : les champs communs aux deux tables (`COPIED_FIELDS` : client
+  et `client_id`, coordonnées, terrain et parcelles, nature de l'opération, surfaces existante, réhabilitée et d'extension, ERP, plans et
+  photos, MAF...) sont recopiés ; la ligne enregistrée complète le corps de la requête, un champ absent du formulaire n'est pas perdu.
+  `proposals.amount` (net HT des **honoraires**) devient `projects.remuneration`, le **budget** est le montant des travaux
+  (`construction_cost`) à défaut les honoraires, `projects.surface` reprend `surface_plancher`, `nature_travaux_maf` se déduit de la
+  nature de l'opération. Une valeur absente est omise, rien n'est inventé. `projects.source_proposal_id` garde le lien : honoraires,
+  planning, étude de faisabilité, pièces jointes et suivi de signature restent lisibles sur la proposition d'origine (archivée, jamais
+  supprimée) ; les réunions préparées sur la proposition rejoignent l'affaire (`meetings.project_id`, le lien à la proposition reste).
+  **Une nouvelle colonne commune aux deux tables s'ajoute à `COPIED_FIELDS`.** Migration
+  `supabase/migrate_project_from_proposal.sql` (colonnes + rattrapage des affaires déjà converties, champs vides seulement).
+  Pas repris : les pièces jointes (deux lignes `documents` sur un même fichier se supprimeraient l'une l'autre) et les dates de l'affaire
+  (30 jours par défaut, pas déduites du planning de la proposition).
 - **Une proposition convertie est archivée d'office** (`archived_at`, `archive_reason = 'converted'`, `next_follow_up_at` vidé) : elle
   n'attend plus de réponse, donc ni relance ni rappel. « Restaurer » depuis le suivi client la rouvre. La migration
   `supabase/migrate_proposal_callback.sql` a rattrapé les propositions déjà acceptées.
