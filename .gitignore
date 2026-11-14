@@ -21,3 +21,8 @@ native/windows-drive/build/
 
 # Native Explorer namespace build outputs
 native/windows-shell/build/
+
+# Playwright browser test outputs
+playwright-report/
+test-results/
+.playwright/
