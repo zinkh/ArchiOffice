@@ -8,7 +8,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
-| GET | `*` | [server.ts:1464](../server.ts#L1464) |
+| GET | `*` | [server.ts:1465](../server.ts#L1465) |
 | GET | `/.well-known/oauth-authorization-server` | [packages/archioffice-agents/src/server/mcp/oauthRoutes.ts:46](../packages/archioffice-agents/src/server/mcp/oauthRoutes.ts#L46) |
 | GET | `/.well-known/oauth-protected-resource` | [packages/archioffice-agents/src/server/mcp/oauthRoutes.ts:59](../packages/archioffice-agents/src/server/mcp/oauthRoutes.ts#L59) |
 | POST | `/admin/users` | [server/offlineGateway.ts:113](../server/offlineGateway.ts#L113) |
@@ -248,7 +248,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/gpa-reserves` | [server/routes/gpaReserves.ts:36](../server/routes/gpaReserves.ts#L36) |
 | DELETE | `/api/gpa-reserves/:id` | [server/routes/gpaReserves.ts:71](../server/routes/gpaReserves.ts#L71) |
 | PUT | `/api/gpa-reserves/:id` | [server/routes/gpaReserves.ts:84](../server/routes/gpaReserves.ts#L84) |
-| GET | `/api/health` | [server.ts:1038](../server.ts#L1038) |
+| GET | `/api/health` | [server.ts:1039](../server.ts#L1039) |
 | GET | `/api/historical-monuments` | [server/routes/geoProxy.ts:739](../server/routes/geoProxy.ts#L739) |
 | GET | `/api/hourly-costs` | [server/routes/timeTracking.ts:191](../server/routes/timeTracking.ts#L191) |
 | PUT | `/api/hourly-costs/:userId` | [server/routes/timeTracking.ts:199](../server/routes/timeTracking.ts#L199) |
@@ -565,11 +565,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/projects/:projectId/study-requests` | [server/routes/projectStudyRequests.ts:72](../server/routes/projectStudyRequests.ts#L72) |
 | POST | `/api/projects/:projectId/study-requests` | [server/routes/projectStudyRequests.ts:89](../server/routes/projectStudyRequests.ts#L89) |
 | GET | `/api/projects/:projectId/time-by-phase` | [server/routes/timeTracking.ts:220](../server/routes/timeTracking.ts#L220) |
-| GET | `/api/proposals` | [server/routes/proposals.ts:27](../server/routes/proposals.ts#L27) |
-| POST | `/api/proposals` | [server/routes/proposals.ts:42](../server/routes/proposals.ts#L42) |
-| DELETE | `/api/proposals/:id` | [server/routes/proposals.ts:237](../server/routes/proposals.ts#L237) |
-| PUT | `/api/proposals/:id` | [server/routes/proposals.ts:80](../server/routes/proposals.ts#L80) |
-| GET | `/api/proposals/:id/export` | [server/routes/proposals.ts:258](../server/routes/proposals.ts#L258) |
+| GET | `/api/proposals` | [server/routes/proposals.ts:29](../server/routes/proposals.ts#L29) |
+| POST | `/api/proposals` | [server/routes/proposals.ts:44](../server/routes/proposals.ts#L44) |
+| DELETE | `/api/proposals/:id` | [server/routes/proposals.ts:231](../server/routes/proposals.ts#L231) |
+| PUT | `/api/proposals/:id` | [server/routes/proposals.ts:82](../server/routes/proposals.ts#L82) |
+| GET | `/api/proposals/:id/export` | [server/routes/proposals.ts:252](../server/routes/proposals.ts#L252) |
 | GET | `/api/proposals/:id/feasibility` | [server/routes/proposalFeasibility.ts:118](../server/routes/proposalFeasibility.ts#L118) |
 | POST | `/api/proposals/:id/feasibility` | [server/routes/proposalFeasibility.ts:128](../server/routes/proposalFeasibility.ts#L128) |
 | PUT | `/api/proposals/:id/feasibility-meta` | [server/routes/proposalFeasibility.ts:102](../server/routes/proposalFeasibility.ts#L102) |
@@ -580,11 +580,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | PUT | `/api/proposals/:id/feasibility/order` | [server/routes/proposalFeasibility.ts:153](../server/routes/proposalFeasibility.ts#L153) |
 | POST | `/api/proposals/:id/feasibility/prefill-sections` | [server/routes/proposalFeasibilityAi.ts:86](../server/routes/proposalFeasibilityAi.ts#L86) |
 | POST | `/api/proposals/:id/follow-up` | [server/routes/proposalFollowUp.ts:7](../server/routes/proposalFollowUp.ts#L7) |
-| PUT | `/api/proposals/:id/illustrations` | [server/routes/proposals.ts:223](../server/routes/proposals.ts#L223) |
+| PUT | `/api/proposals/:id/illustrations` | [server/routes/proposals.ts:217](../server/routes/proposals.ts#L217) |
 | POST | `/api/proposals/:id/signature` | [server/routes/signatures.ts:70](../server/routes/signatures.ts#L70) |
 | GET | `/api/proposals/:id/signature/pdf` | [server/routes/signatures.ts:126](../server/routes/signatures.ts#L126) |
 | POST | `/api/proposals/:id/signature/sync` | [server/routes/signatures.ts:110](../server/routes/signatures.ts#L110) |
-| POST | `/api/proposals/import` | [server/routes/proposals.ts:270](../server/routes/proposals.ts#L270) |
+| POST | `/api/proposals/import` | [server/routes/proposals.ts:264](../server/routes/proposals.ts#L264) |
 | GET | `/api/public/chantier/:token` | [server/routes/panneaux.ts:179](../server/routes/panneaux.ts#L179) |
 | GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:167](../server/routes/consultationDepotPublic.ts#L167) |
 | DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:442](../server/routes/consultationDepotPublic.ts#L442) |
@@ -849,7 +849,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/local-login` | [server/localAuthRoutes.ts:58](../server/localAuthRoutes.ts#L58) |
 | POST | `/local-setup` | [server/localAuthRoutes.ts:24](../server/localAuthRoutes.ts#L24) |
 | GET | `/local-status` | [server/localAuthRoutes.ts:20](../server/localAuthRoutes.ts#L20) |
-| GET | `/manifest.webmanifest` | [server.ts:1441](../server.ts#L1441) |
+| GET | `/manifest.webmanifest` | [server.ts:1442](../server.ts#L1442) |
 | DELETE | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:69](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L69) |
 | GET | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:68](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L68) |
 | POST | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:30](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L30) |

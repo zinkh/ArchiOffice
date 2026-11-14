@@ -123,6 +123,7 @@ import { registerReceptionRoutes } from "./server/routes/receptions";
 import { registerDoeAtelierRoutes } from "./server/routes/doeAtelier";
 import { registerDoeAtelierPublicRoutes } from "./server/routes/doeAtelierPublic";
 import { startDoeReminders } from "./server/doe/relances";
+import { startProposalCallbacks } from "./server/proposalCallbacks";
 import { startReserveReminders } from "./server/reserveReminders";
 import { registerReserveRoutes } from "./server/routes/reserves";
 import { registerGpaReserveRoutes } from "./server/routes/gpaReserves";
@@ -1535,6 +1536,9 @@ async function startServer() {
     // (atelier DOE de l'onglet AOR, server/doe/relances.ts).
     startDoeReminders(supabaseAdmin);
     startReserveReminders(supabaseAdmin);
+    // Rappel téléphonique des propositions sans réponse après un mois : appel sortant + tâche
+    // (server/proposalCallbacks.ts).
+    startProposalCallbacks(supabaseAdmin);
     // Alertes métier des agents (situations à signaler sans qu'on les
     // demande : études sans contrat signé, facture échue, réserves non
     // levées...) et exécutions planifiées d'agents.

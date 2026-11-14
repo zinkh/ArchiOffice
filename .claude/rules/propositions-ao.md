@@ -231,6 +231,34 @@ Section 04 de la modale (`Proposals.tsx`, composant `src/components/proposal/Ter
 - **MAF** : le calcul est affiché sous le calcul des honoraires (TVA/TTC), selon le type de mission choisi en section 04.
 - **Envoyer au client** (action de la liste) : `ProposalExportModal` (`intent: 'send'`) génère le PDF sans le télécharger (`exportProposalPdf(..., { download: false })`) et ouvre `SendProposalMail` (`MailComposeModal` avec `initialFiles`) ; une proposition en brouillon passe à « Envoyée » une fois le message parti.
 
+### Conversion en affaire, archivage automatique et rappel téléphonique à un mois
+
+- **Toutes les informations passent dans l'affaire à l'acceptation** (`PUT /api/proposals/:id`, `src/lib/proposalToProject.ts`
+  `projectRowFromProposal`, testé par `tests/proposalToProject.test.ts`) : les champs communs aux deux tables (`COPIED_FIELDS` : client
+  et `client_id`, coordonnées, terrain et parcelles, nature de l'opération, surfaces existante, réhabilitée et d'extension, ERP, plans et
+  photos, MAF...) sont recopiés ; la ligne enregistrée complète le corps de la requête, un champ absent du formulaire n'est pas perdu.
+  `proposals.amount` (net HT des **honoraires**) devient `projects.remuneration`, le **budget** est le montant des travaux
+  (`construction_cost`) à défaut les honoraires, `projects.surface` reprend `surface_plancher`, `nature_travaux_maf` se déduit de la
+  nature de l'opération. Une valeur absente est omise, rien n'est inventé. `projects.source_proposal_id` garde le lien : honoraires,
+  planning, étude de faisabilité, pièces jointes et suivi de signature restent lisibles sur la proposition d'origine (archivée, jamais
+  supprimée) ; les réunions préparées sur la proposition rejoignent l'affaire (`meetings.project_id`, le lien à la proposition reste).
+  **Une nouvelle colonne commune aux deux tables s'ajoute à `COPIED_FIELDS`.** Migration
+  `supabase/migrate_project_from_proposal.sql` (colonnes + rattrapage des affaires déjà converties, champs vides seulement).
+  Pas repris : les pièces jointes (deux lignes `documents` sur un même fichier se supprimeraient l'une l'autre) et les dates de l'affaire
+  (30 jours par défaut, pas déduites du planning de la proposition).
+- **Une proposition convertie est archivée d'office** (`archived_at`, `archive_reason = 'converted'`, `next_follow_up_at` vidé) : elle
+  n'attend plus de réponse, donc ni relance ni rappel. « Restaurer » depuis le suivi client la rouvre. La migration
+  `supabase/migrate_proposal_callback.sql` a rattrapé les propositions déjà acceptées.
+- **Rappel téléphonique après 30 jours** (`server/proposalCallbacks.ts`, cycle de 6 h réglable par `PROPOSAL_CALLBACKS_INTERVAL_HOURS`,
+  `proposalCallbackDue` dans `src/lib/proposalFollowUp.ts`) : une proposition `Sent` sans réponse, ni signature, ni archivage crée un appel
+  SORTANT dans le journal des appels (`phone_calls`, `callback_due` = jour du passage) ET la tâche liée (`buildTaskFromCall`), attribués
+  au premier administrateur du cabinet, qui est notifié (`/appels?open=<id>`). **Une seule fois** : `proposals.callback_call_id` est pris
+  par une mise à jour conditionnelle (deux processus ne créent pas deux appels) et reste posé même quand l'appel est traité. Un échec
+  libère la prise, le cycle suivant réessaie. Cabinets suspendus ignorés ; colonne ou table absente = aucun rappel, sans bruit.
+- **Écran** : filtre « À rappeler · 30 jours », pastille « À rappeler » dans la ligne, alerte et lien « Ouvrir l'appel » dans le suivi client.
+  Le bouton « Suivi client » est une icône (téléphone) comme les autres actions. La liste n'a plus d'icône PDF : le PDF se télécharge
+  depuis le bouton PDF de la fenêtre ouverte par « Envoyer » (la fenêtre garde ses deux boutons, Envoyer et PDF).
+
 ### Honoraires d'une proposition : arrondi, remise, PC seul
 
 Logique pure dans `src/lib/proposalFees.ts` (testée, `__tests__/proposalFees.test.ts`), migration `supabase/migrate_proposal_fees_discount.sql`.

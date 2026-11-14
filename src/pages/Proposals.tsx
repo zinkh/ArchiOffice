@@ -1,10 +1,10 @@
 import { ProposalFollowUp, updateProposalFollowUp } from '../components/proposal/ProposalFollowUp';
-import { proposalReminderDue, proposalArchiveDue } from '../lib/proposalFollowUp';
+import { proposalReminderDue, proposalArchiveDue, proposalCallbackDue } from '../lib/proposalFollowUp';
 import { contactPatchFromProposal, fillMissingClientFields } from '../lib/proposalClient';
 import * as React from 'react';
 import { useState, useEffect, useId, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract, IconChevronDown, IconSend } from '@tabler/icons-react';
+import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconContract, IconChevronDown, IconSend, IconPhoneCall } from '@tabler/icons-react';
 import { AnimatePresence } from 'motion/react';
 import { ModalShell } from '../components/ui/ModalShell';
 import { formatCurrency, cn } from '../lib/utils';
@@ -591,6 +591,7 @@ export default function Proposals() {
   const filteredProposals = proposals.filter(p =>
     followUpView === 'archived' ? !!p.archived_at :
     followUpView === 'remind' ? proposalReminderDue(p) :
+    followUpView === 'callback' ? proposalCallbackDue(p) :
     followUpView === 'archive_due' ? proposalArchiveDue(p) : !p.archived_at
   ).filter(p =>
     p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -780,6 +781,7 @@ export default function Proposals() {
         <select id="proposal-follow-up-view" className="form-control max-w-48" value={followUpView} onChange={e => setFollowUpView(e.target.value)}>
           <option value="active">{t('proposal_fu_active')}</option>
           <option value="remind">{t('proposal_fu_due')}</option>
+          <option value="callback">{t('proposal_fu_callback_due_view')}</option>
           <option value="archive_due">{t('proposal_fu_archive_due')}</option>
           <option value="archived">{t('proposal_fu_archived')}</option>
         </select>
@@ -822,10 +824,9 @@ export default function Proposals() {
             ]}
             actions={p => (
               <div className="flex flex-wrap gap-2">
-                <button className="btn btn-secondary" onClick={() => setFollowUpProposal(p)}>{t('proposal_fu_title')}</button>
+                <button onClick={() => setFollowUpProposal(p)} title={t('proposal_fu_title')} aria-label={t('proposal_fu_title')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconPhoneCall size={15} /></button>
                 <button disabled={!!p.archived_at} onClick={() => handleEditClick(p)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconEdit size={15} /></button>
                 <button disabled={!!p.archived_at} onClick={() => openExport(p, 'send')} title={t('proposals_send_to_client')} aria-label={t('proposals_send_to_client')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconSend size={15} /></button>
-                <button onClick={() => openExport(p, 'export')} title={t('prop_a_export_pdf')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
                 {!p.archived_at && p.status !== 'Accepted' && <button onClick={() => handleUpdateStatus(p, 'Accepted')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-success)', background: 'rgba(47,179,135,0.1)' }}><IconCircleCheck size={15} /></button>}
               </div>
             )}
@@ -878,10 +879,30 @@ export default function Proposals() {
                     }}>
                       {statusLabel(proposal.status)}
                     </span>
+                    {proposalCallbackDue(proposal) && (
+                      <button
+                        onClick={() => setFollowUpProposal(proposal)}
+                        className="ml-2 inline-flex items-center gap-1 px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider"
+                        style={{ color: 'var(--tblr-warning)', border: '1px solid currentColor', background: 'transparent' }}
+                        title={t('proposal_fu_callback_due', { days: Math.floor((Date.now() - Date.parse(proposal.sent_at || '')) / 86400000) })}
+                      >
+                        <IconPhoneCall size={12} aria-hidden="true" />{t('proposal_fu_callback_badge')}
+                      </button>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button className="btn btn-secondary" onClick={() => setFollowUpProposal(proposal)}>{t('proposal_fu_title')}</button>
+                      <button
+                        onClick={() => setFollowUpProposal(proposal)}
+                        className="p-1.5 rounded-lg transition-colors"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = '')}
+                        title={t('proposal_fu_title')}
+                        aria-label={t('proposal_fu_title')}
+                      >
+                        <IconPhoneCall size={20} />
+                      </button>
                       <button
                         disabled={!!proposal.archived_at} onClick={() => handleEditClick(proposal)}
                         className="p-1.5 rounded-lg transition-colors"
@@ -909,13 +930,6 @@ export default function Proposals() {
                         aria-label={t('proposals_send_to_client')}
                       >
                         <IconSend size={20} />
-                      </button>
-                      <button
-                        onClick={() => openExport(proposal, 'export')}
-                        className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                        title={t('pdf_generator')}
-                      >
-                        <IconFileTypePdf size={20} />
                       </button>
                       <button
                         onClick={() => navigate('/contrats', { state: { fromProposal: proposal } })}
