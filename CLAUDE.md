@@ -293,6 +293,8 @@ import type { Project } from '@/src/types';
 
 There is a Vitest suite (`npm test`), run in CI (`.github/workflows/*.yml`, job `lint-and-build`) after `npm run lint` and before `npm run build` — a change is not done until all three pass. `tests/*.test.ts` cover server routes end-to-end through the real Express app against `tests/testServer.ts`'s in-memory `fakeSupabaseAdmin` (a small PostgREST-like emulator with `.select/.insert/.update/.delete/.upsert(rows, {onConflict})/.eq/.single/.maybeSingle`, `.seed(table, rows)`, `.getTable(table)`); `src/lib/__tests__/*.test.ts` cover pure frontend logic (import/rapprochement, ACT-versement, formulas). `npm run lint` (`tsc --noEmit`) still only type-checks — it does not run the tests.
 
+**Routes : toujours vérifier avant de pousser.** La CI a une étape « Check API route documentation » qui échoue si l'inventaire des routes (`scripts/generate-api-routes.mjs`) n'est plus à jour. Dès qu'une route `/api/**` est ajoutée, renommée, déplacée ou supprimée (`server.ts`, `server/routes/*`), lancer `npm run docs:routes` pour régénérer l'inventaire et le commiter, puis `npm run test:docs` et `npm run docs:check` (doivent passer) en plus de `npm run lint` et `npm test`. Ne pas oublier non plus les routes côté écran (`src/App.tsx`) : un lien ou un `navigate()` doit viser une route qui existe.
+
 ## Docker
 
 ```dockerfile
