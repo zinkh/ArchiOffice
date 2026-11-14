@@ -51,6 +51,8 @@ const NOMIC_EXTRACT_TIMEOUT_MS = 170_000;
 // Un CCTP complet est un long JSON (jusqu'à 16 000 jetons) : le délai de 120 s
 // du chat ne suffit pas à Mistral. Reste sous les 300 s usuels d'un proxy.
 const LLM_GENERATION_TIMEOUT_MS = 270_000;
+// Un seul poste : sous le délai des passerelles (~60 s), pour que l'erreur soit la nôtre.
+const POSTE_TIMEOUT_MS = 50_000;
 // Texte des pièces gardé en mémoire entre l'appel « plan » et les appels « lot »
 // d'une même génération : sans lui chaque lot relirait (et réOCRiserait) les
 // plans. Perdu au redémarrage ou sur un autre conteneur : on relit, sans autre
@@ -444,7 +446,7 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
   }
 
   /** Un appel au modèle, facturé réserve → exécute → règle comme les autres. */
-  async function callModel(tenantId: string, userId: string, prefix: string, cacheKey: string, task: string, system = SYSTEM_PROMPT, images: { data: Buffer; mimeType: string }[] = []): Promise<{ text: string } | { status: number; error: string; code?: string }> {
+  async function callModel(tenantId: string, userId: string, prefix: string, cacheKey: string, task: string, system = SYSTEM_PROMPT, images: { data: Buffer; mimeType: string }[] = [], timeoutMs: number = LLM_GENERATION_TIMEOUT_MS): Promise<{ text: string } | { status: number; error: string; code?: string }> {
     const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
     const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
     // Des photos à décrire exigent un fournisseur qui lit les images : refusé avant tout débit.
@@ -462,7 +464,7 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
         // Sans pièces (rédaction d'un seul poste), rien à mettre en cache.
         ...(prefix ? { cachePrefix: prefix, cacheKey } : {}),
         messages: [{ role: 'user', content: task, ...(images.length ? { images } : {}) }],
-        timeoutMs: LLM_GENERATION_TIMEOUT_MS,
+        timeoutMs,
       });
     } catch (e) {
       await refundAiCredit(tenantId, reservedCents).catch(() => {});
@@ -478,6 +480,11 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
 
   const handleError = (e: any, res: any, tag: string) => {
     if (e?.code === 'LLM_NOT_CONFIGURED') return res.status(503).json({ error: e.message });
+    // Délai du modèle dépassé : on répond NOUS-MÊMES, en JSON, avant la passerelle.
+    // Sans corps JSON, un 504 de passerelle s'affiche comme « mise à jour ou redémarrage ».
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      return res.status(504).json({ error: "Le modèle IA n'a pas répondu à temps. Aucun crédit n'a été débité : réessayez, ou raccourcissez les consignes.", code: 'LLM_TIMEOUT' });
+    }
     console.error(`[${tag}]`, e?.message);
     Sentry.captureException(e, { tags: { feature: 'cctp-generation' } });
     res.status(500).json({ error: 'Échec de la génération du CCTP : ' + e.message });
@@ -595,7 +602,7 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
         instructions: str(req.body?.instructions, MAX_INSTRUCTIONS_CHARS), voisins,
       });
       const contexte = `Affaire : ${(project as any).name}${(project as any).address ? ` (${(project as any).address})` : ''}.`;
-      const out = await callModel(tenantId, req.user.id, '', '', `${contexte}\n\n${tache}`, POSTE_SYSTEM_PROMPT, photosLues.map(({ data, mimeType }) => ({ data, mimeType })));
+      const out = await callModel(tenantId, req.user.id, '', '', `${contexte}\n\n${tache}`, POSTE_SYSTEM_PROMPT, photosLues.map(({ data, mimeType }) => ({ data, mimeType })), POSTE_TIMEOUT_MS);
       if ('error' in out) return res.status(out.status).json({ error: out.error, code: out.code });
       const texte = nettoyerTextePoste(out.text);
       if (!texte) return res.status(502).json({ error: 'Réponse IA vide.' });
