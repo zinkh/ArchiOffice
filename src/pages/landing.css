@@ -89,15 +89,15 @@ html:has(.aol) { scroll-behavior: smooth; }
 @media (hover: hover) { .aol-header-cta:hover:not(:active) { transform: translateY(-1px); } }
 
 .aol-burger {
-  display: none; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  width: 56px; height: 56px; flex-shrink: 0; border: none; border-radius: 999px; background: var(--aol-ink);
+  display: none; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  width: 48px; height: 48px; flex-shrink: 0; border: none; border-radius: 999px; background: var(--aol-ink);
   cursor: pointer; transition: background .25s ease, transform .25s ease;
 }
 .aol-burger:active { transform: scale(.94); }
-.aol-burger span { display: block; width: 22px; height: 2px; background: #fff; border-radius: 2px; transition: transform .3s ease, opacity .2s ease; }
-.aol-burger[aria-expanded='true'] span:nth-child(1) { transform: translateY(8px) rotate(45deg); }
+.aol-burger span { display: block; width: 18px; height: 2px; background: #fff; border-radius: 2px; transition: transform .3s ease, opacity .2s ease; }
+.aol-burger[aria-expanded='true'] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
 .aol-burger[aria-expanded='true'] span:nth-child(2) { opacity: 0; }
-.aol-burger[aria-expanded='true'] span:nth-child(3) { transform: translateY(-8px) rotate(-45deg); }
+.aol-burger[aria-expanded='true'] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
 
 .aol-sheet {
   display: none; position: absolute; left: 0; right: 0; top: 100%;
