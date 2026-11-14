@@ -2,13 +2,14 @@ import { test, expect } from '@playwright/test';
 
 // Diagnostics are read-only and restricted to public pages.
 // A Brave executable must be explicitly configured; Chromium is not silently substituted.
-test.skip(!process.env.PLAYWRIGHT_BRAVE_EXECUTABLE_PATH, 'Brave must be configured for this diagnostic suite');
-
 const pages = [
   { route: '/', label: 'landing' },
   { route: '/login', label: 'login' },
   { route: '/register', label: 'register' },
 ];
+
+test.describe('Brave diagnostics', () => {
+  test.skip(!process.env.PLAYWRIGHT_BRAVE_EXECUTABLE_PATH, 'Brave must be configured for this diagnostic suite');
 
 for (const { route, label } of pages) {
   test(`Brave diagnostic — ${label}`, async ({ page, browser }, testInfo) => {
@@ -89,3 +90,4 @@ for (const { route, label } of pages) {
     expect(report.overflowPixels, 'horizontal overflow in CSS pixels').toBeLessThanOrEqual(2);
   });
 }
+});
