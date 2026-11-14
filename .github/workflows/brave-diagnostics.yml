@@ -46,7 +46,9 @@ jobs:
           test -x "$PLAYWRIGHT_BRAVE_EXECUTABLE_PATH"
 
       - name: Install browser runtime dependencies
-        run: npx playwright install-deps chromium
+        run: |
+          npx playwright install-deps chromium
+          npx playwright install ffmpeg
 
       - name: Diagnose public pages with actual Brave
         run: npx playwright test e2e/brave-diagnostics.spec.ts --project=brave-desktop --project=brave-mobile
