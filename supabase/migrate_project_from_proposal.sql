@@ -42,12 +42,32 @@ UPDATE projects pr SET
   is_erp              = COALESCE(pr.is_erp, p.is_erp),
   illustrations       = COALESCE(pr.illustrations, p.illustrations),
   surface             = COALESCE(pr.surface, NULLIF(trim(p.surface_plancher), '')),
-  construction_cost   = COALESCE(pr.construction_cost, NULLIF(p.construction_cost, 0)),
-  remuneration        = COALESCE(pr.remuneration, NULLIF(p.amount, 0)),
   nature_travaux_maf  = COALESCE(pr.nature_travaux_maf,
                           CASE p.operation_nature WHEN 'neuf' THEN 'Neuf' WHEN 'rehabilitation' THEN 'Réhabilitation' END)
   FROM unique_pairs u JOIN proposals p ON p.id = u.proposal_id
  WHERE pr.id = u.project_id;
+
+-- Coût des travaux et rémunération : TEXT dans schema.sql, NUMERIC sur les bases plus anciennes. Le type
+-- se lit sur la colonne elle-même pour que le rattrapage passe sur une installation neuve comme en production.
+DO $$
+DECLARE
+  v_cost_type TEXT;
+  v_remu_type TEXT;
+BEGIN
+  SELECT CASE WHEN data_type = 'text' THEN 'text' ELSE 'numeric' END INTO v_cost_type
+    FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'projects' AND column_name = 'construction_cost';
+  SELECT CASE WHEN data_type = 'text' THEN 'text' ELSE 'numeric' END INTO v_remu_type
+    FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'projects' AND column_name = 'remuneration';
+  EXECUTE format(
+    'UPDATE projects pr SET
+       construction_cost = COALESCE(pr.construction_cost, NULLIF(p.construction_cost, 0)::%s),
+       remuneration      = COALESCE(pr.remuneration, NULLIF(p.amount, 0)::%s)
+       FROM proposals p
+      WHERE pr.source_proposal_id = p.id AND pr.tenant_id = p.tenant_id',
+    v_cost_type, v_remu_type);
+END $$;
 
 -- Les réunions préparées sur la proposition rejoignent l'affaire (le lien à la proposition reste).
 UPDATE meetings m SET project_id = pr.id
