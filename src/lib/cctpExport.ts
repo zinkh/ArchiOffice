@@ -271,9 +271,10 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
     else if (b.niveau === 2) { place(26); y += 2; ecrire(`${b.numero}  ${b.titre}`, 11, 'bold', GRIS_TEXTE, 0, 1.5); }
     else { place(18); ecrire(`${b.numero}  ${b.titre}`, 10, 'bold', GRIS_TEXTE, retrait, 1); }
     if (b.batiments) ecrire(`Bâtiments concernés : ${b.batiments.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
-    if (b.localisation) ecrire(`Localisation : ${b.localisation}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
     if (b.fiches) ecrire(`Fiches techniques : ${b.fiches.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
-    if (b.texte) ecrireRiche(b.texte, 9.5, GRIS_TEXTE, retrait, 2.5);
+    if (b.texte) ecrireRiche(b.texte, 9.5, GRIS_TEXTE, retrait, b.localisation ? 1 : 2.5);
+    // La localisation (pièce, ouvrage) vient sous le texte de l'article.
+    if (b.localisation) ecrire(`Localisation : ${b.localisation}`, 8.5, 'italic', GRIS_DOUX, retrait, 2.5);
     for (const illustration of b.images ?? []) {
       const img = images.get(illustration.fileUrl);
       if (!img) continue;
@@ -362,7 +363,6 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
       children: [new TextRun({ text: texte, italics: true, size: 17, color: '6B7280' })],
     }));
     if (b.batiments) mention(`Bâtiments concernés : ${b.batiments.join(', ')}`);
-    if (b.localisation) mention(`Localisation : ${b.localisation}`);
     if (b.fiches) mention(`Fiches techniques : ${b.fiches.join(', ')}`);
     for (const segments of paragraphesRiches(b.texte)) {
       const brut = segments.map(x => x.text).join('');
@@ -379,6 +379,8 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
         })),
       }));
     }
+    // La localisation (pièce, ouvrage) vient sous le texte de l'article.
+    if (b.localisation) mention(`Localisation : ${b.localisation}`);
     for (const illustration of b.images ?? []) {
       const img = images.get(illustration.fileUrl);
       if (!img) continue;
