@@ -9,7 +9,7 @@ import { produireDossier } from '../../lib/exportDossier';
 import { suffixeLot } from '../../lib/exportOrientation';
 import type { DocumentDce } from '../../lib/dceIndices';
 import {
-  deposerFichierDce, documentDejaVerse, type EntreePieceDce, type SpecPieceDce,
+  deposerFichierDce, documentDeLaPiece, indiceSuivant, nomFichierDce, type EntreePieceDce, type SpecPieceDce,
 } from '../../lib/dceVersement';
 
 const BOUTON = 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 transition';
@@ -19,9 +19,11 @@ const BOUTON = 'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bo
  * cochée pour son seul lot, donc une entreprise ne reçoit que ceux de ses lots. Le DPGF
  * part sans prix (bordereau à chiffrer par l'entreprise).
  */
-export default function DceVersementPro({ projectId, projectName, lots, dce, documentsAffaire, onVerser }: {
+export default function DceVersementPro({ projectId, projectName, codeAffaire, lots, dce, documentsAffaire, onVerser }: {
   projectId: string;
   projectName: string;
+  /** Code de l'affaire, premier élément du nom des fichiers versés. */
+  codeAffaire: string;
   lots: ProjectLot[];
   dce: EntreePieceDce[];
   documentsAffaire: DocumentDce[];
@@ -53,8 +55,13 @@ export default function DceVersementPro({ projectId, projectName, lots, dce, doc
           typeDoc: doc === 'cctp' ? 'CCTP' : 'DPGF',
           nom: `${doc === 'cctp' ? 'CCTP' : 'DPGF'} - ${suffixeLot(lot)}`, lotsIds: [lotProjet.id],
         };
-        const existant = documentDejaVerse(dce, documentsAffaire, spec, fichier.nom);
-        const documentId = await deposerFichierDce({ projectId, nomFichier: fichier.nom, blob: fichier.blob, existantId: existant?.id });
+        // Nom systématique Code_Pièce_NumLot-NomLot-Indice : l'indice est celui que le serveur donnera à ce versement.
+        const existant = documentDeLaPiece(dce, documentsAffaire, spec);
+        const nomFichier = nomFichierDce({
+          code: codeAffaire, piece: spec.typeDoc, lot: { numero: String(lot.numero), titre: lot.titre },
+          indice: existant ? indiceSuivant(existant.indice) : 'A',
+        });
+        const documentId = await deposerFichierDce({ projectId, nomFichier, blob: fichier.blob, existantId: existant?.id });
         if (!existant) nouvelles++;
         versements.push({ spec, documentId });
       }
