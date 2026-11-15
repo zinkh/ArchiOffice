@@ -13,8 +13,8 @@ import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { docxSectionChrome } from './docxRunningHeader';
-import { drawAgencyFooters, ENTETE_REDUIT_BAS, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
-import { chargerPhotoCouverture, donneesPageDeGarde, drawPageDeGardePdf, lignesDates, pageDeGardeDocx, type CouvertureOptions, type DonneesPageDeGarde } from './pageDeGarde';
+import { drawAgencyFooters, piedDePageMandataire, ENTETE_REDUIT_BAS, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
+import { chargerPhotoCouverture, donneesPageDeGarde, drawPageDeGardePdf, pageDeGardeDocx, type CouvertureOptions } from './pageDeGarde';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
 import { ORIENTATION_CCTP, orientationPdf, suffixeLot, type Orientation } from './exportOrientation';
@@ -67,12 +67,6 @@ async function pageDeGardeCctp(doc: DPGF, opts: CctpExportOptions) {
     version: doc.version, dateCreation: doc.dateCreation, couverture: opts.couverture, photo,
   });
 }
-
-/**
- * Pied de page du CCTP : date d'émission, date de modification et indice, sans le nom ni
- * l'adresse du cabinet. La page de garde porte déjà ce bloc, elle n'a donc que la pagination.
- */
-const piedDePageCctp = (d: DonneesPageDeGarde) => lignesDates(d).join('  ·  ');
 
 /** #rrggbb vers [r, g, b] ; une couleur illisible rend le repli. */
 function hexVersRgb(hex: string | undefined, repli: [number, number, number]): [number, number, number] {
@@ -191,8 +185,8 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   const garde = await pageDeGardeCctp(doc, opts);
   const letterhead = {
     title: cctpTitre(opts), subtitle: opts.projectName, reference: `v${doc.version}`, margin, logo,
-    // Pied de page : dates et indice seulement ; la page 1 n'a que la pagination (son bloc de dates est au-dessus).
-    piedDePage: (page: number) => (page === 1 ? '' : piedDePageCctp(garde)),
+    // Page de garde : ni nom ni adresse en pied (elle porte son bloc de dates). Pages suivantes : le mandataire.
+    piedDePage: (page: number) => (page === 1 ? '' : piedDePageMandataire(opts.settings)),
   };
   // Page de garde, puis le texte à la page suivante sous l'en-tête réduit (agence | document).
   drawPageDeGardePdf(pdf, opts.settings, logo, garde, margin);
@@ -330,11 +324,11 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
       new TextRun({ children: [PageNumber.TOTAL_PAGES], bold: true, size: 15, color: '111827' }),
     ],
   });
-  // Dates et indice seulement, sans le nom ni l'adresse du cabinet ; la page de garde a déjà son bloc de dates.
+  // Pages suivantes : identité du mandataire ; la page de garde n'a que la pagination (son bloc de dates est dans le corps).
   const footerChildren = [
     new Paragraph({
       border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB' } },
-      children: [new TextRun({ text: piedDePageCctp(garde), size: 13, color: '6B7280' })],
+      children: [new TextRun({ text: piedDePageMandataire(settings), size: 13, color: '6B7280' })],
     }),
     pagination,
   ];

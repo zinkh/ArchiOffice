@@ -143,6 +143,18 @@ export function agencyFooterLine(s: AgencySettings): string {
 }
 
 /**
+ * Pied de page d'un document de groupement : l'identité du mandataire (nom, adresse,
+ * contact, SIRET) quand c'est un cotraitant, sinon la ligne du cabinet. La TVA et le
+ * numéro d'ordre du cabinet ne sont jamais mêlés à ceux d'un autre.
+ */
+export function piedDePageMandataire(s: AgencySettings): string {
+  const m = mandataireActif;
+  if (!m) return agencyFooterLine(s);
+  return [m.titre, m.adresse, m.telephone ? `Tél : ${m.telephone}` : '', m.email, m.siret ? `SIRET ${m.siret}` : '']
+    .filter(Boolean).join('  ·  ');
+}
+
+/**
  * Charge le logo du cabinet en data URL, avec ses dimensions réelles — le
  * rapport largeur/hauteur est indispensable pour ne pas le déformer.
  * Rend null en cas d'échec : un logo manquant ne doit jamais empêcher un export.
