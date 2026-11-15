@@ -43,6 +43,8 @@ export async function docxSectionChrome(opts: {
   documentTitle: string;
   firstHeader?: Paragraph[];
   footer?: Paragraph[];
+  /** Pied de la première page, quand il diffère du pied des autres pages. */
+  firstFooter?: Paragraph[];
   /** Orientation de la page A4 ; absente, vertical comme avant. */
   orientation?: Orientation;
 }): Promise<SectionChrome> {
@@ -71,6 +73,6 @@ export async function docxSectionChrome(opts: {
       },
     },
     headers: { first, default: compact },
-    ...(opts.footer ? { footers: { first: new Footer({ children: opts.footer }), default: new Footer({ children: opts.footer }) } } : {}),
+    ...(opts.footer ? { footers: { first: new Footer({ children: opts.firstFooter ?? opts.footer }), default: new Footer({ children: opts.footer }) } } : {}),
   };
 }

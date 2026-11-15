@@ -13,12 +13,13 @@ import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { docxSectionChrome } from './docxRunningHeader';
-import { agencyFooterLine, drawAgencyFooters, ENTETE_REDUIT_BAS, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
-import { chargerPhotoCouverture, donneesPageDeGarde, drawPageDeGardePdf, pageDeGardeDocx, type CouvertureOptions } from './pageDeGarde';
+import { drawAgencyFooters, ENTETE_REDUIT_BAS, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
+import { chargerPhotoCouverture, donneesPageDeGarde, drawPageDeGardePdf, lignesDates, pageDeGardeDocx, type CouvertureOptions, type DonneesPageDeGarde } from './pageDeGarde';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
 import { ORIENTATION_CCTP, orientationPdf, suffixeLot, type Orientation } from './exportOrientation';
 import { mettreEnLignes, paragraphesRiches, type StyleRiche } from './cctpRichText';
+import { textePdf } from './pdfTexte';
 
 /** Fiches rappelées sous l'article : les photos (descriptions pour l'IA) n'en sont pas. */
 const fichesRappelees = (l: Ligne): string[] => (l.fichesTechniques ?? [])
@@ -66,6 +67,12 @@ async function pageDeGardeCctp(doc: DPGF, opts: CctpExportOptions) {
     version: doc.version, dateCreation: doc.dateCreation, couverture: opts.couverture, photo,
   });
 }
+
+/**
+ * Pied de page du CCTP : date d'émission, date de modification et indice, sans le nom ni
+ * l'adresse du cabinet. La page de garde porte déjà ce bloc, elle n'a donc que la pagination.
+ */
+const piedDePageCctp = (d: DonneesPageDeGarde) => lignesDates(d).join('  ·  ');
 
 /** #rrggbb vers [r, g, b] ; une couleur illisible rend le repli. */
 function hexVersRgb(hex: string | undefined, repli: [number, number, number]): [number, number, number] {
@@ -181,11 +188,14 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
   const largeur = pageW - margin * 2;
+  const garde = await pageDeGardeCctp(doc, opts);
   const letterhead = {
     title: cctpTitre(opts), subtitle: opts.projectName, reference: `v${doc.version}`, margin, logo,
+    // Pied de page : dates et indice seulement ; la page 1 n'a que la pagination (son bloc de dates est au-dessus).
+    piedDePage: (page: number) => (page === 1 ? '' : piedDePageCctp(garde)),
   };
   // Page de garde, puis le texte à la page suivante sous l'en-tête réduit (agence | document).
-  drawPageDeGardePdf(pdf, opts.settings, logo, await pageDeGardeCctp(doc, opts), margin);
+  drawPageDeGardePdf(pdf, opts.settings, logo, garde, margin);
   pdf.addPage();
   let y = Math.max(ENTETE_REDUIT_BAS, margin) + 2;
   const basDePage = pageH - 18;
@@ -210,7 +220,7 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
     pdf.setFontSize(taille);
     pdf.setTextColor(...couleur);
     const hLigne = taille * 0.42;
-    for (const paragraphe of valeur.split(/\n/)) {
+    for (const paragraphe of textePdf(valeur).split(/\n/)) {
       const lignes = pdf.splitTextToSize(paragraphe || ' ', largeur - retrait) as string[];
       for (const ligne of lignes) {
         place(hLigne);
@@ -231,7 +241,7 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
       return pdf.getTextWidth(t);
     };
     const hLigne = taille * 0.42;
-    for (const paragraphe of paragraphesRiches(valeur)) {
+    for (const paragraphe of paragraphesRiches(textePdf(valeur))) {
       for (const ligne of mettreEnLignes(paragraphe, largeur - retrait, mesurer)) {
         place(hLigne);
         const base = y + hLigne * 0.8;
@@ -310,20 +320,27 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   );
   const bandeau = await partnerLogosParagraph();
   if (bandeau) headerChildren.push(bandeau);
+  const garde = await pageDeGardeCctp(doc, opts);
+  const pagination = new Paragraph({
+    alignment: AlignmentType.RIGHT,
+    children: [
+      new TextRun({ text: 'P', bold: true, size: 15, color: '111827' }),
+      new TextRun({ children: [PageNumber.CURRENT], bold: true, size: 15, color: '111827' }),
+      new TextRun({ text: '|', bold: true, size: 15, color: '111827' }),
+      new TextRun({ children: [PageNumber.TOTAL_PAGES], bold: true, size: 15, color: '111827' }),
+    ],
+  });
+  // Dates et indice seulement, sans le nom ni l'adresse du cabinet ; la page de garde a déjà son bloc de dates.
   const footerChildren = [
     new Paragraph({
       border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB' } },
-      children: [new TextRun({ text: agencyFooterLine(settings), size: 13, color: '6B7280' })],
+      children: [new TextRun({ text: piedDePageCctp(garde), size: 13, color: '6B7280' })],
     }),
-    new Paragraph({
-      alignment: AlignmentType.RIGHT,
-      children: [
-        new TextRun({ text: 'P', bold: true, size: 15, color: '111827' }),
-        new TextRun({ children: [PageNumber.CURRENT], bold: true, size: 15, color: '111827' }),
-        new TextRun({ text: '|', bold: true, size: 15, color: '111827' }),
-        new TextRun({ children: [PageNumber.TOTAL_PAGES], bold: true, size: 15, color: '111827' }),
-      ],
-    }),
+    pagination,
+  ];
+  const firstFooterChildren = [
+    new Paragraph({ border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB' } }, children: [] }),
+    pagination,
   ];
 
   const retrait = (niveau: number) => ({ left: Math.max(0, niveau - 3) * 360 });
@@ -382,7 +399,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   }
 
   const paysage = (opts.orientation ?? ORIENTATION_CCTP) === 'paysage';
-  const chrome = await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, orientation: opts.orientation ?? ORIENTATION_CCTP });
+  const chrome = await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, firstFooter: firstFooterChildren, orientation: opts.orientation ?? ORIENTATION_CCTP });
   const document_ = new Document({
     // Sans style par défaut, Word retombe sur Times New Roman : la charte est en Arial.
     styles: {
@@ -398,7 +415,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     // sous l'en-tête réduit dès sa première page ; la pagination continue d'une section à l'autre.
     sections: [{
       ...chrome,
-      children: await pageDeGardeDocx(await pageDeGardeCctp(doc, opts), paysage ? { largeurMax: 620, hauteurMax: 250 } : { largeurMax: 600, hauteurMax: 380 }),
+      children: await pageDeGardeDocx(garde, paysage ? { largeurMax: 620, hauteurMax: 250 } : { largeurMax: 600, hauteurMax: 380 }),
     }, {
       ...chrome,
       properties: { ...chrome.properties, titlePage: false as any },
