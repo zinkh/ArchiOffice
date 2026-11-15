@@ -944,7 +944,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               </button>
               </div>
             </div>
-            <DceVersementPro projectId={projectId} projectName={projectName} lots={lots} dce={consultation.dce_documents}
+            <DceVersementPro projectId={projectId} projectName={projectName} codeAffaire={operation?.code || projectName} lots={lots} dce={consultation.dce_documents}
               documentsAffaire={documentsAffaire} onVerser={verserAuDce} />
             <div className="p-5">
               <DceMatrice

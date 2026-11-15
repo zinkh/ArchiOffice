@@ -10,7 +10,7 @@ import {
 import { exporterMarcheDocx, exporterMarchePdf } from '../../lib/actMarcheExport';
 import type { DocumentDce } from '../../lib/dceIndices';
 import { contexteMarche } from '../../lib/marchePieces';
-import { deposerFichierDce, documentDejaVerse, type SpecPieceDce } from '../../lib/dceVersement';
+import { deposerFichierDce, documentDeLaPiece, indiceSuivant, nomFichierDce, type SpecPieceDce } from '../../lib/dceVersement';
 import { genererActeFormulaire, type ActeRempli } from '../../lib/actEngagementForm';
 import { FormulaireNonReconnuError } from '../../lib/actEngagementImport';
 import { lireActeDepuisBuffer } from '../../lib/actEngagementRead';
@@ -186,8 +186,10 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
    * listé dans le tableau d'indices. Déjà versé : nouvelle version, indice suivant.
    */
   /** Dépose un PDF généré et le rattache à sa pièce du DCE (nouvelle version s'il y est déjà). */
-  const verserPdf = async (spec: SpecPieceDce, nomFichier: string, blob: Blob) => {
-    const existant = documentDejaVerse(consultation.dce_documents, documentsAffaire, spec, nomFichier);
+  const verserPdf = async (spec: SpecPieceDce, piece: string, blob: Blob) => {
+    // Nom systématique Code_Pièce-Indice ; l'indice est celui que le serveur donnera à ce versement.
+    const existant = documentDeLaPiece(consultation.dce_documents, documentsAffaire, spec);
+    const nomFichier = nomFichierDce({ code: nomFichierBase, piece, indice: existant ? indiceSuivant(existant.indice) : 'A' });
     const documentId = await deposerFichierDce({ projectId, nomFichier, blob, existantId: existant?.id });
     onVerserAuDce([{ spec, documentId }]);
     setInfoDce(existant
@@ -204,8 +206,9 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
       let fichier: { nom: string; blob: Blob } | null = null;
       await exporterMarchePdf(docs, settings, `${id === 'rc' ? 'Reglement_consultation' : 'CCAP'}_${nomFichierBase}`, (nom, blob) => { fichier = { nom, blob }; });
       if (!fichier) throw new Error('PDF non généré');
-      const { nom, blob } = fichier as { nom: string; blob: Blob };
-      await verserPdf({ typeDoc: id === 'rc' ? 'RC' : 'CCAP', nom: id === 'rc' ? 'Règlement de la Consultation' : 'CCAP', unique: true }, nom, blob);
+      const { blob } = fichier as { nom: string; blob: Blob };
+      await verserPdf({ typeDoc: id === 'rc' ? 'RC' : 'CCAP', nom: id === 'rc' ? 'Règlement de la Consultation' : 'CCAP', unique: true },
+        id === 'rc' ? 'RC' : 'CCAP', blob);
     } catch (e: any) {
       console.error(e);
       setErreur(e?.message || 'Le versement au DCE a échoué.');
@@ -224,7 +227,7 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
         tvaPct, settings,
       );
       await verserPdf({ typeDoc: 'Autre', nom: "Acte d'engagement (formulaire)", unique: false },
-        `Acte_engagement_formulaire_${nomFichierBase.replace(/[^\p{L}\p{N}]+/gu, '_')}.pdf`, new Blob([data], { type: 'application/pdf' }));
+        'Acte-engagement', new Blob([data], { type: 'application/pdf' }));
     } catch (e: any) {
       console.error(e);
       setErreur(e?.message || 'Le versement au DCE a échoué.');

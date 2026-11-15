@@ -39,6 +39,50 @@ export function documentDejaVerse(
   return documents.find(d => ids.has(d.id) && d.name === nomFichier);
 }
 
+/**
+ * Document déjà rattaché à cette pièce du DCE (le plus récemment rattaché qui existe encore dans l'affaire).
+ * Le nom de fichier portant l'indice (`..._B.pdf`), il change à chaque version : la pièce, pas le nom, dit
+ * quel document reçoit la nouvelle version.
+ */
+export function documentDeLaPiece(
+  dce: EntreePieceDce[], documents: DocumentDce[], spec: SpecPieceDce,
+): DocumentDce | undefined {
+  const ids = dce.filter(d => memeEntree(d, spec)).flatMap(d => d.document_ids ?? []);
+  const parId = new Map(documents.map(d => [d.id, d]));
+  for (let i = ids.length - 1; i >= 0; i--) {
+    const d = parId.get(ids[i]);
+    if (d) return d;
+  }
+  return undefined;
+}
+
+/** Indice de la version suivante d'un document : A, B, C... (A pour un premier versement). Même règle que le serveur. */
+export function indiceSuivant(indiceActuel?: string | null): string {
+  const c = (indiceActuel ?? '').trim().toUpperCase().charAt(0);
+  return c >= 'A' && c < 'Z' ? String.fromCharCode(c.charCodeAt(0) + 1) : 'A';
+}
+
+/** Un morceau de nom de fichier : sans accents ni espaces, les mots séparés par « - ». */
+const morceau = (s: string): string =>
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+/**
+ * Nom systématique d'un fichier du DCE : `Code_Pièce_NumLot-NomLot-Indice.pdf`
+ * (« 2419_CCTP_05-Menuiseries-interieures-B.pdf »). Une pièce commune à tous les lots
+ * (RC, CCAP, acte d'engagement) n'a pas de lot : `Code_Pièce-Indice.pdf`.
+ * Le type de pièce est dans le nom : le CCTP et le DPGF d'un même lot ne se confondent pas au téléchargement.
+ */
+export function nomFichierDce(opts: {
+  code: string; piece: string; lot?: { numero: string; titre: string }; indice: string; ext?: string;
+}): string {
+  const code = morceau(opts.code) || 'Affaire';
+  const piece = morceau(opts.piece);
+  const indice = morceau(opts.indice);
+  const lot = opts.lot ? morceau(`${opts.lot.numero} ${opts.lot.titre}`) : '';
+  const corps = lot ? `${code}_${piece}_${lot}-${indice}` : `${code}_${piece}-${indice}`;
+  return `${corps}.${opts.ext ?? 'pdf'}`;
+}
+
 /** Rattache les documents versés à leur pièce du DCE, créée si elle n'existe pas. Rend un nouveau tableau. */
 export function rattacherPieces<D extends EntreePieceDce>(
   dce: D[], versements: Array<{ spec: SpecPieceDce; documentId: string }>, nouvelId: () => string = () => crypto.randomUUID(),
