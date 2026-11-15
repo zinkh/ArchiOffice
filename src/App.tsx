@@ -618,12 +618,26 @@ function ProtectedLayout() {
     if (e.target === el && (el.scrollTop !== 0 || el.scrollLeft !== 0)) { el.scrollTop = 0; el.scrollLeft = 0; }
   };
 
+  // Même garde-fou pour TOUS les conteneurs `overflow: hidden` en dessous (panneau de la fiche affaire, onglet PRO,
+  // éditeurs) : un `scrollIntoView` les décale aussi, le contenu « monte » sous la barre d'outils et laisse un vide en
+  // bas. Les événements de défilement ne remontent pas : on les écoute en phase de capture. Seuls les conteneurs
+  // réellement `hidden` sont ramenés à zéro ; un conteneur `auto` ou `scroll` défile normalement.
+  const resetHiddenOverflowScroll = (e: React.UIEvent<HTMLElement>) => {
+    const el = e.target;
+    if (!(el instanceof HTMLElement) || el === e.currentTarget) return;
+    if (el.scrollTop === 0 && el.scrollLeft === 0) return;
+    const { overflowX, overflowY } = window.getComputedStyle(el);
+    const masque = (v: string) => v === 'hidden' || v === 'clip';
+    if (masque(overflowX) && masque(overflowY)) { el.scrollTop = 0; el.scrollLeft = 0; }
+  };
+
   return (
     <AgentChatProvider>
     <div
       className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-dvh lg:h-dvh lg:overflow-hidden' : 'min-h-dvh')}
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
       onScroll={isFullBleedRoute ? resetStrayScroll : undefined}
+      onScrollCapture={isFullBleedRoute ? resetHiddenOverflowScroll : undefined}
     >
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 lg:min-h-0">
