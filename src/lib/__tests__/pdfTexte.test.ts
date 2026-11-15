@@ -16,6 +16,12 @@ describe('textePdf', () => {
     expect(textePdf(s)).toBe(s);
   });
 
+  it('garde les symboles de Liberation Sans quand cette police est embarquée', () => {
+    expect(textePdf('Uw ≤ 1,3 et ≥ 65 cm, ≈ 2 → ok', { liberation: true })).toBe('Uw ≤ 1,3 et ≥ 65 cm, ≈ 2 → ok');
+    // ∅ n'est pas dans la police : repli sur Ø (Latin-1).
+    expect(textePdf('∅ 100', { liberation: true })).toBe('Ø 100');
+  });
+
   it('supprime ce qui reste illisible sans lever d’erreur', () => {
     expect(textePdf('a😀b')).toBe('ab');
   });

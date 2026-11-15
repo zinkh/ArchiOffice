@@ -20,6 +20,7 @@ import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } fr
 import { ORIENTATION_CCTP, orientationPdf, suffixeLot, type Orientation } from './exportOrientation';
 import { mettreEnLignes, paragraphesRiches, type StyleRiche } from './cctpRichText';
 import { textePdf } from './pdfTexte';
+import { installerLiberationSans, POLICE_LIBERATION } from './pdfPolice';
 
 /** Fiches rappelées sous l'article : les photos (descriptions pour l'IA) n'en sont pas. */
 const fichesRappelees = (l: Ligne): string[] => (l.fichesTechniques ?? [])
@@ -178,6 +179,9 @@ function dimensionsImage(img: ImageChargee, largeurMax: number, hauteurMax: numb
 export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise<void> {
   const [{ default: JsPDF }, logo] = await Promise.all([import('jspdf'), loadLogoDataUrl(opts.settings.logoUrl)]);
   const pdf = new JsPDF({ orientation: orientationPdf(opts.orientation ?? ORIENTATION_CCTP), unit: 'mm', format: 'a4' });
+  // Liberation Sans (≤, ≥, ≈, ≠, →...) ; à défaut Helvetica, et textePdf remplace alors ces symboles.
+  const liberation = await installerLiberationSans(pdf);
+  const famille = liberation ? POLICE_LIBERATION : 'helvetica';
   const margin = 18;
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
@@ -195,14 +199,14 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   const basDePage = pageH - 18;
   const place = (h: number) => { if (y + h > basDePage) { pdf.addPage(); y = Math.max(ENTETE_REDUIT_BAS, margin) + 2; } };
 
-  pdf.setFont('helvetica', 'bold');
+  pdf.setFont(famille,'bold');
   pdf.setFontSize(16);
   pdf.setTextColor(...GRIS_TEXTE);
   pdf.text(SOUS_TITRE, margin, y + 4);
   y += 10;
   const portee = [opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ');
   if (portee) {
-    pdf.setFont('helvetica', 'normal');
+    pdf.setFont(famille,'normal');
     pdf.setFontSize(11);
     pdf.setTextColor(...GRIS_DOUX);
     pdf.text(portee, margin, y + 2);
@@ -210,11 +214,11 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   }
 
   const ecrire = (valeur: string, taille: number, style: 'normal' | 'bold' | 'italic', couleur: [number, number, number], retrait = 0, apres = 1.5) => {
-    pdf.setFont('helvetica', style);
+    pdf.setFont(famille,style);
     pdf.setFontSize(taille);
     pdf.setTextColor(...couleur);
     const hLigne = taille * 0.42;
-    for (const paragraphe of textePdf(valeur).split(/\n/)) {
+    for (const paragraphe of textePdf(valeur, { liberation }).split(/\n/)) {
       const lignes = pdf.splitTextToSize(paragraphe || ' ', largeur - retrait) as string[];
       for (const ligne of lignes) {
         place(hLigne);
@@ -230,19 +234,19 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   const ecrireRiche = (valeur: string, taille: number, couleur: [number, number, number], retrait = 0, apres = 1.5) => {
     const police = (s: StyleRiche) => (s.b && s.i ? 'bolditalic' : s.b ? 'bold' : s.i ? 'italic' : 'normal');
     const mesurer = (t: string, s: StyleRiche) => {
-      pdf.setFont('helvetica', police(s));
+      pdf.setFont(famille,police(s));
       pdf.setFontSize(taille);
       return pdf.getTextWidth(t);
     };
     const hLigne = taille * 0.42;
-    for (const paragraphe of paragraphesRiches(textePdf(valeur))) {
+    for (const paragraphe of paragraphesRiches(textePdf(valeur, { liberation }))) {
       for (const ligne of mettreEnLignes(paragraphe, largeur - retrait, mesurer)) {
         place(hLigne);
         const base = y + hLigne * 0.8;
         let x = margin + retrait;
         for (const m of ligne) {
           const rgb = hexVersRgb(m.color, couleur);
-          pdf.setFont('helvetica', police(m));
+          pdf.setFont(famille,police(m));
           pdf.setFontSize(taille);
           pdf.setTextColor(...rgb);
           pdf.text(m.text, x, base);
