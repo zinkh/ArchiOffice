@@ -39,6 +39,12 @@ export interface LetterheadOptions {
    * l'écran ; `null` : l'en-tête reste celui du cabinet.
    */
   mandataire?: CotraitantIdentity | null;
+  /**
+   * Texte du pied de page, à la place de la ligne du cabinet (nom, adresse,
+   * coordonnées, SIRET). Une fonction le donne page par page ; une chaîne vide
+   * ne laisse que la pagination.
+   */
+  piedDePage?: string | ((page: number) => string);
 }
 
 // ── Groupement actif ─────────────────────────────────────────────────────────
@@ -134,6 +140,18 @@ export function agencyFooterLine(s: AgencySettings): string {
     s.oaNumber ? `OA ${s.oaNumber}` : '',
     s.vatNumber ? `TVA ${s.vatNumber}` : '',
   ].filter(Boolean).join('  ·  ');
+}
+
+/**
+ * Pied de page d'un document de groupement : l'identité du mandataire (nom, adresse,
+ * contact, SIRET) quand c'est un cotraitant, sinon la ligne du cabinet. La TVA et le
+ * numéro d'ordre du cabinet ne sont jamais mêlés à ceux d'un autre.
+ */
+export function piedDePageMandataire(s: AgencySettings): string {
+  const m = mandataireActif;
+  if (!m) return agencyFooterLine(s);
+  return [m.titre, m.adresse, m.telephone ? `Tél : ${m.telephone}` : '', m.email, m.siret ? `SIRET ${m.siret}` : '']
+    .filter(Boolean).join('  ·  ');
 }
 
 /**
@@ -497,10 +515,11 @@ export async function loadGroupementHeader(
 export function drawAgencyFooters(pdf: any, settings: AgencySettings, opts: LetterheadOptions): void {
   const margin = opts.margin ?? 14;
   const total = pdf.internal.getNumberOfPages();
-  const ligne = agencyFooterLine(settings);
+  const ligneCabinet = agencyFooterLine(settings);
 
   for (let p = 1; p <= total; p++) {
     pdf.setPage(p);
+    const ligne = typeof opts.piedDePage === 'function' ? opts.piedDePage(p) : (opts.piedDePage ?? ligneCabinet);
     // Taille lue page par page, APRÈS setPage : un document qui mêle portrait et paysage (annexe de plans) a des
     // pages de tailles différentes. Lue une seule fois avant la boucle, c'était celle de la dernière page, et le
     // pied des pages portrait se dessinait à 210 mm au lieu de 297 mm, en plein milieu du contenu.

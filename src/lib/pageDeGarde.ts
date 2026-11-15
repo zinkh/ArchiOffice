@@ -4,7 +4,7 @@
 // l'indice en bas à droite. Charte sobre : noir, blanc, nuances de gris.
 // Partagée par le PDF et le Word ; les pages suivantes portent l'en-tête réduit.
 import type { AgencySettings } from './proposalExport';
-import { drawPartnerLogos, resolvePartnerLogos, type LogoImage } from './pdfLetterhead';
+import { drawPartnerLogos, enteteDe, type LogoImage } from './pdfLetterhead';
 
 export interface PhotoCouverture {
   dataUrl: string;
@@ -117,13 +117,17 @@ export function drawPageDeGardePdf(
   const largeur = pageW - margin * 2;
   let y = margin;
 
-  // Identité du cabinet.
+  // Identité du mandataire du groupement (logo et coordonnées) quand ce n'est pas
+  // le cabinet ; le cabinet rejoint alors le bandeau « En groupement avec ».
+  const entete = enteteDe(settings, { logo });
+  settings = entete.settings;
   let textX = margin;
-  if (logo) {
+  if (entete.logo) {
+    const logoEntete = entete.logo;
     const h = 16;
-    const w = (logo.width / logo.height) * h;
+    const w = (logoEntete.width / logoEntete.height) * h;
     try {
-      pdf.addImage(logo.dataUrl, logo.format, margin, y, w, h);
+      pdf.addImage(logoEntete.dataUrl, logoEntete.format, margin, y, w, h);
       textX = margin + w + 5;
     } catch { /* un logo illisible ne doit pas emporter l'export */ }
   }
@@ -142,7 +146,7 @@ export function drawPageDeGardePdf(
   pdf.setDrawColor(...GRIS_FILET);
   pdf.setLineWidth(0.4);
   pdf.line(margin, y, pageW - margin, y);
-  const bandeau = drawPartnerLogos(pdf, resolvePartnerLogos(), margin, y + 3);
+  const bandeau = drawPartnerLogos(pdf, entete.partners, margin, y + 3);
   y = bandeau ?? y;
 
   // Titre de l'opération et du document.
