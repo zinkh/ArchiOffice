@@ -36,6 +36,7 @@ import type { AgencySettings } from '../lib/proposalExport';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Section } from './chantier/Section';
 import CroquisPanel from './croquis/CroquisPanel';
+import MeetingRecordingPanel from './MeetingRecordingPanel';
 import { DraftInput, parseDays } from './chantier/fields';
 import { upsertById } from '../lib/observationsLocal';
 import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
@@ -136,6 +137,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
 
   const [reports, setReports] = useState<SiteReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const selectedReportIdRef = useRef(selectedReportId);
+  selectedReportIdRef.current = selectedReportId;
   const [reportObservations, setReportObservations] = useState<Observation[]>([]);
   const [allObservations, setAllObservations] = useState<Observation[]>([]);
   const [reportNotes, setReportNotes] = useState<SiteReportNote[]>([]);
@@ -1635,6 +1638,19 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   )}
 
                   {/* Rubriques personnalisées (corps administratif du CR) */}
+                  <MeetingRecordingPanel kind="siteReport" parentId={selectedReport.id} onInsert={async (text, id) => {
+                    const report = selectedReport;
+                    const body = {
+                      id, category: 'Notes de réunion', text, note_number: reportNotes.length + 1,
+                      issue_date: report.date, status: 'open' as const,
+                    };
+                    const { queued, data } = await queuedJsonRequest<SiteReportNote>({
+                      entity: 'siteReportNote', id, method: 'POST', url: `/api/reports/${report.id}/notes`, body,
+                    });
+                    const created: SiteReportNote = queued || !data ? { ...body, report_id: report.id } : data;
+                    if (selectedReportIdRef.current === report.id) setReportNotes(prev => [...prev.filter(n => n.id !== id), created]);
+                    db.siteReportNotesCache.put(created).catch(() => {});
+                  }} />
                   <Section id="rubriques"
                     title="Rubriques"
                     icon={IconListDetails}
