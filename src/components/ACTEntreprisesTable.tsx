@@ -25,6 +25,7 @@ import { documentsAJoindre, lignesIndices, piecesDeEntreprise, type DocumentDce 
 import { genererTableauIndicesPdf } from '../lib/dceIndicesPdf';
 import DossierPartageDialog, { type NouveauPartage } from './act/DossierPartageDialog';
 import { ENTETE_DOSSIER_PARTAGE, ENTETE_DOSSIER_PARTAGE_LIENS, type ElementDossierPartage } from '../lib/dossierPartageMail';
+import { bilanVisite, libelleVisite, type CreneauVisite, type PresenceVisite } from '../lib/actVisites';
 
 export type EntrepriseRow = EntrepriseSuivi & { corps_etat_codes?: string[] };
 
@@ -58,6 +59,8 @@ interface Props {
   /** Un fichier vient d'être déposé dans les documents de l'affaire : relire la liste. */
   onDocumentDepose?: () => void;
   entreprises: EntrepriseRow[];
+  creneauxVisite?: CreneauVisite[];
+  onChangeCreneaux?: (next: CreneauVisite[]) => void;
   onChange: (next: EntrepriseRow[]) => void;
   dcePieces: PieceDce[];
   /** Documents de l'affaire (fichiers et indices des pièces du DCE). */
@@ -279,6 +282,7 @@ export default function ACTEntreprisesTable({
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
   depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null, genererPiecesMarche,
   dcePartages = [], onAjouterPartage, onRetirerPartage, onDocumentDepose,
+  creneauxVisite = [], onChangeCreneaux,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -287,6 +291,8 @@ export default function ACTEntreprisesTable({
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [suggestLotId, setSuggestLotId] = useState<string | null>(null);
   const [mailPour, setMailPour] = useState<string | null>(null);
+  const [nouveauCreneau, setNouveauCreneau] = useState('');
+  const [erreurCreneau, setErreurCreneau] = useState('');
 
   const [clignote, setClignote] = useState<string | null>(null);
   useEffect(() => {
@@ -463,6 +469,22 @@ export default function ACTEntreprisesTable({
     );
   };
 
+  const champVisite = (e: EntrepriseRow) => (
+    <div className="space-y-1.5 min-w-[180px]">
+      <select className={cn(FIELD, 'w-full')} aria-label={`Rendez-vous de visite de ${e.nom || "l'entreprise"}`}
+        value={e.visite_creneau_id || ''}
+        onChange={event => patch(e.id, { visite_creneau_id: event.target.value || undefined, visite_presence: event.target.value ? 'prevue' : undefined })}>
+        <option value="">Aucun rendez-vous</option>
+        {e.visite_creneau_id && !creneauxVisite.some(c => c.id === e.visite_creneau_id) && <option value={e.visite_creneau_id}>Créneau indisponible</option>}
+        {[...creneauxVisite].sort((a, b) => a.date_heure.localeCompare(b.date_heure)).map(c => <option key={c.id} value={c.id}>{libelleVisite(c.date_heure)}</option>)}
+      </select>
+      {e.visite_creneau_id && <select className={cn(FIELD, 'w-full')} aria-label={`Présence à la visite de ${e.nom || "l'entreprise"}`}
+        value={e.visite_presence || 'prevue'} onChange={event => patch(e.id, { visite_presence: event.target.value as PresenceVisite })}>
+        <option value="prevue">Prévue</option><option value="confirmee">Confirmée</option><option value="presente">Présente</option><option value="absente">Absente</option>
+      </select>}
+    </div>
+  );
+
   const champStatut = (e: EntrepriseRow) => {
     const statut = statutEntreprise(e, today);
     const coches = [e.envoyer_dce && 'envoyer_dce', e.ne_repond_pas && 'ne_repond_pas'].filter((x): x is string => !!x);
@@ -521,6 +543,37 @@ export default function ACTEntreprisesTable({
 
   return (
     <div>
+      <section className="px-5 py-4 border-b border-[var(--tblr-border)] space-y-3" aria-label="Créneaux de visites">
+        <div><h3 className="font-semibold text-sm">Créneaux de visites</h3>
+          <p className="text-xs text-[var(--tblr-muted)] mt-1">Créez les rendez-vous, puis affectez les entreprises dans le tableau. Les présences sont comptées après pointage.</p></div>
+        <form className="flex flex-wrap items-end gap-2" onSubmit={event => {
+          event.preventDefault();
+          if (!nouveauCreneau || Number.isNaN(new Date(nouveauCreneau).getTime())) { setErreurCreneau('Indiquez une date et une heure valides.'); return; }
+          if (creneauxVisite.some(c => c.date_heure === nouveauCreneau)) { setErreurCreneau('Ce créneau existe déjà.'); return; }
+          onChangeCreneaux?.([...creneauxVisite, { id: crypto.randomUUID(), date_heure: nouveauCreneau }]);
+          setNouveauCreneau(''); setErreurCreneau('');
+        }}>
+          <label className="text-xs font-medium">Date et heure de visite
+            <input className={cn(FIELD, 'block mt-1 min-h-10')} type="datetime-local" required value={nouveauCreneau} onChange={e => setNouveauCreneau(e.target.value)} />
+          </label>
+          <button type="submit" disabled={!onChangeCreneaux} className="min-h-10 px-3 rounded-lg border border-[var(--tblr-border)] text-sm font-medium">Ajouter le créneau</button>
+        </form>
+        {erreurCreneau && <p role="alert" className="text-sm text-red-600">{erreurCreneau}</p>}
+        {creneauxVisite.length === 0 ? <p className="text-xs text-[var(--tblr-muted)]">Aucun créneau défini.</p> :
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{[...creneauxVisite].sort((a,b) => a.date_heure.localeCompare(b.date_heure)).map(c => {
+            const bilan = bilanVisite(c.id, entreprises, lots);
+            return <div key={c.id} className="rounded-lg border border-[var(--tblr-border)] p-3 text-xs space-y-1.5">
+              <div className="flex items-start justify-between gap-2"><strong>{libelleVisite(c.date_heure)}</strong>
+                <button type="button" className="text-red-600 underline" onClick={() => {
+                  if (bilan.inscrites) { setErreurCreneau('Réaffectez ou retirez les entreprises inscrites avant de supprimer ce créneau.'); return; }
+                  onChangeCreneaux?.(creneauxVisite.filter(x => x.id !== c.id)); setErreurCreneau('');
+                }} aria-label={`Supprimer le créneau du ${libelleVisite(c.date_heure)}`}>Supprimer</button></div>
+              <p>{bilan.inscrites} entreprise{bilan.inscrites > 1 ? 's' : ''} inscrite{bilan.inscrites > 1 ? 's' : ''} · {bilan.presentes} présente{bilan.presentes > 1 ? 's' : ''}</p>
+              {bilan.lots.map(({ lot, inscrites, presentes }) => <p key={lot.id}>Lot {lot.lot_number} — {lot.lot_title} : {presentes} présente{presentes > 1 ? 's' : ''} / {inscrites} inscrite{inscrites > 1 ? 's' : ''}</p>)}
+              {bilan.sansLot > 0 && <p>{bilan.sansLot} sans lot assigné</p>}
+            </div>;
+          })}</div>}
+      </section>
       {/* Synthèse du suivi */}
       {!aucuneEntreprise && (
         <div className="px-5 py-3 border-b border-[var(--tblr-border)] space-y-2">
@@ -724,6 +777,7 @@ export default function ACTEntreprisesTable({
                 <th className={cn(TH, 'min-w-[200px]')}>Corps d'état</th>
                 <th className={cn(TH, 'min-w-[200px]')}>Lots assignés</th>
                 <th className={cn(TH, 'min-w-[220px]')}>Suivi</th>
+                <th className={cn(TH, 'min-w-[200px]')}>Rendez-vous de visite</th>
                 <th className={cn(TH, 'min-w-[130px]')}>Statut</th>
                 <th className="w-20"></th>
               </tr>
@@ -733,7 +787,7 @@ export default function ACTEntreprisesTable({
                 <React.Fragment key={groupe.key}>
                   {!plat && (
                     <tr className="bg-zinc-100 dark:bg-zinc-800">
-                      <td colSpan={nbCols - 1} className="px-4 py-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                      <td colSpan={nbCols} className="px-4 py-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
                         {groupe.libelle} <span className="font-bold text-[var(--tblr-muted)]">· {groupe.entreprises.length}</span>
                       </td>
                     </tr>
@@ -749,6 +803,7 @@ export default function ACTEntreprisesTable({
                       <td className="px-3 py-2.5">{champCorps(e)}</td>
                       <td className="px-3 py-2.5">{champLots(e)}</td>
                       <td className="px-3 py-2.5">{champDates(e)}</td>
+                      <td className="px-3 py-2.5">{champVisite(e)}</td>
                       <td className="px-3 py-2.5 pt-3.5">{champStatut(e)}</td>
                       <td className="px-3 py-2.5 text-right">{boutonsLigne(e)}</td>
                     </tr>
@@ -756,7 +811,7 @@ export default function ACTEntreprisesTable({
                 </React.Fragment>
               ))}
               {groupes.length === 0 && (
-                <tr><td colSpan={nbCols - 1} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">
+                <tr><td colSpan={nbCols} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">
                   {aucuneEntreprise ? 'Aucune entreprise consultée.' : 'Aucune entreprise ne correspond aux filtres.'}
                 </td></tr>
               )}
@@ -787,6 +842,7 @@ export default function ACTEntreprisesTable({
                       {champLots(e)}
                     </div>
                     {champDates(e)}
+                    <div><span className="text-xs font-semibold">Rendez-vous de visite</span>{champVisite(e)}</div>
                   </li>
                 ))}
               </ul>

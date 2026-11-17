@@ -90,6 +90,8 @@ interface EntrepriseConsultee {
   relance_le?: string;
   offre_recue_le?: string;
   ne_repond_pas?: boolean;
+  visite_creneau_id?: string;
+  visite_presence?: import('../lib/actVisites').PresenceVisite;
 }
 
 interface CritereNotation {
@@ -160,6 +162,7 @@ interface ComparatifLot {
 interface Consultation extends DonneesNegociation {
   dce_documents: DCEDocument[];
   entreprises: EntrepriseConsultee[];
+  creneaux_visite?: import('../lib/actVisites').CreneauVisite[];
   criteres: CritereNotation[];
   pieces_admin: PieceAdmin[];
   questions: QuestionReponse[];
@@ -972,14 +975,14 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => settings && exportEntreprisesConsulteesToExcel(consultation.entreprises, lots, settings, projectName)}
+                  onClick={() => settings && exportEntreprisesConsulteesToExcel(consultation.entreprises, lots, settings, projectName, consultation.creneaux_visite)}
                   disabled={!settings}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
                 >
                   <IconDownload size={13} /> Excel
                 </button>
                 <button
-                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, lots, settings, projectName)}
+                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, lots, settings, projectName, consultation.creneaux_visite)}
                   disabled={!settings}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition"
                 >
@@ -1028,6 +1031,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               depotRecuLe={depot.depotRecuLe}
               onInviterDepot={e => setInviterPour(e.id)}
               entreprises={consultation.entreprises}
+              creneauxVisite={consultation.creneaux_visite || []}
+              onChangeCreneaux={creneaux_visite => update({ ...consultation, creneaux_visite })}
               onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
               dcePieces={dcePieces}
               dcePartages={dcePartages}

@@ -15,6 +15,8 @@ export interface EntrepriseSuivi {
   relance_le?: string;
   offre_recue_le?: string;
   ne_repond_pas?: boolean;
+  visite_creneau_id?: string;
+  visite_presence?: import('./actVisites').PresenceVisite;
   /**
    * Date d'une remise faite sur l'espace de dépôt et pas encore traitée. Jamais
    * enregistrée avec la consultation : elle se déduit des remises reçues
