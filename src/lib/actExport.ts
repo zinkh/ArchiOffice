@@ -4,6 +4,7 @@
 // consulter. Le PDF et l'Excel ont la même mise en page (en-tête du cabinet,
 // tableau en gris, pied « P1|2 ») : l'Excel passe par xlsxLetterhead.ts.
 import type { AgencySettings } from './proposalExport';
+import { libelleVisite, type CreneauVisite, type PresenceVisite } from './actVisites';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import {
   ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO,
@@ -18,6 +19,8 @@ export interface EntrepriseConsulteeExport {
   relance_le?: string;
   offre_recue_le?: string;
   ne_repond_pas?: boolean;
+  visite_creneau_id?: string;
+  visite_presence?: PresenceVisite;
 }
 
 export interface LotRef {
@@ -70,9 +73,9 @@ export function groupByLot<T extends { lots_ids: string[] }>(
   return groups;
 }
 
-const ENTETES_ENTREPRISES = ['Entreprise', 'Email', 'Lots', 'DCE transmis le', 'Relance', 'Offre reçue le', 'Ne répond pas'];
+const ENTETES_ENTREPRISES = ['Entreprise', 'Email', 'Lots', 'DCE transmis le', 'Relance', 'Offre reçue le', 'Ne répond pas', 'Visite', 'Présence'];
 
-const ligneEntreprise = (e: EntrepriseConsulteeExport, lots: LotRef[]) => [
+const ligneEntreprise = (e: EntrepriseConsulteeExport, lots: LotRef[], creneaux: CreneauVisite[]) => [
   e.nom,
   e.email || '',
   lotsLabel(e.lots_ids, lots),
@@ -80,6 +83,8 @@ const ligneEntreprise = (e: EntrepriseConsulteeExport, lots: LotRef[]) => [
   fmtDate(e.relance_le),
   fmtDate(e.offre_recue_le),
   e.ne_repond_pas ? '✗' : '',
+  creneaux.find(c => c.id === e.visite_creneau_id)?.date_heure ? libelleVisite(creneaux.find(c => c.id === e.visite_creneau_id)!.date_heure) : '',
+  e.visite_creneau_id ? ({ prevue: 'Prévue', confirmee: 'Confirmée', presente: 'Présente', absente: 'Absente' } as const)[e.visite_presence || 'prevue'] : '',
 ];
 
 export async function exportEntreprisesConsulteesToExcel(
@@ -87,6 +92,7 @@ export async function exportEntreprisesConsulteesToExcel(
   lots: LotRef[],
   settings: AgencySettings,
   projectName: string,
+  creneaux: CreneauVisite[] = [],
 ): Promise<void> {
   const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
   const feuille = ajouterFeuille(wb, {
@@ -102,11 +108,13 @@ export async function exportEntreprisesConsulteesToExcel(
       { header: ENTETES_ENTREPRISES[4], width: 14, align: 'center' },
       { header: ENTETES_ENTREPRISES[5], width: 16, align: 'center' },
       { header: ENTETES_ENTREPRISES[6], width: 14, align: 'center' },
+      { header: ENTETES_ENTREPRISES[7], width: 22, align: 'center' },
+      { header: ENTETES_ENTREPRISES[8], width: 14, align: 'center' },
     ],
   });
   for (const groupe of groupByLot(entreprises, lots)) {
     feuille.groupe(groupe.libelle);
-    for (const e of groupe.entreprises) feuille.ligne(ligneEntreprise(e, lots));
+    for (const e of groupe.entreprises) feuille.ligne(ligneEntreprise(e, lots, creneaux));
   }
   await enregistrerClasseur(wb, `Entreprises_consultees_${projectName.replace(/\s+/g, '_')}.xlsx`);
 }
@@ -116,6 +124,7 @@ export async function exportEntreprisesConsulteesToPDF(
   lots: LotRef[],
   settings: AgencySettings,
   projectName: string,
+  creneaux: CreneauVisite[] = [],
 ): Promise<void> {
   const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
@@ -135,7 +144,7 @@ export async function exportEntreprisesConsulteesToPDF(
   const body: any[] = [];
   for (const groupe of groupByLot(entreprises, lots)) {
     body.push([{ content: groupe.libelle.toUpperCase(), colSpan: ENTETES_ENTREPRISES.length, styles: { fillColor: [225, 225, 225], textColor: GRIS_TEXTE, fontStyle: 'bold', fontSize: 8 } }]);
-    for (const e of groupe.entreprises) body.push(ligneEntreprise(e, lots));
+    for (const e of groupe.entreprises) body.push(ligneEntreprise(e, lots, creneaux));
   }
 
   autoTable(doc, {
