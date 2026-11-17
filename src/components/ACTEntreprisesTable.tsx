@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  IconSearch, IconSend, IconLink, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus,
+  IconSearch, IconSend, IconLink, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus, IconCalendarEvent, IconPhone,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { groupByLot } from '../lib/actExport';
@@ -8,7 +8,7 @@ import {
   type EntrepriseSuivi, type StatutEntreprise, type FiltresEntreprises,
   STATUT_LABELS, STATUT_ORDER, SANS_LOT, MIN_ENTREPRISES_PAR_LOT, FILTRES_VIDES,
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  filtresActifs, nomContact, todayIso, listeAPlat, type Regroupement, destinatairesEntreprise } from '../lib/actEntreprises';
+  filtresActifs, nomContact, todayIso, listeAPlat, type Regroupement, destinatairesEntreprise, telephoneEntreprise } from '../lib/actEntreprises';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useMailAccounts } from '../hooks/useMailAccounts';
 import type { Contact, ProjectLot } from '../types';
@@ -66,6 +66,7 @@ interface Props {
   /** Documents de l'affaire (fichiers et indices des pièces du DCE). */
   documentsAffaire?: DocumentDce[];
   entrepriseContacts: Contact[];
+  contactsTelephone?: Parameters<typeof telephoneEntreprise>[1];
   corpsEtatOptions: MultiSelectOption[];
   lotOptions: MultiSelectOption[];
   onChangeCorpsEtat: (e: EntrepriseRow, next: string[]) => void;
@@ -283,6 +284,7 @@ export default function ACTEntreprisesTable({
   depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null, genererPiecesMarche,
   dcePartages = [], onAjouterPartage, onRetirerPartage, onDocumentDepose,
   creneauxVisite = [], onChangeCreneaux,
+  contactsTelephone = entrepriseContacts,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -291,6 +293,9 @@ export default function ACTEntreprisesTable({
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [suggestLotId, setSuggestLotId] = useState<string | null>(null);
   const [mailPour, setMailPour] = useState<string | null>(null);
+  const [visitePour, setVisitePour] = useState<string | null>(null);
+  const boutonVisiteActif = useRef<HTMLButtonElement | null>(null);
+  const fermerVisite = () => { setVisitePour(null); requestAnimationFrame(() => boutonVisiteActif.current?.focus()); };
   const [nouveauCreneau, setNouveauCreneau] = useState('');
   const [erreurCreneau, setErreurCreneau] = useState('');
 
@@ -406,14 +411,17 @@ export default function ACTEntreprisesTable({
         onCreate={name => onCreateContact(e.id, name)}
         onEditContact={c => window.open(`/contacts?open=${encodeURIComponent(c.id)}`, '_blank', 'noopener,noreferrer')}
       />
+      <div className="flex flex-wrap items-center gap-x-2">
       <input
-        className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
+        className="mt-1 min-w-[9rem] flex-1 text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
         type="email" aria-label="Email de l'entreprise"
         placeholder="email@entreprise.fr" value={e.email || ''}
         onChange={ev => patch(e.id, { email: ev.target.value })}
         onFocus={() => entrerAdresses(e)}
         onBlur={() => quitterAdresses(e)}
       />
+      {telephoneEntreprise(e, contactsTelephone) && <a className="inline-flex items-center gap-1 text-[0.6875rem] text-[var(--tblr-muted)] hover:text-blue-600 whitespace-nowrap" href={`tel:${telephoneEntreprise(e, contactsTelephone).replace(/[^+0-9]/g, '')}`} title="Appeler l’entreprise"><IconPhone size={12} aria-hidden="true" />{telephoneEntreprise(e, contactsTelephone)}</a>}
+      </div>
       <input
         className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
         type="text" aria-label="Autres adresses e-mail de l'entreprise"
@@ -470,7 +478,7 @@ export default function ACTEntreprisesTable({
   };
 
   const champVisite = (e: EntrepriseRow) => (
-    <div className="space-y-1.5 min-w-[180px]">
+    <div className="space-y-1.5">
       <select className={cn(FIELD, 'w-full')} aria-label={`Rendez-vous de visite de ${e.nom || "l'entreprise"}`}
         value={e.visite_creneau_id || ''}
         onChange={event => patch(e.id, { visite_creneau_id: event.target.value || undefined, visite_presence: event.target.value ? 'prevue' : undefined })}>
@@ -484,6 +492,19 @@ export default function ACTEntreprisesTable({
       </select>}
     </div>
   );
+
+  const boutonVisite = (e: EntrepriseRow) => {
+    const creneau = creneauxVisite.find(c => c.id === e.visite_creneau_id);
+    const description = creneau ? libelleVisite(creneau.date_heure) : e.visite_creneau_id ? 'Créneau indisponible' : 'Aucun rendez-vous';
+    const statut = ({ prevue: 'Prévue', confirmee: 'Confirmée', presente: 'Présente', absente: 'Absente' } as const)[e.visite_presence || 'prevue'];
+    return <button type="button" onClick={event => { boutonVisiteActif.current = event.currentTarget; setVisitePour(e.id); }} aria-label={`Gérer la visite de ${e.nom || "l'entreprise"} : ${description}${e.visite_creneau_id ? `, ${statut}` : ''}`}
+      title={`${description}${e.visite_creneau_id ? ` · ${statut}` : ''}`} className={cn('inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--tblr-border)] hover:bg-blue-50 dark:hover:bg-blue-900/20', e.visite_creneau_id ? 'text-blue-700 bg-blue-50 dark:bg-blue-900/20' : 'text-[var(--tblr-muted)]')}>
+      <IconCalendarEvent size={17} aria-hidden="true" /><span className="sr-only">{description}</span>
+    </button>;
+  };
+  const champObservation = (e: EntrepriseRow) => <textarea aria-label={`Observation pour ${e.nom || "l'entreprise"}`} rows={2}
+    className={cn(FIELD, 'w-full min-w-0 resize-y')} placeholder="Ajouter une observation…" value={e.observation || ''}
+    onChange={event => patch(e.id, { observation: event.target.value })} />;
 
   const champStatut = (e: EntrepriseRow) => {
     const statut = statutEntreprise(e, today);
@@ -537,7 +558,7 @@ export default function ACTEntreprisesTable({
 
   // ── Rendu ──────────────────────────────────────────────────────────────────
 
-  const nbCols = 7;
+  const nbCols = 8;
   const aucuneEntreprise = entreprises.length === 0;
   const pctOffres = resume.total ? Math.round((resume.parStatut.offre_recue / resume.total) * 100) : 0;
 
@@ -777,7 +798,8 @@ export default function ACTEntreprisesTable({
                 <th className={cn(TH, 'min-w-[200px]')}>Corps d'état</th>
                 <th className={cn(TH, 'min-w-[200px]')}>Lots assignés</th>
                 <th className={cn(TH, 'min-w-[220px]')}>Suivi</th>
-                <th className={cn(TH, 'min-w-[200px]')}>Rendez-vous de visite</th>
+                <th className={cn(TH, 'w-16')} title="Rendez-vous de visite">Visite</th>
+                <th className={cn(TH, 'min-w-[180px]')}>Observation</th>
                 <th className={cn(TH, 'min-w-[130px]')}>Statut</th>
                 <th className="w-20"></th>
               </tr>
@@ -803,7 +825,8 @@ export default function ACTEntreprisesTable({
                       <td className="px-3 py-2.5">{champCorps(e)}</td>
                       <td className="px-3 py-2.5">{champLots(e)}</td>
                       <td className="px-3 py-2.5">{champDates(e)}</td>
-                      <td className="px-3 py-2.5">{champVisite(e)}</td>
+                      <td className="px-3 py-2.5">{boutonVisite(e)}</td>
+                      <td className="px-3 py-2.5">{champObservation(e)}</td>
                       <td className="px-3 py-2.5 pt-3.5">{champStatut(e)}</td>
                       <td className="px-3 py-2.5 text-right">{boutonsLigne(e)}</td>
                     </tr>
@@ -842,7 +865,8 @@ export default function ACTEntreprisesTable({
                       {champLots(e)}
                     </div>
                     {champDates(e)}
-                    <div><span className="text-xs font-semibold">Rendez-vous de visite</span>{champVisite(e)}</div>
+                    <div className="flex items-center gap-2"><span className="text-xs font-semibold">Rendez-vous de visite</span>{boutonVisite(e)}</div>
+                    <label className="block text-xs font-semibold">Observation{champObservation(e)}</label>
                   </li>
                 ))}
               </ul>
@@ -856,6 +880,24 @@ export default function ACTEntreprisesTable({
         </div>
       )}
 
+      {visitePour && entreprises.find(e => e.id === visitePour) && (() => {
+        const e = entreprises.find(row => row.id === visitePour)!;
+        return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={fermerVisite}>
+          <div role="dialog" aria-modal="true" aria-labelledby="visite-dialog-title" className="w-full max-w-sm rounded-xl bg-[var(--tblr-surface)] p-5 shadow-xl space-y-4" onClick={event => event.stopPropagation()} onKeyDown={event => {
+            if (event.key === 'Escape') { event.preventDefault(); fermerVisite(); }
+            if (event.key === 'Tab') {
+              const fields = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled])')];
+              if (event.shiftKey && document.activeElement === fields[0]) { event.preventDefault(); fields.at(-1)?.focus(); }
+              else if (!event.shiftKey && document.activeElement === fields.at(-1)) { event.preventDefault(); fields[0]?.focus(); }
+            }
+          }}>
+            <div className="flex justify-between gap-3"><h3 id="visite-dialog-title" className="font-semibold">Rendez-vous de visite — {e.nom || 'Entreprise'}</h3><button type="button" autoFocus onClick={fermerVisite} aria-label="Fermer la visite"><IconX size={18} /></button></div>
+            <p className="text-xs text-[var(--tblr-muted)]">Sélectionnez un créneau puis indiquez la présence de l’entreprise.</p>
+            {champVisite(e)}
+            <button type="button" onClick={fermerVisite} className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm">Terminer</button>
+          </div>
+        </div>;
+      })()}
       {entrepriseMail && (
         <DceMailDialog
           projectId={projectId} depotActif={!!depot?.actif} depotIndisponible={depot?.indisponible} genererPiecesMarche={genererPiecesMarche} deadlineAt={depotDeadlineAt}
