@@ -72,6 +72,23 @@ describe('export des entreprises consultées', () => {
     expect(colA).toContain('SANS LOT ASSIGNÉ');
     expect(colA.some(v => v.includes('CORPS'))).toBe(false);
   });
+
+  it('exporte le téléphone de la fiche contact et l’observation sans perdre la visite', async () => {
+    saveAsMock.mockClear();
+    await exportEntreprisesConsulteesToExcel(
+      [{ id: 'e1', nom: 'Entreprise A', contact_id: 'c1', lots_ids: ['l1'], observation: 'Rappeler lundi', visite_creneau_id: 'v1', visite_presence: 'confirmee' }],
+      lots, settings, 'Projet', [{ id: 'v1', date_heure: '2026-11-23T09:30' }], [{ id: 'c1', phone_work: '03 83 00 00 01' }],
+    );
+    const { Workbook } = await import('exceljs');
+    const wb = new Workbook();
+    await wb.xlsx.load(await (saveAsMock.mock.calls[0][0] as Blob).arrayBuffer() as any);
+    const cells: string[] = [];
+    wb.worksheets[0].eachRow(row => row.eachCell(cell => cells.push(String(cell.value ?? ''))));
+    expect(cells).toContain('03 83 00 00 01');
+    expect(cells).toContain('Rappeler lundi');
+    expect(cells).toContain('Confirmée');
+    expect(cells.some(value => value.includes('09:30'))).toBe(true);
+  });
 });
 
 describe('exporterListe', () => {
