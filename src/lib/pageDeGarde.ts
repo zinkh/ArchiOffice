@@ -127,7 +127,7 @@ export function drawPageDeGardePdf(
     const h = 16;
     const w = (logoEntete.width / logoEntete.height) * h;
     try {
-      pdf.addImage(logoEntete.dataUrl, logoEntete.format, margin, y, w, h);
+      pdf.addImage(logoEntete.dataUrl, logoEntete.format, margin, y, w, h, undefined, 'SLOW');
       textX = margin + w + 5;
     } catch { /* un logo illisible ne doit pas emporter l'export */ }
   }

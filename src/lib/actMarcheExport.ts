@@ -29,7 +29,7 @@ function telecharger(blob: Blob, nom: string) {
 /** Un seul PDF pour un ou plusieurs documents : chacun repart sur une nouvelle page. */
 export async function exporterMarchePdf(docs: DocModele[], settings: AgencySettings, nom: string, sortie?: Sortie): Promise<void> {
   const [{ default: jsPDF }, logo] = await Promise.all([import('jspdf'), loadLogoDataUrl(settings.logoUrl)]);
-  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   const largeur = pdf.internal.pageSize.getWidth() - MARGE * 2;
   let y = 0;
   let courant: DocModele = docs[0];

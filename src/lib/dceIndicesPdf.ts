@@ -15,7 +15,7 @@ export async function genererTableauIndicesPdf(opts: {
     import('jspdf'), import('jspdf-autotable'), fetchAgencySettings(),
   ]);
   const logo = await loadLogoDataUrl(settings.logoUrl);
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   const margin = 14;
   const lettrine = {
     title: 'Tableau des indices du DCE', subtitle: opts.projectName, margin, logo,
