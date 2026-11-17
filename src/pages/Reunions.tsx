@@ -38,6 +38,8 @@ import { db } from '../db';
 import { SignedImage } from '../components/SignedImage';
 import { PhotoSourcePicker } from '../components/PhotoSourcePicker';
 import CroquisPanel from '../components/croquis/CroquisPanel';
+import MeetingRecordingPanel from '../components/MeetingRecordingPanel';
+import { appendMeetingNotes } from '../lib/meetingRecordingDrafts';
 import { useImageDrop } from '../hooks/useImageDrop';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
@@ -1474,6 +1476,15 @@ export default function Reunions() {
                 <IconNotes size={16} />
                 Notes de réunion
               </h2>
+              <MeetingRecordingPanel kind="meeting" parentId={selectedMeeting.id} onInsert={async text => {
+                const meeting = selectedMeeting;
+                // A retry after a lost acknowledgement must not append the same draft twice.
+                const value = notesValue.trimEnd().endsWith(text) ? notesValue : appendMeetingNotes(notesValue, text);
+                handleNotesChange(value);
+                if (notesTimerRef.current) { clearTimeout(notesTimerRef.current); notesTimerRef.current = null; }
+                unsavedNotesRef.current = null;
+                await persistNotes(meeting.id, value, meeting);
+              }} />
               <textarea
                 value={notesValue}
                 onChange={e => handleNotesChange(e.target.value)}
