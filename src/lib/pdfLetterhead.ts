@@ -172,16 +172,17 @@ export async function loadLogoDataUrl(
       el.src = logoUrl;
     });
     const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+    const echelle = Math.min(1, 800 / Math.max(img.naturalWidth, img.naturalHeight));
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * echelle));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * echelle));
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     return {
       dataUrl: canvas.toDataURL('image/png'),
       format: 'PNG',
-      width: img.naturalWidth,
-      height: img.naturalHeight,
+      width: canvas.width,
+      height: canvas.height,
     };
   } catch {
     return null;
@@ -265,7 +266,7 @@ export function drawAgencyHeader(
     const h = hMax;
     const w = (logo.width / logo.height) * h;
     try {
-      pdf.addImage(logo.dataUrl, logo.format, margin, y, w, h);
+      pdf.addImage(logo.dataUrl, logo.format, margin, y, w, h, undefined, 'SLOW');
       textX = margin + w + 5;
     } catch { /* un logo illisible ne doit pas emporter l'export */ }
   }
@@ -358,7 +359,7 @@ export function drawPartnerLogos(
     }
     if (x + w > pageW - margin) break;
     try {
-      pdf.addImage(logo.dataUrl, logo.format, x, logoTop + (PARTNER_LOGO_HEIGHT - h) / 2, w, h);
+      pdf.addImage(logo.dataUrl, logo.format, x, logoTop + (PARTNER_LOGO_HEIGHT - h) / 2, w, h, undefined, 'SLOW');
     } catch { /* un logo illisible ne doit pas emporter l'export */ }
     x += w + PARTNER_LOGO_GAP;
   }
