@@ -17,6 +17,7 @@ export interface EntrepriseSuivi {
   ne_repond_pas?: boolean;
   visite_creneau_id?: string;
   visite_presence?: import('./actVisites').PresenceVisite;
+  observation?: string;
   /**
    * Date d'une remise faite sur l'espace de dépôt et pas encore traitée. Jamais
    * enregistrée avec la consultation : elle se déduit des remises reçues
@@ -29,6 +30,12 @@ export interface LotSuivi {
   id: string;
   lot_number: string;
   lot_title: string;
+}
+
+/** Le numéro reste celui de la fiche contact, sans copie périmée dans la consultation. */
+export function telephoneEntreprise(e: Pick<EntrepriseSuivi, 'contact_id'>, contacts: Array<{ id: string; phone_work?: string | null; phone_mobile?: string | null; phone_main?: string | null; phone?: string | null }>): string {
+  const c = contacts.find(contact => contact.id === e.contact_id);
+  return [c?.phone_work, c?.phone_mobile, c?.phone_main, c?.phone].find(value => !!value?.trim())?.trim() || '';
 }
 
 /** En deçà, un lot n'a pas assez d'entreprises consultées pour une mise en concurrence sérieuse. */

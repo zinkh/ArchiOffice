@@ -92,6 +92,7 @@ interface EntrepriseConsultee {
   ne_repond_pas?: boolean;
   visite_creneau_id?: string;
   visite_presence?: import('../lib/actVisites').PresenceVisite;
+  observation?: string;
 }
 
 interface CritereNotation {
@@ -281,7 +282,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   const [extraContacts, setExtraContacts] = useState<Contact[]>([]);
   const allContacts = useMemo(() => {
     const byId = new Map(contacts.map(c => [c.id, c]));
-    for (const c of extraContacts) byId.set(c.id, c);
+    for (const c of extraContacts) byId.set(c.id, { ...byId.get(c.id), ...c });
     return [...byId.values()];
   }, [contacts, extraContacts]);
   const entrepriseContacts = useMemo(() => allContacts.filter(isEntrepriseContact), [allContacts]);
@@ -975,14 +976,14 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => settings && exportEntreprisesConsulteesToExcel(consultation.entreprises, lots, settings, projectName, consultation.creneaux_visite)}
+                  onClick={() => settings && exportEntreprisesConsulteesToExcel(consultation.entreprises, lots, settings, projectName, consultation.creneaux_visite, allContacts)}
                   disabled={!settings}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
                 >
                   <IconDownload size={13} /> Excel
                 </button>
                 <button
-                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, lots, settings, projectName, consultation.creneaux_visite)}
+                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, lots, settings, projectName, consultation.creneaux_visite, allContacts)}
                   disabled={!settings}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition"
                 >
@@ -1044,6 +1045,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               depotDeadlineAt={depot.deadlineAt}
               genererPiecesMarche={() => genererPiecesMarchePdf({ consultation: consultation as any, lots, operation: { nom: projectName, ...operation } })}
               entrepriseContacts={entrepriseContacts}
+              contactsTelephone={allContacts}
               corpsEtatOptions={corpsEtatOptions}
               lotOptions={lotOptions}
               onChangeCorpsEtat={changeCorpsEtat}
