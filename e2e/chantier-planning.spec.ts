@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test';
 
+// Keep text assertions deterministic on English-language CI runners.
+test.use({ locale: 'fr-FR' });
+
 const taches = [
   { id: 'installation', lotId: '', libelle: 'Installation du chantier', debut: '2026-12-23', fin: '2026-12-29', avancement: 100, source: 'manuel' },
   { id: 'fondations', lotId: 'go', libelle: 'Fondations et dallage', debut: '2026-12-30', fin: '2027-01-08', avancement: 40, source: 'manuel', dependencies: ['installation'] },
