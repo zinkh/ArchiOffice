@@ -178,7 +178,7 @@ function dimensionsImage(img: ImageChargee, largeurMax: number, hauteurMax: numb
 
 export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise<void> {
   const [{ default: JsPDF }, logo] = await Promise.all([import('jspdf'), loadLogoDataUrl(opts.settings.logoUrl)]);
-  const pdf = new JsPDF({ orientation: orientationPdf(opts.orientation ?? ORIENTATION_CCTP), unit: 'mm', format: 'a4' });
+  const pdf = new JsPDF({ orientation: orientationPdf(opts.orientation ?? ORIENTATION_CCTP), unit: 'mm', format: 'a4', compress: true });
   // Liberation Sans (≤, ≥, ≈, ≠, →...) ; à défaut Helvetica, et textePdf remplace alors ces symboles.
   const liberation = await installerLiberationSans(pdf);
   const famille = liberation ? POLICE_LIBERATION : 'helvetica';
