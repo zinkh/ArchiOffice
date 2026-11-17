@@ -64,6 +64,41 @@ describe('lecture et enregistrement', () => {
     expect(get.body.planning.taches.map((t: any) => t.libelle)).toEqual(['Fondations']);
   });
 
+  it('conserve les dépendances dans le JSON serveur et après rechargement', async () => {
+    const { token, projectId, lot1, lot2 } = seed();
+    const tache = { libelle: 'Travaux', debut: '2026-12-30', fin: '2027-01-03', avancement: 25 };
+    const url = `/api/projects/${projectId}/planning-chantier`;
+    const put = await request(app).put(url).set(authHeader(token)).send({ taches: [
+      { ...tache, id: 'a', lotId: lot1 }, { ...tache, id: 'b', lotId: lot2, dependencies: ['a'] },
+    ] });
+    expect(put.status).toBe(200);
+    const get = await request(app).get(url).set(authHeader(token));
+    expect(get.body.planning.taches[1].dependencies).toEqual(['a']);
+    expect(fakeSupabaseAdmin.getTable('project_chantier_planning').find(r => r.project_id === projectId)?.data.taches[1].dependencies).toEqual(['a']);
+  });
+
+  it('refuse les cycles avant écriture et nettoie les références supprimées', async () => {
+    const { token, projectId } = seed();
+    const url = `/api/projects/${projectId}/planning-chantier`;
+    const a = { id: 'a', libelle: 'A', debut: '2026-03-01', fin: '2026-03-02', dependencies: ['b'] };
+    const b = { ...a, id: 'b', dependencies: ['a'] };
+    expect((await request(app).put(url).set(authHeader(token)).send({ taches: [a, b] })).status).toBe(400);
+    expect((await request(app).put(url).set(authHeader(token)).send({ taches: [{ ...a, dependencies: ['a'] }] })).status).toBe(400);
+    const nettoye = await request(app).put(url).set(authHeader(token)).send({ taches: [a] });
+    expect(nettoye.status).toBe(200);
+    expect(nettoye.body.planning.taches[0].dependencies).toBeUndefined();
+  });
+
+  it('reprend les couleurs AOR de cette affaire seulement', async () => {
+    const { token, projectId, tenantId } = seed();
+    fakeSupabaseAdmin.seed('reserves', [
+      { id: 'r', project_id: projectId, tenant_id: tenantId, entreprises: ['Martin'], lots: [] },
+      { id: 'autre', project_id: 'ailleurs', tenant_id: tenantId, entreprises: ['AAA'], lots: [] },
+    ]);
+    const get = await request(app).get(`/api/projects/${projectId}/planning-chantier`).set(authHeader(token));
+    expect(get.body.couleursAor).toEqual({ 'e:martin': '#2563eb' });
+  });
+
   it('refuse l’affaire d’un autre cabinet', async () => {
     const { projectId } = seed();
     const { token } = makeUser(makeTenant(), 'admin');

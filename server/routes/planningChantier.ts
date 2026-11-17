@@ -16,8 +16,9 @@ import { randomUUID } from 'crypto';
 import { aiGenerationLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import {
-  PLANNING_VIDE, estDateIso, planningDepuisReponse, sanitizePlanning, type LotPlanifiable,
+  PLANNING_VIDE, cycleDependances, estDateIso, planningDepuisReponse, sanitizePlanning, type LotPlanifiable,
 } from '../../src/lib/planningChantier';
+import { construireLegende, couleursParCle } from '../../src/lib/reserveCouleurs';
 import { associerMarches, sourcesPourPlanning, texteSourceLot, type MarcheLigne } from '../planningSources';
 
 export interface RouteDeps {
@@ -112,7 +113,9 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
       try {
         for (const l of (await chargerLots(tenantId, req.params.projectId, null)).lots) if (l.contact_name) entreprises[l.id] = l.contact_name;
       } catch { /* complément : jamais une raison de refuser la lecture */ }
-      res.json({ available: true, planning: sanitizePlanning((data as any)?.data), updated_at: (data as any)?.updated_at ?? null, entreprises });
+      const { data: reserves } = await tenantScopedFrom(supabaseAdmin, tenantId, 'reserves').select('entreprises, lots').eq('project_id', req.params.projectId);
+      const couleursAor = Object.fromEntries(couleursParCle(construireLegende((reserves as any[]) ?? [])));
+      res.json({ available: true, couleursAor, planning: sanitizePlanning((data as any)?.data), updated_at: (data as any)?.updated_at ?? null, entreprises });
     } catch (error) {
       console.error('[GET /api/projects/:projectId/planning-chantier]', error);
       res.status(500).json({ error: 'Lecture impossible.' });
@@ -123,6 +126,11 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
     try {
       const tenantId = await getTenantId(req.user.id);
       if (!(await projectInTenant(tenantId, req.params.projectId))) return res.status(404).json({ error: 'Opération introuvable.' });
+      // Valider les liens avant assainissement : un cycle ne doit pas disparaître silencieusement.
+      const taches = Array.isArray(req.body?.taches) ? req.body.taches.slice(0, 400).filter((t: any) => t && typeof t.id === 'string').map((t: any) => ({
+        id: t.id, dependencies: Array.isArray(t.dependencies) ? t.dependencies.filter((d: unknown) => typeof d === 'string').slice(0, 400) : [],
+      })) : [];
+      if (cycleDependances(taches)) return res.status(400).json({ error: 'Une tâche ne peut pas dépendre d’elle-même ni former une dépendance circulaire.' });
       const planning = sanitizePlanning(req.body);
       const updatedAt = new Date().toISOString();
       // project_id est la clé primaire et vient d'être vérifié dans le cabinet : le conflit ne peut viser qu'une ligne du cabinet.

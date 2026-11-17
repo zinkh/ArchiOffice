@@ -551,9 +551,9 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/projects/:projectId/panneau-chantier` | [server/routes/panneaux.ts:89](../server/routes/panneaux.ts#L89) |
 | PUT | `/api/projects/:projectId/panneau-chantier` | [server/routes/panneaux.ts:118](../server/routes/panneaux.ts#L118) |
 | POST | `/api/projects/:projectId/panneau-chantier/pdf` | [server/routes/panneaux.ts:141](../server/routes/panneaux.ts#L141) |
-| GET | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:100](../server/routes/planningChantier.ts#L100) |
-| PUT | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:122](../server/routes/planningChantier.ts#L122) |
-| POST | `/api/projects/:projectId/planning-chantier/generate` | [server/routes/planningChantier.ts:178](../server/routes/planningChantier.ts#L178) |
+| GET | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:101](../server/routes/planningChantier.ts#L101) |
+| PUT | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:125](../server/routes/planningChantier.ts#L125) |
+| POST | `/api/projects/:projectId/planning-chantier/generate` | [server/routes/planningChantier.ts:186](../server/routes/planningChantier.ts#L186) |
 | POST | `/api/projects/:projectId/pro/control/suggest` | [server/routes/cctpGeneration.ts:620](../server/routes/cctpGeneration.ts#L620) |
 | GET | `/api/projects/:projectId/reports` | [server/routes/siteReports.ts:25](../server/routes/siteReports.ts#L25) |
 | POST | `/api/projects/:projectId/reports` | [server/routes/siteReports.ts:48](../server/routes/siteReports.ts#L48) |

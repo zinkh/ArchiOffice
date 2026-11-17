@@ -1,4 +1,4 @@
-import type { Project, Task, TeamMember } from '../types';
+import type { Project, TeamMember } from '../types';
 import {
   addDays,
   asArray,
@@ -8,6 +8,8 @@ import {
   inclusiveDays,
   isoDay,
   planningXmlBuilder,
+  type PlanningXmlOptions,
+  type PlanningXmlTask,
   type ImportedPlanningTask,
   type ParsedPlanningXml,
 } from './projectPlanningXmlShared';
@@ -29,7 +31,7 @@ function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Array<{ 
       progress: clampProgress(node?.['@_complete'] ?? node?.complete),
       dependencies: [],
       resourceNames: [],
-      milestone: asText(node?.['@_milestone']).toLowerCase() === 'true',
+      milestone: asText(node?.['@_milestone'] ?? node?.['@_meeting']).toLowerCase() === 'true',
     });
 
     for (const dep of asArray(node?.depend)) {
@@ -77,7 +79,7 @@ export function parseGanttProject(root: any): ParsedPlanningXml {
   };
 }
 
-export function exportGanttProjectXml(project: Project, tasks: Task[], team: TeamMember[] = []): string {
+export function exportGanttProjectXml(project: Project, tasks: PlanningXmlTask[], team: TeamMember[] = [], options: PlanningXmlOptions = {}): string {
   const taskId = new Map(tasks.map((task, index) => [task.id, String(index + 1)]));
   const members = assignedMembers(tasks, team);
   const resourceId = new Map(members.map((member, index) => [member.id, String(index + 1)]));
@@ -91,6 +93,22 @@ export function exportGanttProjectXml(project: Project, tasks: Task[], team: Tea
     }
   }
 
+  const nodes = tasks.map(task => ({
+    '@_id': taskId.get(task.id),
+    '@_name': task.title,
+    '@_color': task.xmlColor ?? '#8b5cf6',
+    '@_start': task.start_date,
+    '@_milestone': task.xmlMilestone === true ? 'true' : 'false',
+    ...(task.xmlMilestone === true ? { '@_meeting': 'true' } : {}),
+    '@_duration': String(task.xmlMilestone ? 0 : inclusiveDays(task.start_date, task.end_date)),
+    '@_complete': String(task.progress || 0),
+    '@_expand': 'true',
+    ...(task.description ? { notes: task.description } : {}),
+    ...(successors.get(task.id)?.length ? {
+      depend: successors.get(task.id)!.map(id => ({ '@_id': taskId.get(id), '@_type': '2', '@_difference': '0', '@_hardness': 'Strong' })),
+    } : {}),
+        }));
+  const nested = (parent?: string): any[] => tasks.flatMap((task, i) => task.xmlParentId === parent ? [{ ...nodes[i], task: nested(task.id) }] : []);
   const xml = {
     project: {
       '@_name': project.name,
@@ -98,25 +116,14 @@ export function exportGanttProjectXml(project: Project, tasks: Task[], team: Tea
       '@_version': '3.3',
       '@_view-date': project.start_date,
       '@_date-format': 'yyyy-MM-dd',
+      ...(options.calendarDays ? { calendars: { 'day-types': {
+        'day-type': [{ '@_id': '0' }, { '@_id': '1' }],
+        'default-week': { '@_id': '1', '@_name': 'Calendrier chantier', '@_sun': '0', '@_mon': '0', '@_tue': '0', '@_wed': '0', '@_thu': '0', '@_fri': '0', '@_sat': '0' },
+        'only-show-weekends': { '@_value': 'false' }, 'overriden-day-types': {}, days: {},
+      } } } : {}),
       tasks: {
-        task: tasks.map(task => ({
-          '@_id': taskId.get(task.id),
-          '@_name': task.title,
-          '@_color': '#8b5cf6',
-          '@_start': task.start_date,
-          '@_duration': String(inclusiveDays(task.start_date, task.end_date)),
-          '@_complete': String(task.progress || 0),
-          '@_expand': 'true',
-          ...(task.description ? { notes: task.description } : {}),
-          ...(successors.get(task.id)?.length ? {
-            depend: successors.get(task.id)!.map(successorId => ({
-              '@_id': taskId.get(successorId),
-              '@_type': '2',
-              '@_difference': '0',
-              '@_hardness': 'Strong',
-            })),
-          } : {}),
-        })),
+        ...(options.calendarDays ? { '@_empty-milestones': 'true' } : {}),
+        task: nested(),
       },
       resources: {
         resource: members.map(member => ({

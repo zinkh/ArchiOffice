@@ -1,14 +1,16 @@
 // Fenêtre de saisie d'une tâche du planning de chantier.
+import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { ModalShell } from '../ui/ModalShell';
-import { dureeJours, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
+import { cycleDependances, incoherencesDependances, dureeJours, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
 
 interface Props {
   /** Tâche existante, ou brouillon d'une nouvelle (identifiant déjà tiré). */
   tache: TachePlanning;
   nouvelle: boolean;
   lots: LotPlanifiable[];
+  taches: TachePlanning[];
   onSave: (tache: TachePlanning) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -17,13 +19,17 @@ interface Props {
 const champ = 'w-full rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] px-3 py-2 text-sm pointer-coarse:min-h-11';
 const etiquette = 'block text-xs font-semibold text-[var(--tblr-muted)] mb-1';
 
-export function PlanningTacheDialog({ tache, nouvelle, lots, onSave, onDelete, onClose }: Props) {
+export function PlanningTacheDialog({ tache, nouvelle, lots, taches, onSave, onDelete, onClose }: Props) {
+  const { t: tr } = useTranslation();
   const [form, setForm] = useState<TachePlanning>(tache);
   const set = <K extends keyof TachePlanning>(cle: K, valeur: TachePlanning[K]) => setForm(prev => ({ ...prev, [cle]: valeur }));
 
   const libelle = form.libelle.trim();
   const datesValides = !!form.debut && !!form.fin && form.fin >= form.debut;
-  const erreur = !libelle ? 'Indiquez l’intitulé de la tâche.' : !form.debut ? 'Indiquez la date de début.' : !datesValides && !form.jalon ? 'La fin doit suivre le début.' : null;
+  const toutes = [...taches.filter(t => t.id !== form.id), form];
+  const cycle = cycleDependances(toutes);
+  const conflits = incoherencesDependances(toutes).filter(c => c.tache.id === form.id || c.precedent.id === form.id);
+  const erreur = cycle ? tr('planning_cycle') : !libelle ? 'Indiquez l’intitulé de la tâche.' : !form.debut ? 'Indiquez la date de début.' : !datesValides && !form.jalon ? 'La fin doit suivre le début.' : null;
 
   const enregistrer = () => {
     if (erreur) return;
@@ -93,6 +99,24 @@ export function PlanningTacheDialog({ tache, nouvelle, lots, onSave, onDelete, o
             <input id="planning-avancement" type="range" min={0} max={100} step={5} className="w-full" value={form.avancement}
               onChange={e => set('avancement', Number(e.target.value))} />
           </div>
+          <fieldset className="space-y-2">
+            <legend className={etiquette}>{tr('planning_predecessors')}</legend>
+            <p className="text-xs text-[var(--tblr-muted)]">{tr('planning_dependencies_help')}</p>
+            <div className="max-h-48 overflow-y-auto rounded border border-[var(--tblr-border)]">
+              {taches.filter(t => t.id !== form.id).map(t => {
+                const coche = (form.dependencies ?? []).includes(t.id);
+                const interdit = !coche && cycleDependances(toutes.map(x => x.id === form.id ? { ...x, dependencies: [...(form.dependencies ?? []), t.id] } : x));
+                const lot = lots.find(l => l.id === t.lotId);
+                return <label key={t.id} className="flex items-start gap-2 p-2 min-h-11 text-sm">
+                  <input type="checkbox" checked={coche} disabled={interdit} onChange={e => set('dependencies', e.target.checked ? [...(form.dependencies ?? []), t.id] : (form.dependencies ?? []).filter(id => id !== t.id))} />
+                  <span>{t.libelle} · {lot ? `Lot ${lot.lot_number}` : tr('planning_general_short')}{t.jalon ? ` · ${tr('planning_milestone')}` : ''}{interdit ? ` · ${tr('planning_cycle_forbidden')}` : ''}</span>
+                </label>;
+              })}
+            </div>
+          </fieldset>
+          {conflits.length > 0 && <div role="status" className="text-xs text-[var(--tblr-text)]">
+            {conflits.map(c => <p key={`${c.tache.id}:${c.precedent.id}`}>{tr('planning_dates_conflict', { task: c.tache.libelle, predecessor: c.precedent.libelle, date: c.precedent.fin })}</p>)}
+          </div>}
           {erreur && <p role="alert" className="text-xs text-red-600">{erreur}</p>}
         </form>
       </ModalShell>

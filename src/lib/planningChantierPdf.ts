@@ -1,10 +1,12 @@
 // Export PDF du planning de chantier (Gantt par lot), à la charte du cabinet :
 // en-tête avec logo sur la première page, nuances de gris, pied et « P1|2 ».
 // Complet, ou limité à un lot pour remettre à chaque entreprise SON planning.
+import { hexVersRgb, RESERVE_COULEUR_NEUTRE } from './reserveCouleurs';
 import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import {
-  aujourdhuiIso, bornesPlanning, joursEntre, planningParLot, semainesEntre,
+  AFFICHAGE_PLANNING, periodesPlanning, positionPlanning, ajouterJours, etatTache, type AffichagePlanning,
+  aujourdhuiIso, bornesPlanning, planningParLot,
   type LotPlanifiable, type PlanningChantier,
 } from './planningChantier';
 
@@ -14,6 +16,8 @@ export interface PlanningPdfOptions {
   project: { name: string; project_code?: string; address?: string };
   /** Limite le document au planning d'un lot (remis à son entreprise). */
   lotId?: string;
+  affichage?: AffichagePlanning;
+  couleurs?: Map<string, string>;
 }
 
 const MARGIN = 12;
@@ -23,7 +27,6 @@ const GRIS_FOND = [236, 236, 236] as const;
 const GRIS_BARRE = [150, 150, 150] as const;
 const GRIS_FAIT = [45, 45, 45] as const;
 const GRIS_GRILLE = [215, 215, 215] as const;
-const MOIS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
 
 const fmt = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 const nettoyer = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
@@ -37,7 +40,8 @@ export async function exportPlanningToPDF(
   const { default: jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const lot = opts.lotId ? lots.find(l => l.id === opts.lotId) : undefined;
-  const lignes = planningParLot(planning, lots).filter(l => !opts.lotId || l.lot?.id === opts.lotId);
+  const affichage = opts.affichage ?? AFFICHAGE_PLANNING;
+  const lignes = planningParLot(planning, lots).filter(l => (!opts.lotId || l.lot?.id === opts.lotId) && (affichage.generales || l.lot));
   const bornes = bornesPlanning({ ...planning, taches: lignes.flatMap(l => l.taches) });
 
   const titre = lot ? `Planning de chantier, lot ${lot.lot_number} ${lot.lot_title}` : 'Planning de chantier';
@@ -57,10 +61,13 @@ export async function exportPlanningToPDF(
     opts.project.address,
     bornes ? `Du ${fmt(bornes.debut)} au ${fmt(bornes.fin)}` : null,
     lot?.contact_name ? `Entreprise : ${lot.contact_name}` : null,
+    `Tous les lots dépliés ; tâches générales ${affichage.generales ? 'incluses' : 'masquées'}.`,
+    affichage.relatif ? `Origine S1 / M1 : ${bornesPlanning(planning)?.debut ?? ''}` : 'Dates calendaires',
     `Édité le ${new Date().toLocaleDateString('fr-FR')}`,
   ].filter(Boolean).join('   ·   ');
-  doc.text(doc.splitTextToSize(resume, pageW - MARGIN * 2) as string[], MARGIN, y);
-  y += 7;
+  const resumeLignes = doc.splitTextToSize(resume, pageW - MARGIN * 2) as string[];
+  doc.text(resumeLignes, MARGIN, y);
+  y += resumeLignes.length * 4.5 + 3;
 
   if (!bornes || !lignes.length) {
     doc.setFont('helvetica', 'italic');
@@ -69,13 +76,14 @@ export async function exportPlanningToPDF(
     return { blob: doc.output('blob'), filename };
   }
 
-  const semaines = semainesEntre(bornes.debut, bornes.fin);
+  // Origine du planning complet, même pour un export limité à un lot.
+  const total = bornesPlanning(planning)!;
+  const periodes = periodesPlanning(total.debut, total.fin, affichage);
   const x0 = MARGIN + LABEL_W;
-  const colW = (pageW - MARGIN - x0) / semaines.length;
-  const premierLundi = semaines[0];
-  const xDate = (iso: string) => x0 + (joursEntre(premierLundi, iso) / 7) * colW;
-  // Fin d'une tâche = fin du dernier jour travaillé (le vendredi occupe sa case jusqu'au dimanche).
-  const xFin = (iso: string) => xDate(iso) + colW / 7;
+  const colW = (pageW - MARGIN - x0) / periodes.length;
+  const premierLundi = periodes[0].debut;
+  const xDate = (iso: string) => x0 + positionPlanning(iso, periodes) * colW;
+  const xFin = (iso: string) => xDate(ajouterJours(iso, 1));
   const aujourdhui = aujourdhuiIso();
 
   /** Axe des mois et des semaines, redessiné en tête de chaque page. */
@@ -84,27 +92,18 @@ export async function exportPlanningToPDF(
     doc.rect(MARGIN, top, pageW - MARGIN * 2, 9, 'F');
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(17, 24, 39);
     doc.text('Lot / tâche', MARGIN + 1.5, top + 5.6);
-    let debutMois = 0;
-    semaines.forEach((lundi, i) => {
-      const mois = lundi.slice(0, 7);
-      if (i < semaines.length - 1 && semaines[i + 1].slice(0, 7) === mois) return;
-      const largeur = (i - debutMois + 1) * colW;
-      const etiquette = largeur > 12 ? `${MOIS[Number(mois.slice(5, 7)) - 1]} ${mois.slice(0, 4)}` : largeur > 6 ? MOIS[Number(mois.slice(5, 7)) - 1] : '';
-      if (etiquette) doc.text(etiquette, x0 + debutMois * colW + 1, top + 3.4);
-      doc.setDrawColor(...GRIS_GRILLE); doc.setLineWidth(0.15);
-      doc.line(x0 + (i + 1) * colW, top, x0 + (i + 1) * colW, top + 9);
-      debutMois = i + 1;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5);
+    // Éviter la superposition des libellés pour un planning long.
+    const pas = Math.max(1, Math.ceil(15 / colW));
+    periodes.forEach((p, i) => {
+      if (i % pas === 0) doc.text(p.libelle, x0 + i * colW + 0.5, top + 5.6);
     });
-    if (colW >= 4.2) {
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.setTextColor(75, 85, 99);
-      semaines.forEach((lundi, i) => doc.text(lundi.slice(8, 10), x0 + i * colW + colW / 2, top + 7.8, { align: 'center' }));
-    }
     return top + 9;
   };
 
   const grille = (top: number, bas: number) => {
     doc.setDrawColor(...GRIS_GRILLE); doc.setLineWidth(0.1);
-    semaines.forEach((_, i) => doc.line(x0 + i * colW, top, x0 + i * colW, bas));
+    periodes.forEach((_, i) => doc.line(x0 + i * colW, top, x0 + i * colW, bas));
     if (aujourdhui >= premierLundi && aujourdhui <= bornes.fin) {
       doc.setDrawColor(60, 60, 60); doc.setLineWidth(0.35);
       doc.line(xDate(aujourdhui), top, xDate(aujourdhui), bas);
@@ -123,13 +122,14 @@ export async function exportPlanningToPDF(
   const coupe = (texte: string, largeur: number) => (doc.splitTextToSize(texte, largeur) as string[])[0] ?? '';
 
   for (const ligne of lignes) {
+    const couleur = hexVersRgb(opts.couleurs?.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE);
     place(ROW_H * 2);
     const nom = ligne.lot ? `Lot ${ligne.lot.lot_number}  ${ligne.lot.lot_title}` : 'Tâches générales du chantier';
     doc.setFillColor(...GRIS_FOND); doc.rect(MARGIN, y, pageW - MARGIN * 2, ROW_H, 'F');
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(17, 24, 39);
     doc.text(coupe(nom, LABEL_W - 3), MARGIN + 1.5, y + ROW_H * 0.7);
     // Barre de synthèse du lot, fine.
-    doc.setFillColor(...GRIS_BARRE);
+    doc.setFillColor(...couleur);
     doc.rect(xDate(ligne.debut), y + ROW_H * 0.38, Math.max(0.8, xFin(ligne.fin) - xDate(ligne.debut)), ROW_H * 0.24, 'F');
     y += ROW_H;
     if (ligne.lot?.contact_name) {
@@ -140,22 +140,34 @@ export async function exportPlanningToPDF(
     for (const t of ligne.taches) {
       place(ROW_H);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(17, 24, 39);
-      doc.text(coupe(t.libelle, LABEL_W - 24), MARGIN + 4, y + ROW_H * 0.7);
+      const retard = etatTache(t, aujourdhui) === 'en_retard' ? ' [Retard]' : '';
+      doc.text(coupe(`${t.avancement} %${retard} ${t.libelle}`, LABEL_W - 24), MARGIN + 4, y + ROW_H * 0.7);
       doc.setFontSize(6); doc.setTextColor(90, 90, 90);
       doc.text(`${fmt(t.debut).slice(0, 5)} - ${fmt(t.fin).slice(0, 5)}`, x0 - 1.5, y + ROW_H * 0.7, { align: 'right' });
       if (t.jalon) {
-        doc.setFillColor(...GRIS_FAIT);
-        doc.circle(xDate(t.debut) + colW / 14 * 5, y + ROW_H / 2, 1.3, 'F');
+        doc.setFillColor(...couleur);
+        doc.circle(xDate(t.debut) + 0.5, y + ROW_H / 2, 1.3, 'F');
       } else {
         const bx = xDate(t.debut);
         const bw = Math.max(0.8, xFin(t.fin) - bx);
-        doc.setFillColor(...GRIS_BARRE); doc.rect(bx, y + 1, bw, ROW_H - 2, 'F');
+        doc.setFillColor(...couleur); doc.rect(bx, y + 1, bw, ROW_H - 2, 'F');
         if (t.avancement > 0) { doc.setFillColor(...GRIS_FAIT); doc.rect(bx, y + 1, bw * (t.avancement / 100), ROW_H - 2, 'F'); }
       }
       y += ROW_H;
     }
   }
   grille(topGrille, y);
+
+  const presentes = new Set(lignes.flatMap(l => l.taches.map(t => t.id)));
+  const liaisons = planning.taches.flatMap(t => (t.dependencies ?? []).map(id => ({ t, p: planning.taches.find(p => p.id === id) }))).filter(l => l.p && presentes.has(l.t.id));
+  if (liaisons.length) {
+    y += 5; place(8); doc.setFontSize(8); doc.setTextColor(17, 24, 39);
+    doc.text('Dépendances (fin à début, sans déplacement automatique)', MARGIN, y);
+    for (const { t, p } of liaisons) {
+      y += 4; place(4); doc.setFontSize(7);
+      doc.text(coupe(`${p!.libelle} -> ${t.libelle}${!presentes.has(p!.id) ? ' (prédécesseur hors périmètre)' : ''}${t.debut <= p!.fin ? ' : dates incohérentes' : ''}`, pageW - MARGIN * 2), MARGIN, y);
+    }
+  }
 
   if (planning.hypotheses.length && !opts.lotId) {
     y += 4; place(8);

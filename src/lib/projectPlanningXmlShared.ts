@@ -35,6 +35,7 @@ export const planningXmlBuilder = new XMLBuilder({
   attributeNamePrefix: '@_',
   format: true,
   suppressEmptyNode: true,
+  suppressBooleanAttributes: false,
 });
 
 export function asArray<T>(value: T | T[] | undefined | null): T[] {
@@ -113,3 +114,15 @@ export function importedTasksToCreatePayloads(
     };
   });
 }
+
+
+/** Métadonnées facultatives : les exports des tâches internes gardent leur comportement. */
+export type PlanningXmlTask = Task & { xmlParentId?: string; xmlMilestone?: boolean; xmlColor?: string };
+export function xmlOutline(tasks: PlanningXmlTask[], task: PlanningXmlTask): string {
+  const siblings = tasks.filter(t => t.xmlParentId === task.xmlParentId);
+  const rank = String(siblings.findIndex(t => t.id === task.id) + 1);
+  const parent = tasks.find(t => t.id === task.xmlParentId);
+  return parent ? `${xmlOutline(tasks, parent)}.${rank}` : rank;
+}
+
+export interface PlanningXmlOptions { calendarDays?: boolean }

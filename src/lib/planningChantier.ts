@@ -25,6 +25,8 @@ export interface TachePlanning {
   source: SourceTache;
   /** Un jalon est une échéance d'un jour (réception, fin de gros œuvre...). */
   jalon?: boolean;
+  /** Identifiants des prédécesseurs, relation fin à début (jours inclusifs). */
+  dependencies?: string[];
 }
 
 export interface PlanningChantier {
@@ -78,6 +80,7 @@ export function sanitizePlanning(brut: unknown): PlanningChantier {
   const source = (brut && typeof brut === 'object' ? brut : {}) as Record<string, unknown>;
   const vus = new Set<string>();
   const taches: TachePlanning[] = [];
+  const liens = new Map<string, string[]>();
   for (const entree of (Array.isArray(source.taches) ? source.taches : []).slice(0, MAX_TACHES)) {
     if (!entree || typeof entree !== 'object') continue;
     const t = entree as Record<string, unknown>;
@@ -88,8 +91,10 @@ export function sanitizePlanning(brut: unknown): PlanningChantier {
     if (fin < debut) [debut, fin] = [fin, debut];
     const jalon = t.jalon === true;
     if (jalon) fin = debut;
-    const id = typeof t.id === 'string' && t.id && t.id.length <= 64 && !vus.has(t.id) ? t.id : `t-${taches.length + 1}-${vus.size}`;
+    let id = typeof t.id === 'string' && t.id && t.id.length <= 64 && !vus.has(t.id) ? t.id : `t-${taches.length + 1}-${vus.size}`;
+    while (vus.has(id)) id += '-';
     vus.add(id);
+    liens.set(id, Array.isArray(t.dependencies) ? [...new Set(t.dependencies.filter((d): d is string => typeof d === 'string'))].slice(0, MAX_TACHES) : []);
     const avancement = Number(t.avancement);
     taches.push({
       id,
@@ -101,6 +106,20 @@ export function sanitizePlanning(brut: unknown): PlanningChantier {
       source: t.source === 'ia' ? 'ia' : 'manuel',
       ...(jalon ? { jalon: true } : {}),
     });
+  }
+  // Nettoyage après lecture de tous les identifiants : suppression / remplacement IA.
+  const graphe = new Map<string, string[]>();
+  const atteint = (depart: string, cible: string, visites = new Set<string>()): boolean => {
+    if (depart === cible) return true;
+    if (visites.has(depart)) return false;
+    visites.add(depart);
+    return (graphe.get(depart) ?? []).some(id => atteint(id, cible, visites));
+  };
+  for (const t of taches) {
+    const deps = (liens.get(t.id) ?? []).filter(id => vus.has(id) && id !== t.id);
+    const valides = deps.filter(id => !atteint(id, t.id));
+    if (valides.length) t.dependencies = valides;
+    graphe.set(t.id, valides);
   }
   return {
     version: 1,
@@ -280,4 +299,88 @@ export function appliquerGeneration(
     hypotheses: genere.hypotheses,
     genereLe: (options.maintenant ?? new Date()).toISOString(),
   });
+}
+
+
+/** Détection par parcours des prédécesseurs, indépendante des dates et des lots. */
+export function cycleDependances(taches: Pick<TachePlanning, 'id' | 'dependencies'>[]): boolean {
+  const parId = new Map(taches.map(t => [t.id, t.dependencies ?? []]));
+  const actifs = new Set<string>();
+  const faits = new Set<string>();
+  const visite = (id: string): boolean => {
+    if (actifs.has(id)) return true;
+    if (faits.has(id)) return false;
+    actifs.add(id);
+    if ((parId.get(id) ?? []).some(visite)) return true;
+    actifs.delete(id); faits.add(id);
+    return false;
+  };
+  return taches.some(t => visite(t.id));
+}
+
+export function incoherencesDependances(taches: TachePlanning[]): { tache: TachePlanning; precedent: TachePlanning }[] {
+  const parId = new Map(taches.map(t => [t.id, t]));
+  return taches.flatMap(tache => (tache.dependencies ?? []).flatMap(id => {
+    const precedent = parId.get(id);
+    // La fin est inclusive, y compris pour les jalons datés sans heure.
+    return precedent && tache.debut <= precedent.fin ? [{ tache, precedent }] : [];
+  }));
+}
+
+export interface AffichagePlanning {
+  echelle: 'semaines' | 'mois';
+  relatif: boolean;
+  numerosSemaines: boolean;
+  generales: boolean;
+  replies: string[];
+}
+export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [] };
+export function sanitizeAffichage(v: unknown): AffichagePlanning {
+  const o = (v && typeof v === 'object' ? v : {}) as Partial<AffichagePlanning>;
+  return { echelle: o.echelle === 'mois' ? 'mois' : 'semaines', relatif: o.relatif === true,
+    numerosSemaines: o.numerosSemaines !== false, generales: o.generales !== false,
+    replies: Array.isArray(o.replies) ? o.replies.filter((s): s is string => typeof s === 'string').slice(0, MAX_TACHES) : [] };
+}
+
+export function semaineIso(iso: string): string {
+  const jeudi = ajouterJours(lundiDe(iso), 3);
+  const annee = jeudi.slice(0, 4);
+  const semaine = 1 + Math.round(joursEntre(lundiDe(`${annee}-01-04`), lundiDe(iso)) / 7);
+  return `${annee}-S${String(semaine).padStart(2, '0')}`;
+}
+
+/** Mois relatifs ancrés au jour de démarrage, rabattus au dernier jour du mois. */
+export function ajouterMois(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const jour = d.getUTCDate();
+  d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + n);
+  const dernier = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(jour, dernier));
+  return d.toISOString().slice(0, 10);
+}
+
+export interface PeriodePlanning { debut: string; fin: string; libelle: string }
+/** Même axe écran / PDF : en relatif S1/M1 commence exactement au premier jour du planning. */
+export function periodesPlanning(debut: string, fin: string, affichage: AffichagePlanning): PeriodePlanning[] {
+  const hebdo = affichage.echelle === 'semaines';
+  const origine = affichage.relatif ? debut : hebdo ? lundiDe(debut) : `${debut.slice(0, 7)}-01`;
+  const resultat: PeriodePlanning[] = [];
+  for (let i = 0; i < 1200; i++) {
+    const date = hebdo ? ajouterJours(origine, i * 7) : ajouterMois(origine, i);
+    if (date > fin) break;
+    const suivante = hebdo ? ajouterJours(date, 7) : ajouterMois(origine, i + 1);
+    const libelle = affichage.relatif ? `${hebdo ? 'S' : 'M'}${i + 1}` : hebdo
+      ? affichage.numerosSemaines ? semaineIso(date) : `${date.slice(8)}/${date.slice(5, 7)}/${date.slice(0, 4)}`
+      : `${date.slice(5, 7)}/${date.slice(0, 4)}`;
+    resultat.push({ debut: date, fin: ajouterJours(suivante, -1), libelle });
+  }
+  return resultat;
+}
+
+/** Position continue dans des colonnes de longueurs calendaires différentes. */
+export function positionPlanning(iso: string, periodes: PeriodePlanning[]): number {
+  const i = periodes.findIndex(p => iso >= p.debut && iso <= p.fin);
+  if (i >= 0) return i + joursEntre(periodes[i].debut, iso) / (joursEntre(periodes[i].debut, periodes[i].fin) + 1);
+  if (!periodes.length) return 0;
+  return iso < periodes[0].debut ? 0 : periodes.length;
 }
