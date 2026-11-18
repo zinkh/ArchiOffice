@@ -67,8 +67,8 @@ describe('planningParLot', () => {
     ] });
     const lignes = planningParLot(p, lots);
     expect(lignes.map(l => l.lot?.id ?? null)).toEqual([null, 'l1', 'l2']);
-    // Même début : la plus courte d'abord.
-    expect(lignes[0].taches.map(t => t.id)).toEqual(['d', 'c']);
+    // L’ordre enregistré est indépendant des dates.
+    expect(lignes[0].taches.map(t => t.id)).toEqual(['c', 'd']);
   });
 
   it('pondère l’avancement du lot par la durée des tâches', () => {

@@ -184,7 +184,7 @@ export async function exportPlanningToPDF(
   const liaisons = planning.taches.flatMap(t => (t.dependencies ?? []).map(id => ({ t, p: planning.taches.find(p => p.id === id) }))).filter(l => l.p && presentes.has(l.t.id));
   if (liaisons.length) {
     y += 5; place(8); doc.setFontSize(8); doc.setTextColor(17, 24, 39);
-    doc.text('Dépendances (fin à début, sans déplacement automatique)', MARGIN, y);
+    doc.text('Dépendances (fin à début, dates modifiables)', MARGIN, y);
     for (const { t, p } of liaisons) {
       y += 4; place(4); doc.setFontSize(7);
       doc.text(coupe(`${p!.libelle} -> ${t.libelle}${!presentes.has(p!.id) ? ' (prédécesseur hors périmètre)' : ''}${t.debut <= p!.fin ? ' : dates incohérentes' : ''}`, pageW - MARGIN * 2), MARGIN, y);

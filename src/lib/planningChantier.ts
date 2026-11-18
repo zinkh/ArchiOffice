@@ -154,11 +154,10 @@ export interface LignePlanningLot {
 
 export const dureeJours = (t: Pick<TachePlanning, 'debut' | 'fin'>) => joursEntre(t.debut, t.fin) + 1;
 
-/** Les tâches rangées par lot, dans l'ordre des lots ; les tâches générales d'abord. */
+/** Lots dans leur ordre et tâches dans l'ordre enregistré, indépendant des dates. */
 export function planningParLot(planning: PlanningChantier, lots: LotPlanifiable[]): LignePlanningLot[] {
-  const parDebut = (a: TachePlanning, b: TachePlanning) => a.debut.localeCompare(b.debut) || a.fin.localeCompare(b.fin);
   const resume = (lot: LotPlanifiable | null, taches: TachePlanning[]): LignePlanningLot => {
-    const tri = [...taches].sort(parDebut);
+    const tri = [...taches];
     const poids = tri.reduce((n, t) => n + dureeJours(t), 0);
     return {
       lot,
@@ -470,4 +469,15 @@ export function sanitizeCalendrierPlanning(brut: unknown): CalendrierPlanning {
     periodes.push({ id, libelle, debut: p.debut, fin: p.fin, type: p.type === 'ferie' ? 'ferie' : 'conge' });
   }
   return { joursFeries: o.joursFeries === 'aucun' || o.joursFeries === 'alsace_moselle' ? o.joursFeries : 'france', periodes };
+}
+
+/** Appelé uniquement à l'ajout d'un prédécesseur : aucun recalcul continu ni cascade.
+ * Toutes les fins sont inclusives ; conserver la durée (un jour pour un jalon).
+ */
+export function placerApresPredecesseurs(tache: TachePlanning, taches: TachePlanning[]): TachePlanning {
+  const precedents = taches.filter(t => t.id !== tache.id && tache.dependencies?.includes(t.id));
+  if (!precedents.length || !estDateIso(tache.debut) || !estDateIso(tache.fin) || tache.fin < tache.debut) return tache;
+  const derniereFin = precedents.reduce((fin, t) => t.fin > fin ? t.fin : fin, precedents[0].fin);
+  const debut = ajouterJours(derniereFin, 1);
+  return datesParGeste(tache.jalon ? { ...tache, fin: tache.debut } : tache, 'deplacer', debut);
 }

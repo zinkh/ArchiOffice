@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { ModalShell } from '../ui/ModalShell';
-import { cycleDependances, incoherencesDependances, dureeJours, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
+import { placerApresPredecesseurs, cycleDependances, incoherencesDependances, dureeJours, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
 
 interface Props {
   /** Tâche existante, ou brouillon d'une nouvelle (identifiant déjà tiré). */
@@ -108,7 +108,13 @@ export function PlanningTacheDialog({ tache, nouvelle, lots, taches, onSave, onD
                 const interdit = !coche && cycleDependances(toutes.map(x => x.id === form.id ? { ...x, dependencies: [...(form.dependencies ?? []), t.id] } : x));
                 const lot = lots.find(l => l.id === t.lotId);
                 return <label key={t.id} className="flex items-start gap-2 p-2 min-h-11 text-sm">
-                  <input type="checkbox" checked={coche} disabled={interdit} onChange={e => set('dependencies', e.target.checked ? [...(form.dependencies ?? []), t.id] : (form.dependencies ?? []).filter(id => id !== t.id))} />
+                  <input type="checkbox" checked={coche} disabled={interdit} onChange={e => {
+                    const checked = e.target.checked;
+                    setForm(prev => {
+                      const suivante = { ...prev, dependencies: checked ? [...(prev.dependencies ?? []), t.id] : (prev.dependencies ?? []).filter(id => id !== t.id) };
+                      return checked ? placerApresPredecesseurs(suivante, taches) : suivante;
+                    });
+                  }} />
                   <span>{t.libelle} · {lot ? `Lot ${lot.lot_number}` : tr('planning_general_short')}{t.jalon ? ` · ${tr('planning_milestone')}` : ''}{interdit ? ` · ${tr('planning_cycle_forbidden')}` : ''}</span>
                 </label>;
               })}

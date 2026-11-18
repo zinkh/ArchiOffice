@@ -104,6 +104,7 @@ test('déplacement, poignées, liaison par geste et annulation sans écriture', 
     await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 10 }); await page.mouse.up();
   };
   await relier('Fondations et dallage', 'Réception');
+  await expect.poll(() => saved.taches.find(t => t.id === 'reception')?.debut).toBe('2027-01-16');
   await expect.poll(() => saved.taches.find(t => t.id === 'reception')?.dependencies).toContain('fondations');
   await relier('Réception', 'Fondations et dallage');
   await expect(page.getByText('Lien refusé : il créerait une dépendance circulaire.')).toBeVisible();
@@ -203,4 +204,47 @@ test('calendrier configurable, repères persistants et poignées discrètes', as
   await page.getByRole('button', { name: 'Supprimer « Fermeture hivernale »', exact: true }).click();
   await expect.poll(() => saved.calendrier?.periodes.length).toBe(0);
   expect(saved.taches.map((t: any) => [t.debut, t.fin])).toEqual(originalDates);
+});
+
+test('ordre vertical fixe, placement à l’ajout du prédécesseur puis dates manuelles', async ({ page }) => {
+  test.setTimeout(120_000);
+  const seconde = { ...taches[1], id: 'finitions', libelle: 'Finitions du gros œuvre', debut: '2027-01-01', fin: '2027-01-03', dependencies: [] as string[] };
+  let saved = { version: 1, taches: [...taches, seconde], hypotheses: [], genereLe: null };
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  const rowIds = () => page.locator('[data-planning-task-id]').evaluateAll(els => els.map(el => el.getAttribute('data-planning-task-id')));
+  const initial = ['installation', 'reception', 'fondations', 'finitions', 'charpente'];
+  await expect.poll(rowIds).toEqual(initial);
+  // La tâche initialement plus tôt reste sous Fondations, même après modification des dates.
+  await page.getByRole('button', { name: /Finitions du gros œuvre, .*du/ }).click();
+  await page.getByLabel(/Fondations et dallage · Lot 01/).check();
+  await expect(page.getByLabel('Début', { exact: true })).toHaveValue('2027-01-09');
+  await expect(page.getByLabel('Fin', { exact: true })).toHaveValue('2027-01-11');
+  // Les dates proposées restent modifiables avant même d’enregistrer.
+  await page.getByLabel('Début', { exact: true }).fill('2026-12-20');
+  await page.getByLabel('Fin', { exact: true }).fill('2026-12-22');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect.poll(() => saved.taches.find(t => t.id === 'finitions')?.debut).toBe('2026-12-20');
+  await expect.poll(rowIds).toEqual(initial);
+  await page.reload();
+  await expect.poll(rowIds).toEqual(initial);
+  await page.getByRole('button', { name: /Finitions du gros œuvre, .*du/ }).click();
+  await expect(page.getByLabel('Début', { exact: true })).toHaveValue('2026-12-20');
+  await page.getByLabel(/Fondations et dallage · Lot 01/).uncheck();
+  await expect(page.getByLabel('Début', { exact: true })).toHaveValue('2026-12-20');
+  await page.getByLabel(/Fondations et dallage · Lot 01/).check();
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect.poll(() => saved.taches.find(t => t.id === 'finitions')?.debut).toBe('2027-01-09');
+  // Déplacement clavier après création, sans recalcul automatique au rechargement.
+  const bar = page.getByRole('button', { name: 'Déplacer « Finitions du gros œuvre »', exact: true });
+  await bar.focus(); await page.keyboard.press('ArrowLeft');
+  await expect.poll(() => saved.taches.find(t => t.id === 'finitions')?.debut).toBe('2027-01-08');
+  await expect.poll(rowIds).toEqual(initial);
+  await page.reload();
+  await expect(bar).toHaveAttribute('title', /2027-01-08 – 2027-01-10/);
+  await expect.poll(rowIds).toEqual(initial);
+  expect(saved.taches.find(t => t.id === 'fondations')?.fin).toBe('2027-01-08');
 });
