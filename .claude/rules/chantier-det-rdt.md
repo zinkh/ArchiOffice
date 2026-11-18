@@ -239,7 +239,7 @@ vide (`available: false`) et refuse l'écriture en 503.
   métallique (3 postes) »), les lignes « Nouvel article » sont ignorées, et dans le texte du CCTP les prescriptions des ouvrages
   passent avant le texte générique des chapitres réservés au CCTP (que le plafond de 900 caractères coupe en dernier).
 - **Enregistrement automatique** (1,2 s, écritures chaînées, rien avant la fin de la lecture), comme la consultation ACT.
-- **PDF** (`planningChantierPdf.ts`, charte du cabinet, « P1|2 ») : complet, ou un lot seul à remettre à son entreprise.
+- **PDF** (`planningChantierPdf.ts`, charte du cabinet, « P1|2 ») : complet, ou un lot seul à remettre à son entreprise ; A4 ou A3, plage de dates facultative (numérotation S1 / M1 conservée), bandeau mois ou année, étiquette « Aujourd'hui », rappel « (suite) » du lot et légende qui suit le contenu (voir `docs/planning-chantier.md`).
 - **Affichage, couleurs AOR, dépendances fin à début, exports XML et PDF** : voir `docs/planning-chantier.md`. Les dépendances sont conservées dans le JSON existant, sans migration supplémentaire ; le serveur refuse les cycles. Les préférences sont locales par cabinet, compte et affaire.
 - **Pas encore fait** : glisser-déposer des barres, liaison avec les jalons de mission.
 
