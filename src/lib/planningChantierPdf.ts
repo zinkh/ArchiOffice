@@ -21,7 +21,6 @@ export interface PlanningPdfOptions {
 }
 
 const MARGIN = 12;
-const LABEL_W = 78;
 const ROW_H = 5.2;
 const GRIS_FOND = [236, 236, 236] as const;
 const GRIS_BARRE = [150, 150, 150] as const;
@@ -41,6 +40,8 @@ export async function exportPlanningToPDF(
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const lot = opts.lotId ? lots.find(l => l.id === opts.lotId) : undefined;
   const affichage = opts.affichage ?? AFFICHAGE_PLANNING;
+  // La largeur des périodes est un zoom écran. Le PDF ajuste toujours toutes les périodes.
+  const LABEL_W = Math.min(140, Math.max(40, 78 * affichage.largeurLibelles / AFFICHAGE_PLANNING.largeurLibelles));
   const lignes = planningParLot(planning, lots).filter(l => (!opts.lotId || l.lot?.id === opts.lotId) && (affichage.generales || l.lot));
   const bornes = bornesPlanning({ ...planning, taches: lignes.flatMap(l => l.taches) });
 
@@ -141,7 +142,7 @@ export async function exportPlanningToPDF(
       place(ROW_H);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(17, 24, 39);
       const retard = etatTache(t, aujourdhui) === 'en_retard' ? ' [Retard]' : '';
-      doc.text(coupe(`${t.avancement} %${retard} ${t.libelle}`, LABEL_W - 24), MARGIN + 4, y + ROW_H * 0.7);
+      doc.text(coupe(`${affichage.avancement ? `${t.avancement} % ` : ''}${retard} ${t.libelle}`, LABEL_W - 24), MARGIN + 4, y + ROW_H * 0.7);
       doc.setFontSize(6); doc.setTextColor(90, 90, 90);
       doc.text(`${fmt(t.debut).slice(0, 5)} - ${fmt(t.fin).slice(0, 5)}`, x0 - 1.5, y + ROW_H * 0.7, { align: 'right' });
       if (t.jalon) {
@@ -151,7 +152,7 @@ export async function exportPlanningToPDF(
         const bx = xDate(t.debut);
         const bw = Math.max(0.8, xFin(t.fin) - bx);
         doc.setFillColor(...couleur); doc.rect(bx, y + 1, bw, ROW_H - 2, 'F');
-        if (t.avancement > 0) { doc.setFillColor(...GRIS_FAIT); doc.rect(bx, y + 1, bw * (t.avancement / 100), ROW_H - 2, 'F'); }
+        if (affichage.avancement && t.avancement > 0) { doc.setFillColor(...GRIS_FAIT); doc.rect(bx, y + 1, bw * (t.avancement / 100), ROW_H - 2, 'F'); }
       }
       y += ROW_H;
     }
@@ -183,7 +184,7 @@ export async function exportPlanningToPDF(
   y += 7; place(6);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(75, 85, 99);
   doc.setFillColor(...GRIS_BARRE); doc.rect(MARGIN, y - 2.5, 8, 3, 'F'); doc.text('Prévu', MARGIN + 10, y);
-  doc.setFillColor(...GRIS_FAIT); doc.rect(MARGIN + 26, y - 2.5, 8, 3, 'F'); doc.text('Réalisé', MARGIN + 36, y);
+  if (affichage.avancement) { doc.setFillColor(...GRIS_FAIT); doc.rect(MARGIN + 26, y - 2.5, 8, 3, 'F'); doc.text('Réalisé', MARGIN + 36, y); }
   doc.circle(MARGIN + 58, y - 1, 1.3, 'F'); doc.text('Jalon', MARGIN + 61, y);
 
   drawAgencyFooters(doc, settings, letterhead);
