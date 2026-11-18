@@ -449,8 +449,14 @@ réutilisation de `ProjectDetail.tsx` ni des éditeurs PRO** (ils lisent des rou
 une feuille avec un plan des lots et chapitres, le DPGF une grille (unité, quantité, P.U., total, sous-total de lot recalculé
 depuis les articles, jamais un « pour mémoire ») avec une ligne de détail repliable pour proposer et commenter. **Promotion** :
 pastille et bouton « Essayer ArchiOffice » (`/register`) dans l'en-tête, mention en pied de page ; rien sur les boutons
-grisés. **Pas encore fait** : les onglets ACT, comptes rendus, réserves et tâches gardent leur présentation en cartes
-(seulement rangés sous la bonne famille d'onglets) ; pas vérifié dans un navigateur.
+grisés. **Ateliers de chantier** (`SharedChantier.tsx`, `SharedKpis.tsx`, `tests/sharedChantier.test.ts`) : réserves AOR et GPA en
+tableau (n°, intitulé, localisation, entreprise, échéance avec jours de retard, statut en pastille colorée, détail repliable
+pour description, réponse et échéance) sous quatre chiffres (total, à lever, en retard, levées) et des filtres ; une réserve
+« pour mémoire » n'est jamais en retard (`reserveOverdueDays`, `isReserveForRecord`). Comptes rendus en liste à gauche et fiche
+à droite, libellés visibles au-dessus des champs. ACT en tableaux à en-têtes avec le repère « Meilleur prix » (offre conforme
+la moins chère du lot, jamais une offre non conforme). Tâches en tableau avec barre d'avancement. Mécaniques inchangées :
+enregistrement à la sortie du champ, proposition pour l'ACT, droits revérifiés par le serveur. **Pas encore fait** : photos
+et plan des réserves (voir la liste « Pas encore fait » plus haut) ; pas vérifié dans un navigateur.
 
 **Écriture par proposition** (`project_share_proposals`,
 `supabase/migrate_project_share_proposals.sql`, `server/routes/projectShareProposals.ts`).

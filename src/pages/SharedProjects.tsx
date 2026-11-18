@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import SharedDocument from '../components/SharedDocument';
 import SharedProjectShell from '../components/shared/SharedProjectShell';
+import SharedKpis from '../components/shared/SharedKpis';
 import { SharedAct, SharedReports, SharedReserves } from '../components/SharedChantier';
 import { sharedInitialTab, sharedProSubTabs, sharedVisibleTabs } from '../lib/sharedTabs';
 import type { ProjectTabId } from '../lib/projectTabs';
@@ -71,9 +72,9 @@ function TaskRow({ projectId, task, canWrite, onSaved, onError }: {
   };
   return (
     <tr style={{ borderTop: '1px solid var(--tblr-border)' }}>
-      <td className="py-2 pr-3 text-sm text-[var(--tblr-text)]">{task.title}</td>
-      <td className="py-2 pr-3 text-xs text-[var(--tblr-muted)] whitespace-nowrap">{task.start_date} → {task.end_date}</td>
-      <td className="py-2 pr-3">
+      <td className="px-3 py-2 text-sm font-medium text-[var(--tblr-text)]">{task.title}</td>
+      <td className="px-3 py-2 text-xs text-[var(--tblr-muted)] whitespace-nowrap">{task.start_date} → {task.end_date}</td>
+      <td className="px-3 py-2">
         {canWrite ? (
           <select
             aria-label={t('shared_progress')} value={task.status ?? 'todo'} onChange={e => patch({ status: e.target.value })}
@@ -85,14 +86,19 @@ function TaskRow({ projectId, task, canWrite, onSaved, onError }: {
           <span className="text-xs">{t(`shared_task_status_${task.status ?? 'todo'}`)}</span>
         )}
       </td>
-      <td className="py-2 text-xs whitespace-nowrap">
-        {canWrite ? (
-          <input
-            type="number" min={0} max={100} aria-label={t('shared_progress')} defaultValue={task.progress ?? 0}
-            onBlur={e => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v <= 100 && v !== (task.progress ?? 0)) void patch({ progress: v }); }}
-            className={`${fieldClass} w-16`}
-          />
-        ) : `${task.progress ?? 0} %`}
+      <td className="px-3 py-2 text-xs whitespace-nowrap">
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-20 rounded-full overflow-hidden" style={{ background: 'var(--tblr-surface-2)' }} aria-hidden>
+            <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, task.progress ?? 0))}%`, background: 'var(--tblr-primary)' }} />
+          </div>
+          {canWrite ? (
+            <input
+              type="number" min={0} max={100} aria-label={t('shared_progress')} defaultValue={task.progress ?? 0}
+              onBlur={e => { const v = Number(e.target.value); if (Number.isInteger(v) && v >= 0 && v <= 100 && v !== (task.progress ?? 0)) void patch({ progress: v }); }}
+              className={`${fieldClass} w-16`}
+            />
+          ) : <span className="tabular-nums">{`${task.progress ?? 0} %`}</span>}
+        </div>
       </td>
     </tr>
   );
@@ -252,20 +258,37 @@ function SharedDetail({ projectId }: { projectId: string }) {
       {activeTab === 'GPA' && gpaRight && <SharedReserves projectId={projectId} kind="gpa" canWrite={gpaRight.canWrite} />}
 
       {activeTab === 'TACHES' && tasksGrant && (
-        <section className="rounded-lg p-4 overflow-x-auto" style={cardStyle}>
-          <h2 className="text-sm font-bold mb-2 text-[var(--tblr-text)]">{t('shared_tasks_title')}</h2>
+        <section className="space-y-3">
+          <h2 className="text-sm font-bold text-[var(--tblr-text)]">{t('shared_tasks_title')}</h2>
           {tasks && tasks.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_tasks_empty')}</p>}
           {tasks && tasks.length > 0 && (
-            <table className="w-full text-left">
-              <tbody>
-                {tasks.map(task => (
-                  <TaskRow key={`${task.id}-${task.status}-${task.progress}`} projectId={projectId} task={task} canWrite={canWrite} onSaved={reload} onError={setError} />
-                ))}
-              </tbody>
-            </table>
+            <>
+              <SharedKpis items={[
+                { label: t('shared_kpi_tasks'), value: tasks.length },
+                { label: t('shared_kpi_tasks_open'), value: tasks.filter(x => x.status === 'in_progress' || x.status === 'review').length },
+                { label: t('shared_kpi_tasks_done'), value: tasks.filter(x => x.status === 'done').length, tone: tasks.some(x => x.status === 'done') ? 'ok' : 'neutral' },
+              ]} />
+              <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                      <th scope="col" className="px-3 py-2 text-xs font-semibold">{t('shared_col_task')}</th>
+                      <th scope="col" className="px-3 py-2 text-xs font-semibold">{t('shared_col_period')}</th>
+                      <th scope="col" className="px-3 py-2 text-xs font-semibold">{t('shared_col_status')}</th>
+                      <th scope="col" className="px-3 py-2 text-xs font-semibold">{t('shared_col_progress')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tasks.map(task => (
+                      <TaskRow key={`${task.id}-${task.status}-${task.progress}`} projectId={projectId} task={task} canWrite={canWrite} onSaved={reload} onError={setError} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
           {canWrite && (
-            <form onSubmit={addTask} className="mt-3 flex flex-wrap items-end gap-2">
+            <form onSubmit={addTask} className="flex flex-wrap items-end gap-2 rounded-lg p-3" style={cardStyle}>
               <input required value={title} onChange={e => setTitle(e.target.value)} maxLength={200} placeholder={t('shared_task_title')} aria-label={t('shared_task_title')} className={`${fieldClass} flex-1 min-w-40`} />
               <input required type="date" value={start} onChange={e => setStart(e.target.value)} aria-label={t('shared_task_start')} className={fieldClass} />
               <input required type="date" value={end} onChange={e => setEnd(e.target.value)} aria-label={t('shared_task_end')} className={fieldClass} />

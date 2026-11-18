@@ -1,11 +1,16 @@
-// Espace d'un confrère invité : suivi de chantier (comptes rendus, réserves AOR, réserves GPA).
-// Le serveur revérifie le droit à chaque requête (server/routes/projectShareChantier.ts) ; l'écran
-// ne fait que masquer ce qui n'est pas accordé. Chaque champ s'enregistre à la sortie du champ,
-// jamais à chaque frappe : la réponse du serveur ne doit pas écraser la saisie en cours.
-import { useCallback, useEffect, useState } from 'react';
+// Espace d'un confrère invité : suivi de chantier (comptes rendus, réserves AOR, réserves GPA, ACT).
+// Même présentation que les ateliers du cabinet (chiffres en tête, tableaux, pastilles de statut), limitée
+// à ce que le cabinet a accordé. Le serveur revérifie le droit à chaque requête
+// (server/routes/projectShareChantier.ts) ; l'écran ne fait que masquer ce qui n'est pas accordé.
+// Chaque champ s'enregistre à la sortie du champ, jamais à chaque frappe : la réponse du serveur ne doit
+// pas écraser la saisie en cours.
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
-import { RESERVE_STATUSES, reserveStatusKey } from './pro/reserveShared';
+import { cn } from '../lib/utils';
+import SharedKpis from './shared/SharedKpis';
+import { RESERVE_STATUSES, isReserveClosed, isReserveForRecord, reserveOverdueDays, reserveStatusKey, statusPillClass } from './pro/reserveShared';
 
 interface SharedReport {
   id: string; report_number: number; date: string; statut: string | null;
@@ -23,9 +28,10 @@ interface SharedReserve {
 const cardStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' };
 const fieldClass = 'px-3 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60';
 const buttonClass = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-50';
+const thClass = 'px-3 py-2 text-xs font-semibold text-left';
 const NOTE_STATUSES = ['open', 'done'] as const;
 
-/** Champ texte enregistré à la sortie du champ, seulement si la valeur a changé. */
+/** Champ texte enregistré à la sortie du champ, seulement si la valeur a changé. Le libellé reste visible. */
 function CommitField({ value, label, disabled, multiline, type = 'text', maxLength, onCommit }: {
   value: string | null; label: string; disabled: boolean; multiline?: boolean; type?: 'text' | 'date'; maxLength?: number;
   onCommit: (next: string) => void;
@@ -37,9 +43,14 @@ function CommitField({ value, label, disabled, multiline, type = 'text', maxLeng
       if (next !== (value ?? '').trim()) onCommit(next);
     },
   };
-  return multiline
-    ? <textarea {...common} rows={3} className={`${fieldClass} w-full`} />
-    : <input {...common} type={type} className={`${fieldClass} w-full`} />;
+  return (
+    <label className="block space-y-0.5">
+      <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{label}</span>
+      {multiline
+        ? <textarea {...common} rows={3} className={`${fieldClass} w-full`} />
+        : <input {...common} type={type} className={`${fieldClass} w-full`} />}
+    </label>
+  );
 }
 
 export function SharedReports({ projectId, canWrite }: { projectId: string; canWrite: boolean }) {
@@ -106,62 +117,90 @@ export function SharedReports({ projectId, canWrite }: { projectId: string; canW
   if (!reports) return error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null;
 
   return (
-    <section className="rounded-lg p-4 space-y-3" style={cardStyle}>
+    <section className="space-y-3">
       <h2 className="text-sm font-bold text-[var(--tblr-text)]">{t('shared_reports_title')}</h2>
       {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
       {reports.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_reports_empty')}</p>}
       {report && (
-        <>
-          <select value={reportId} onChange={e => setReportId(e.target.value)} aria-label={t('shared_reports_title')} className={fieldClass}>
-            {reports.map(r => <option key={r.id} value={r.id}>{t('shared_report_label', { number: r.report_number, date: r.date })}</option>)}
-          </select>
-          {canWrite && report.statut === 'diffuse' && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_report_locked')}</p>}
-          <div className="grid gap-2 sm:grid-cols-2">
-            <CommitField key={`m-${report.id}-${report.meteo}`} value={report.meteo} label={t('shared_report_meteo')} disabled={!editable} maxLength={60} onCommit={v => patchReport({ meteo: v })} />
-            <CommitField key={`t-${report.id}-${report.temperature}`} value={report.temperature} label={t('shared_report_temperature')} disabled={!editable} maxLength={30} onCommit={v => patchReport({ temperature: v })} />
-            <CommitField key={`n-${report.id}-${report.nextMeeting}`} value={report.nextMeeting} label={t('shared_report_next')} disabled={!editable} maxLength={200} onCommit={v => patchReport({ nextMeeting: v })} />
+        <div className="lg:grid lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-4 space-y-3 lg:space-y-0">
+          <nav aria-label={t('shared_reports_list')} className="rounded-lg p-2 self-start max-h-[70dvh] overflow-y-auto" style={cardStyle}>
+            <ul className="space-y-0.5">
+              {reports.map(r => {
+                const active = r.id === reportId;
+                return (
+                  <li key={r.id}>
+                    <button type="button" aria-current={active ? 'true' : undefined} onClick={() => setReportId(r.id)}
+                      className={cn('w-full text-left px-2 py-1.5 rounded-md text-sm hover:bg-[var(--tblr-surface-2)]', active && 'font-semibold bg-[var(--tblr-surface-2)]')}>
+                      <span className="block text-[var(--tblr-text)]">{t('shared_report_label', { number: r.report_number, date: r.date })}</span>
+                      {r.statut && <span className="block text-[0.6875rem] uppercase tracking-wider text-[var(--tblr-muted)]">{r.statut}</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+
+          <div className="rounded-lg p-4 space-y-3 min-w-0" style={cardStyle}>
+            <h3 className="text-sm font-bold text-[var(--tblr-text)]">{t('shared_report_label', { number: report.report_number, date: report.date })}</h3>
+            {canWrite && report.statut === 'diffuse' && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_report_locked')}</p>}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <CommitField key={`m-${report.id}-${report.meteo}`} value={report.meteo} label={t('shared_report_meteo')} disabled={!editable} maxLength={60} onCommit={v => patchReport({ meteo: v })} />
+              <CommitField key={`t-${report.id}-${report.temperature}`} value={report.temperature} label={t('shared_report_temperature')} disabled={!editable} maxLength={30} onCommit={v => patchReport({ temperature: v })} />
+              <CommitField key={`n-${report.id}-${report.nextMeeting}`} value={report.nextMeeting} label={t('shared_report_next')} disabled={!editable} maxLength={200} onCommit={v => patchReport({ nextMeeting: v })} />
+            </div>
+            <CommitField key={`g-${report.id}-${report.meetingNotes}`} value={report.meetingNotes} label={t('shared_report_notes')} disabled={!editable} multiline maxLength={5000} onCommit={v => patchReport({ meetingNotes: v })} />
+
+            <ul className="space-y-3">
+              {notes.length === 0 && <li className="text-xs text-[var(--tblr-muted)]">{t('shared_notes_empty')}</li>}
+              {notes.map(note => (
+                <li key={`${note.id}-${note.status}-${note.due_date}-${note.text}`} className="space-y-1.5 pt-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-[var(--tblr-text)]">
+                      {note.note_number}. {note.category}{note.responsible_company ? ` · ${note.responsible_company}` : ''}
+                    </span>
+                    <select
+                      value={note.status ?? 'open'} disabled={!editable} aria-label={t('shared_note_status')}
+                      onChange={e => patchNote(note, { status: e.target.value })} className={fieldClass}
+                    >
+                      {NOTE_STATUSES.map(s => <option key={s} value={s}>{t(`shared_note_status_${s}`)}</option>)}
+                      {note.status && !(NOTE_STATUSES as readonly string[]).includes(note.status) && <option value={note.status}>{note.status}</option>}
+                    </select>
+                  </div>
+                  <CommitField value={note.text} label={t('shared_note_text')} disabled={!editable} multiline maxLength={5000} onCommit={v => patchNote(note, { text: v })} />
+                  <CommitField value={note.due_date} label={t('shared_note_due')} disabled={!editable} type="date" onCommit={v => patchNote(note, { due_date: v })} />
+                </li>
+              ))}
+            </ul>
+
+            {editable && (
+              <form onSubmit={addNote} className="flex flex-wrap items-end gap-2 pt-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                <input required value={category} onChange={e => setCategory(e.target.value)} maxLength={120} placeholder={t('shared_note_category')} aria-label={t('shared_note_category')} className={`${fieldClass} min-w-40`} />
+                <input value={text} onChange={e => setText(e.target.value)} maxLength={5000} placeholder={t('shared_note_text')} aria-label={t('shared_note_text')} className={`${fieldClass} flex-1 min-w-40`} />
+                <button type="submit" className={buttonClass}>{t('shared_note_add')}</button>
+              </form>
+            )}
           </div>
-          <CommitField key={`g-${report.id}-${report.meetingNotes}`} value={report.meetingNotes} label={t('shared_report_notes')} disabled={!editable} multiline maxLength={5000} onCommit={v => patchReport({ meetingNotes: v })} />
-
-          <ul className="space-y-3">
-            {notes.length === 0 && <li className="text-xs text-[var(--tblr-muted)]">{t('shared_notes_empty')}</li>}
-            {notes.map(note => (
-              <li key={`${note.id}-${note.status}-${note.due_date}-${note.text}`} className="space-y-1.5 pt-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-[var(--tblr-text)]">
-                    {note.note_number}. {note.category}{note.responsible_company ? ` · ${note.responsible_company}` : ''}
-                  </span>
-                  <select
-                    value={note.status ?? 'open'} disabled={!editable} aria-label={t('shared_note_status')}
-                    onChange={e => patchNote(note, { status: e.target.value })} className={fieldClass}
-                  >
-                    {NOTE_STATUSES.map(s => <option key={s} value={s}>{t(`shared_note_status_${s}`)}</option>)}
-                    {note.status && !(NOTE_STATUSES as readonly string[]).includes(note.status) && <option value={note.status}>{note.status}</option>}
-                  </select>
-                </div>
-                <CommitField value={note.text} label={t('shared_note_text')} disabled={!editable} multiline maxLength={5000} onCommit={v => patchNote(note, { text: v })} />
-                <CommitField value={note.due_date} label={t('shared_note_due')} disabled={!editable} type="date" onCommit={v => patchNote(note, { due_date: v })} />
-              </li>
-            ))}
-          </ul>
-
-          {editable && (
-            <form onSubmit={addNote} className="flex flex-wrap items-end gap-2 pt-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
-              <input required value={category} onChange={e => setCategory(e.target.value)} maxLength={120} placeholder={t('shared_note_category')} aria-label={t('shared_note_category')} className={`${fieldClass} min-w-40`} />
-              <input value={text} onChange={e => setText(e.target.value)} maxLength={5000} placeholder={t('shared_note_text')} aria-label={t('shared_note_text')} className={`${fieldClass} flex-1 min-w-40`} />
-              <button type="submit" className={buttonClass}>{t('shared_note_add')}</button>
-            </form>
-          )}
-        </>
+        </div>
       )}
     </section>
   );
+}
+
+type ReserveFilter = 'all' | 'open' | 'late' | 'done';
+
+/** État d'une réserve pour le suivi : levée, en retard, à lever ou pour mémoire (jamais en retard). */
+function reserveState(item: SharedReserve) {
+  // Une échéance absente vaut '' : `reserveOverdueDays` ne la compte jamais comme un retard.
+  const like = { status: (item.status ?? 'A faire') as any, due_date: item.due_date ?? '' };
+  return { closed: isReserveClosed(like), forRecord: isReserveForRecord(like), lateDays: reserveOverdueDays(like) };
 }
 
 export function SharedReserves({ projectId, kind, canWrite }: { projectId: string; kind: 'reserves' | 'gpa'; canWrite: boolean }) {
   const { t } = useTranslation();
   const [items, setItems] = useState<SharedReserve[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ReserveFilter>('all');
+  const [open, setOpen] = useState<string | null>(null);
   const path = `/api/shared/projects/${projectId}/${kind === 'gpa' ? 'gpa-reserves' : 'reserves'}`;
 
   useEffect(() => {
@@ -177,34 +216,116 @@ export function SharedReserves({ projectId, kind, canWrite }: { projectId: strin
     } catch (e: any) { setError(e?.message || t('share_error')); }
   };
 
+  const counts = useMemo(() => {
+    const list = items ?? [];
+    const states = list.map(reserveState);
+    return {
+      total: list.length,
+      open: states.filter(s => !s.closed && !s.forRecord).length,
+      late: states.filter(s => s.lateDays > 0).length,
+      done: states.filter(s => s.closed).length,
+    };
+  }, [items]);
+
   if (!items) return error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null;
 
+  const visible = items.filter(item => {
+    const s = reserveState(item);
+    return filter === 'all' || (filter === 'open' && !s.closed && !s.forRecord) || (filter === 'late' && s.lateDays > 0) || (filter === 'done' && s.closed);
+  });
+  const filters: Array<[ReserveFilter, string]> = [['all', 'shared_filter_all'], ['open', 'shared_kpi_open'], ['late', 'shared_kpi_late'], ['done', 'shared_kpi_done']];
+  const COLS = 7;
+
   return (
-    <section className="rounded-lg p-4 space-y-3" style={cardStyle}>
+    <section className="space-y-3">
       <h2 className="text-sm font-bold text-[var(--tblr-text)]">{t(kind === 'gpa' ? 'shared_gpa_title' : 'shared_reserves_title')}</h2>
       {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
       {items.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_reserves_empty')}</p>}
-      <ul className="space-y-3">
-        {items.map(item => (
-          <li key={`${item.id}-${item.status}-${item.due_date}-${item.reponse}-${item.description}`} className="space-y-1.5 pt-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-medium text-[var(--tblr-text)]">{item.number ? `N° ${item.number} · ` : ''}{item.title}</span>
-              <select
-                value={item.status ?? 'A faire'} disabled={!canWrite} aria-label={t('shared_reserve_status')}
-                onChange={e => patch(item, { status: e.target.value })} className={fieldClass}
-              >
-                {RESERVE_STATUSES.map(s => <option key={s} value={s}>{t(reserveStatusKey(s) ?? s)}</option>)}
-              </select>
-            </div>
-            <div className="text-xs text-[var(--tblr-muted)]">
-              {[item.batiment, item.local, item.lots, item.entreprises].filter(Boolean).join(' · ')}
-            </div>
-            <CommitField value={item.description} label={t('shared_reserve_description')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patch(item, { description: v })} />
-            <CommitField value={item.reponse} label={t('shared_reserve_response')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patch(item, { reponse: v })} />
-            <CommitField value={item.due_date} label={t('shared_reserve_due')} disabled={!canWrite} type="date" onCommit={v => patch(item, { due_date: v })} />
-          </li>
-        ))}
-      </ul>
+      {items.length > 0 && (
+        <>
+          <SharedKpis items={[
+            { label: t('shared_kpi_total'), value: counts.total },
+            { label: t('shared_kpi_open'), value: counts.open },
+            { label: t('shared_kpi_late'), value: counts.late, tone: counts.late > 0 ? 'danger' : 'neutral' },
+            { label: t('shared_kpi_done'), value: counts.done, tone: counts.done > 0 ? 'ok' : 'neutral' },
+          ]} />
+          <div role="group" aria-label={t('shared_filter_label')} className="flex flex-wrap gap-1.5">
+            {filters.map(([id, label]) => (
+              <button key={id} type="button" aria-pressed={filter === id} onClick={() => setFilter(id)}
+                className={cn('px-3 py-1 rounded-full text-xs font-semibold border', filter === id ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100' : 'border-[var(--tblr-border)] text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]')}>
+                {t(label)}
+              </button>
+            ))}
+          </div>
+          <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+            <table className="w-full text-sm border-collapse" style={{ minWidth: 760 }}>
+              <thead>
+                <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                  <th scope="col" className={`${thClass} w-16`}>{t('shared_col_numero')}</th>
+                  <th scope="col" className={thClass}>{t('shared_col_title')}</th>
+                  <th scope="col" className={thClass}>{t('shared_col_where')}</th>
+                  <th scope="col" className={thClass}>{t('shared_col_company')}</th>
+                  <th scope="col" className={`${thClass} w-36`}>{t('shared_col_due')}</th>
+                  <th scope="col" className={`${thClass} w-48`}>{t('shared_col_status')}</th>
+                  <th scope="col" className="w-10"><span className="sr-only">{t('shared_row_details')}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.length === 0 && <tr><td colSpan={COLS} className="px-3 py-4 text-xs text-[var(--tblr-muted)]">{t('shared_reserves_no_match')}</td></tr>}
+                {visible.map(item => {
+                  const status = (item.status ?? 'A faire') as any;
+                  const { lateDays } = reserveState(item);
+                  const expanded = open === item.id;
+                  return (
+                    <Fragment key={item.id}>
+                      <tr style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                        <td className="px-3 py-2 align-top font-mono text-xs text-[var(--tblr-muted)]">{item.number ?? ''}</td>
+                        <td className="px-3 py-2 align-top font-medium text-[var(--tblr-text)]">{item.title}</td>
+                        <td className="px-3 py-2 align-top text-xs text-[var(--tblr-muted)]">{[item.batiment, item.local].filter(Boolean).join(' · ')}</td>
+                        <td className="px-3 py-2 align-top text-xs text-[var(--tblr-muted)]">{[item.lots, item.entreprises].filter(Boolean).join(' · ')}</td>
+                        <td className="px-3 py-2 align-top text-xs whitespace-nowrap">
+                          <span className="block text-[var(--tblr-text)]">{item.due_date ?? ''}</span>
+                          {lateDays > 0 && <span className="block font-semibold text-red-600">{t('shared_late_days', { count: lateDays })}</span>}
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          {canWrite ? (
+                            <select
+                              value={status} aria-label={t('shared_reserve_status')} onChange={e => patch(item, { status: e.target.value })}
+                              className={cn('pill-select', statusPillClass(status))}
+                            >
+                              {RESERVE_STATUSES.map(s => <option key={s} value={s}>{t(reserveStatusKey(s) ?? s)}</option>)}
+                            </select>
+                          ) : (
+                            <span className={cn(statusPillClass(status), 'inline-block cursor-default')}>{t(reserveStatusKey(status) ?? status)}</span>
+                          )}
+                        </td>
+                        <td className="px-1 py-2 align-top">
+                          <button type="button" aria-expanded={expanded} aria-label={t('shared_row_details')} title={t('shared_row_details')}
+                            onClick={() => setOpen(expanded ? null : item.id)}
+                            className="rounded-md p-1 text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)] hover:text-[var(--tblr-text)]">
+                            {expanded ? <IconChevronDown size={14} aria-hidden /> : <IconChevronRight size={14} aria-hidden />}
+                          </button>
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr>
+                          <td colSpan={COLS} className="px-4 py-3" style={{ background: 'var(--tblr-surface-2)' }}>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <CommitField key={`d-${item.id}-${item.description}`} value={item.description} label={t('shared_reserve_description')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patch(item, { description: v })} />
+                              <CommitField key={`r-${item.id}-${item.reponse}`} value={item.reponse} label={t('shared_reserve_response')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patch(item, { reponse: v })} />
+                              <CommitField key={`e-${item.id}-${item.due_date}`} value={item.due_date} label={t('shared_reserve_due')} disabled={!canWrite} type="date" onCommit={v => patch(item, { due_date: v })} />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -226,6 +347,25 @@ interface ActProposal {
 }
 
 const euros = (v: number | null) => (v == null ? '' : new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v));
+
+/** Table de l'ACT : même cadre et mêmes en-têtes que les tableaux du cabinet. */
+function ActTable({ title, heads, children }: { title: string; heads: string[]; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs font-bold text-[var(--tblr-text)]">{title}</h3>
+      <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
+        <table className="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+              {heads.map(h => <th key={h} scope="col" className={thClass}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>{children}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Atelier ACT d'un confrère : consultation, offres, attributions et marchés. La modification est une PROPOSITION :
@@ -266,125 +406,126 @@ export function SharedAct({ projectId, canPropose }: { projectId: string; canPro
   const lotName = (id: string | null) => view.lots.find(l => l.id === id)?.name ?? id ?? '';
   const company = (id: string | null) => view.entreprises.find(e => e.id === id)?.nom ?? id ?? '';
   const empty = !view.entreprises.length && !view.offres.length && !view.marches.length;
-  const heading = 'text-xs font-bold text-[var(--tblr-text)] mb-1';
   const pending = proposals.filter(p => p.status === 'pending');
   const pendingOn = (type: string, id: string, field: string) => pending.find(p => p.targetType === type && p.targetId === id && p.field === field);
 
+  // Meilleure offre conforme de chaque lot : un repère de lecture, comme le comparatif du cabinet.
+  const best = new Map<string, number>();
+  for (const o of view.offres) {
+    if (!o.conforme || !o.lot_id || !o.montant_base || o.montant_base <= 0) continue;
+    const current = best.get(o.lot_id);
+    if (current === undefined || o.montant_base < current) best.set(o.lot_id, o.montant_base);
+  }
+  const signed = view.marches.filter(m => m.statut_signature === 'signe').length;
+
   return (
-    <section className="rounded-lg p-4 space-y-4" style={cardStyle}>
+    <section className="space-y-4">
       <h2 className="text-sm font-bold text-[var(--tblr-text)]">{t('shared_act_title')}</h2>
+      {!empty && (
+        <SharedKpis items={[
+          { label: t('shared_act_entreprises'), value: view.entreprises.length },
+          { label: t('shared_act_offres'), value: view.offres.length },
+          { label: t('shared_act_attributions'), value: view.attributions.length },
+          { label: t('shared_act_marches'), value: `${signed} / ${view.marches.length}` },
+        ]} />
+      )}
       {canPropose && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_act_propose_hint')}</p>}
       {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
       {notice && <p role="status" className="text-xs text-[var(--tblr-muted)]">{notice}</p>}
       {empty && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_act_empty')}</p>}
 
       {view.entreprises.length > 0 && (
-        <div className="overflow-x-auto">
-          <h3 className={heading}>{t('shared_act_entreprises')}</h3>
-          <table className="w-full text-left text-xs">
-            <tbody>
-              {view.entreprises.map(e => (
-                <tr key={e.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
-                  <td className="py-1.5 pr-3 font-medium text-[var(--tblr-text)]">{e.nom}</td>
-                  <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">{e.lots_ids.map(lotName).join(', ')}</td>
-                  <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">
-                    {e.ne_repond_pas ? t('shared_act_no_answer')
-                      : e.offre_recue_le ? t('shared_act_offer_received', { date: e.offre_recue_le })
-                      : e.dce_transmis_le ? t('shared_act_dce_sent', { date: e.dce_transmis_le }) : ''}
-                  </td>
-                  {canPropose && (
-                    <td className="py-1.5 whitespace-nowrap">
-                      <label className="inline-flex items-center gap-1 mr-3">
-                        <input
-                          key={`nr-${e.id}-${e.ne_repond_pas}`} type="checkbox" defaultChecked={e.ne_repond_pas}
-                          onChange={ev => propose('entreprise', e.id, 'ne_repond_pas', ev.target.checked)} aria-label={t('shared_act_no_answer')}
-                        />
-                        {t('shared_act_no_answer')}
-                      </label>
-                      <CommitField
-                        key={`rl-${e.id}-${e.relance_le}`} value={e.relance_le} label={t('shared_act_relance')} disabled={!!pendingOn('entreprise', e.id, 'relance_le')}
-                        type="date" onCommit={v => propose('entreprise', e.id, 'relance_le', v)}
-                      />
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ActTable title={t('shared_act_entreprises')} heads={[t('shared_col_company'), t('shared_col_lots'), t('shared_col_state'), ...(canPropose ? [t('shared_col_proposal')] : [])]}>
+          {view.entreprises.map(e => (
+            <tr key={e.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+              <td className="px-3 py-2 align-top font-medium text-[var(--tblr-text)]">{e.nom}</td>
+              <td className="px-3 py-2 align-top text-[var(--tblr-muted)]">{e.lots_ids.map(lotName).join(', ')}</td>
+              <td className="px-3 py-2 align-top text-[var(--tblr-muted)]">
+                {e.ne_repond_pas ? t('shared_act_no_answer')
+                  : e.offre_recue_le ? t('shared_act_offer_received', { date: e.offre_recue_le })
+                  : e.dce_transmis_le ? t('shared_act_dce_sent', { date: e.dce_transmis_le }) : ''}
+              </td>
+              {canPropose && (
+                <td className="px-3 py-2 align-top whitespace-nowrap space-y-1">
+                  <label className="inline-flex items-center gap-1 mr-3">
+                    <input
+                      key={`nr-${e.id}-${e.ne_repond_pas}`} type="checkbox" defaultChecked={e.ne_repond_pas}
+                      onChange={ev => propose('entreprise', e.id, 'ne_repond_pas', ev.target.checked)} aria-label={t('shared_act_no_answer')}
+                    />
+                    {t('shared_act_no_answer')}
+                  </label>
+                  <CommitField
+                    key={`rl-${e.id}-${e.relance_le}`} value={e.relance_le} label={t('shared_act_relance')} disabled={!!pendingOn('entreprise', e.id, 'relance_le')}
+                    type="date" onCommit={v => propose('entreprise', e.id, 'relance_le', v)}
+                  />
+                </td>
+              )}
+            </tr>
+          ))}
+        </ActTable>
       )}
 
       {view.offres.length > 0 && (
-        <div className="overflow-x-auto">
-          <h3 className={heading}>{t('shared_act_offres')}</h3>
-          <table className="w-full text-left text-xs">
-            <tbody>
-              {view.offres.map(o => (
-                <tr key={o.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
-                  <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">{lotName(o.lot_id)}</td>
-                  <td className="py-1.5 pr-3 font-medium text-[var(--tblr-text)]">{company(o.entreprise_id)}</td>
-                  <td className="py-1.5 pr-3 whitespace-nowrap">{euros(o.montant_base)}</td>
-                  <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">{o.conforme ? '' : `${t('shared_act_non_conform')}${o.motif_nc ? ` : ${o.motif_nc}` : ''}`}</td>
-                  {canPropose && (
-                    <td className="py-1.5 whitespace-nowrap">
-                      <CommitField
-                        key={`mb-${o.id}-${o.montant_base}`} value={o.montant_base == null ? '' : String(o.montant_base)} label={t('shared_act_field_montant_base')}
-                        disabled={!!pendingOn('offre', o.id, 'montant_base')} onCommit={v => propose('offre', o.id, 'montant_base', v)}
-                      />
-                      <label className="inline-flex items-center gap-1 mt-1">
-                        <input
-                          key={`cf-${o.id}-${o.conforme}`} type="checkbox" defaultChecked={o.conforme}
-                          onChange={ev => propose('offre', o.id, 'conforme', ev.target.checked)} aria-label={t('shared_act_field_conforme')}
-                        />
-                        {t('shared_act_field_conforme')}
-                      </label>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ActTable title={t('shared_act_offres')} heads={[t('shared_col_lot'), t('shared_col_company'), t('shared_col_amount'), t('shared_col_conform'), ...(canPropose ? [t('shared_col_proposal')] : [])]}>
+          {view.offres.map(o => (
+            <tr key={o.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+              <td className="px-3 py-2 align-top text-[var(--tblr-muted)]">{lotName(o.lot_id)}</td>
+              <td className="px-3 py-2 align-top font-medium text-[var(--tblr-text)]">{company(o.entreprise_id)}</td>
+              <td className="px-3 py-2 align-top whitespace-nowrap font-mono tabular-nums">
+                {euros(o.montant_base)}
+                {o.lot_id && o.montant_base != null && best.get(o.lot_id) === o.montant_base && o.conforme && (
+                  <span className="ml-2 rounded-full px-2 py-0.5 text-[0.6875rem] font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">{t('shared_act_best')}</span>
+                )}
+              </td>
+              <td className="px-3 py-2 align-top text-[var(--tblr-muted)]">{o.conforme ? '' : `${t('shared_act_non_conform')}${o.motif_nc ? ` : ${o.motif_nc}` : ''}`}</td>
+              {canPropose && (
+                <td className="px-3 py-2 align-top whitespace-nowrap space-y-1">
+                  <CommitField
+                    key={`mb-${o.id}-${o.montant_base}`} value={o.montant_base == null ? '' : String(o.montant_base)} label={t('shared_act_field_montant_base')}
+                    disabled={!!pendingOn('offre', o.id, 'montant_base')} onCommit={v => propose('offre', o.id, 'montant_base', v)}
+                  />
+                  <label className="inline-flex items-center gap-1">
+                    <input
+                      key={`cf-${o.id}-${o.conforme}`} type="checkbox" defaultChecked={o.conforme}
+                      onChange={ev => propose('offre', o.id, 'conforme', ev.target.checked)} aria-label={t('shared_act_field_conforme')}
+                    />
+                    {t('shared_act_field_conforme')}
+                  </label>
+                </td>
+              )}
+            </tr>
+          ))}
+        </ActTable>
       )}
 
       {view.attributions.length > 0 && (
-        <div className="overflow-x-auto">
-          <h3 className={heading}>{t('shared_act_attributions')}</h3>
-          <table className="w-full text-left text-xs">
-            <tbody>
-              {view.attributions.map(a => (
-                <tr key={`${a.lot_id}-${a.entreprise_id}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
-                  <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">{lotName(a.lot_id)}</td>
-                  <td className="py-1.5 pr-3 font-medium text-[var(--tblr-text)]">{company(a.entreprise_id)}</td>
-                  <td className="py-1.5 whitespace-nowrap">{euros(a.montant)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ActTable title={t('shared_act_attributions')} heads={[t('shared_col_lot'), t('shared_col_company'), t('shared_col_amount')]}>
+          {view.attributions.map(a => (
+            <tr key={`${a.lot_id}-${a.entreprise_id}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+              <td className="px-3 py-2 text-[var(--tblr-muted)]">{lotName(a.lot_id)}</td>
+              <td className="px-3 py-2 font-medium text-[var(--tblr-text)]">{company(a.entreprise_id)}</td>
+              <td className="px-3 py-2 whitespace-nowrap font-mono tabular-nums">{euros(a.montant)}</td>
+            </tr>
+          ))}
+        </ActTable>
       )}
 
       {view.marches.length > 0 && (
-        <div className="overflow-x-auto">
-          <h3 className={heading}>{t('shared_act_marches')}</h3>
-          <table className="w-full text-left text-xs">
-            <tbody>
-              {view.marches.map(m => (
-                <tr key={m.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
-                  <td className="py-1.5 pr-3 text-[var(--tblr-muted)]">{[m.lot_numero, m.lot_titre].filter(Boolean).join(' ')}</td>
-                  <td className="py-1.5 pr-3 font-medium text-[var(--tblr-text)]">{m.entreprise_nom}</td>
-                  <td className="py-1.5 pr-3 whitespace-nowrap">{euros(m.montant_ht)}</td>
-                  <td className="py-1.5 text-[var(--tblr-muted)]">{m.statut_signature === 'signe' ? t('shared_act_signed') : ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ActTable title={t('shared_act_marches')} heads={[t('shared_col_lot'), t('shared_col_company'), t('shared_col_amount'), t('shared_col_state')]}>
+          {view.marches.map(m => (
+            <tr key={m.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+              <td className="px-3 py-2 text-[var(--tblr-muted)]">{[m.lot_numero, m.lot_titre].filter(Boolean).join(' ')}</td>
+              <td className="px-3 py-2 font-medium text-[var(--tblr-text)]">{m.entreprise_nom}</td>
+              <td className="px-3 py-2 whitespace-nowrap font-mono tabular-nums">{euros(m.montant_ht)}</td>
+              <td className="px-3 py-2 text-[var(--tblr-muted)]">{m.statut_signature === 'signe' ? t('shared_act_signed') : ''}</td>
+            </tr>
+          ))}
+        </ActTable>
       )}
 
       {view.questions.length > 0 && (
-        <div>
-          <h3 className={heading}>{t('shared_act_questions')}</h3>
+        <div className="rounded-lg p-4" style={cardStyle}>
+          <h3 className="text-xs font-bold text-[var(--tblr-text)] mb-1">{t('shared_act_questions')}</h3>
           <ul className="space-y-1.5 text-xs">
             {view.questions.map(q => (
               <li key={q.id}>
@@ -397,13 +538,13 @@ export function SharedAct({ projectId, canPropose }: { projectId: string; canPro
       )}
 
       {proposals.length > 0 && (
-        <div>
-          <h3 className={heading}>{t('shared_act_my_proposals')}</h3>
+        <div className="rounded-lg p-4" style={cardStyle}>
+          <h3 className="text-xs font-bold text-[var(--tblr-text)] mb-1">{t('shared_act_my_proposals')}</h3>
           <ul className="space-y-1.5 text-xs">
             {proposals.slice(0, 20).map(p => (
               <li key={p.id} className="flex flex-wrap items-center justify-between gap-2" style={{ borderTop: '1px solid var(--tblr-border)', paddingTop: '0.375rem' }}>
                 <span className="text-[var(--tblr-text)]">
-                  {t(`shared_act_field_${p.field}`)} : {p.baseValue || '—'} → {p.proposedValue || '—'}
+                  {t(`shared_act_field_${p.field}`)} : {p.baseValue || '·'} → {p.proposedValue || '·'}
                   <span className="text-[var(--tblr-muted)]"> · {t(`share_status_${p.status}`)}{p.decisionNote ? ` · ${p.decisionNote}` : ''}</span>
                 </span>
                 {p.status === 'pending' && canPropose && (
