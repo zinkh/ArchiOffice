@@ -1,4 +1,4 @@
-import type { Project, Task, TeamMember } from '../types';
+import type { Project, TeamMember } from '../types';
 import {
   asArray,
   asText,
@@ -7,6 +7,9 @@ import {
   inclusiveDays,
   isoDay,
   planningXmlBuilder,
+  xmlOutline,
+  type PlanningXmlOptions,
+  type PlanningXmlTask,
   type ImportedPlanningTask,
   type ParsedPlanningXml,
 } from './projectPlanningXmlShared';
@@ -68,7 +71,7 @@ function dateTime(date: string, time = '08:00:00') {
   return `${date}T${time}`;
 }
 
-export function exportMsProjectXml(project: Project, tasks: Task[], team: TeamMember[] = []): string {
+export function exportMsProjectXml(project: Project, tasks: PlanningXmlTask[], team: TeamMember[] = [], options: PlanningXmlOptions = {}): string {
   const taskUid = new Map(tasks.map((task, index) => [task.id, String(index + 1)]));
   const members = assignedMembers(tasks, team);
   const resourceUid = new Map(members.map((member, index) => [member.id, String(index + 1)]));
@@ -84,22 +87,37 @@ export function exportMsProjectXml(project: Project, tasks: Task[], team: TeamMe
       StartDate: dateTime(project.start_date),
       FinishDate: dateTime(project.end_date, '17:00:00'),
       MinutesPerDay: '480',
-      MinutesPerWeek: '2400',
+      MinutesPerWeek: options.calendarDays ? '3360' : '2400',
       DaysPerMonth: '20',
       CalendarUID: '1',
+      ...(options.calendarDays ? {
+        Calendars: { Calendar: {
+          UID: '1', Name: 'Calendrier chantier (7 jours)', IsBaseCalendar: '1', BaseCalendarUID: '-1',
+          WeekDays: { WeekDay: Array.from({ length: 7 }, (_, i) => ({
+            DayType: String(i + 1), DayWorking: '1',
+            WorkingTimes: { WorkingTime: [
+              { FromTime: '08:00:00', ToTime: '12:00:00' },
+              { FromTime: '13:00:00', ToTime: '17:00:00' },
+            ] },
+          })) },
+        } },
+      } : {}),
       Tasks: {
         Task: tasks.map((task, index) => {
           const durationDays = inclusiveDays(task.start_date, task.end_date);
-          const duration = `PT${durationDays * 8}H0M0S`;
+          const milestone = task.xmlMilestone ?? durationDays === 1;
+          const summary = tasks.some(t => t.xmlParentId === task.id);
+          const outline = xmlOutline(tasks, task);
+          const duration = `PT${milestone ? 0 : durationDays * 8}H0M0S`;
           return {
             UID: String(index + 1),
             ID: String(index + 1),
             Name: task.title,
             Type: '0',
             IsNull: '0',
-            WBS: String(index + 1),
-            OutlineNumber: String(index + 1),
-            OutlineLevel: '1',
+            WBS: outline,
+            OutlineNumber: outline,
+            OutlineLevel: String(outline.split('.').length),
             Priority: task.priority === 'urgent'
               ? '1000'
               : task.priority === 'high'
@@ -108,16 +126,16 @@ export function exportMsProjectXml(project: Project, tasks: Task[], team: TeamMe
                   ? '250'
                   : '500',
             Start: dateTime(task.start_date),
-            Finish: dateTime(task.end_date, '17:00:00'),
+            Finish: dateTime(task.end_date, milestone ? '08:00:00' : '17:00:00'),
             Duration: duration,
             DurationFormat: '7',
             Work: duration,
-            Milestone: durationDays === 1 ? '1' : '0',
-            Summary: '0',
+            Milestone: milestone ? '1' : '0',
+            Summary: summary ? '1' : '0',
             PercentComplete: String(task.progress || 0),
             PercentWorkComplete: String(task.progress || 0),
             Active: '1',
-            Manual: '0',
+            Manual: task.xmlMilestone !== undefined ? '1' : '0',
             ...(task.description ? { Notes: task.description } : {}),
             ...(task.dependencies?.length ? {
               PredecessorLink: task.dependencies

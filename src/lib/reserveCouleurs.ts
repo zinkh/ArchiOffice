@@ -86,3 +86,12 @@ export function couleurDe(r: AvecResponsable, table: Map<string, string>): strin
   const resp = responsableDe(r);
   return (resp && table.get(resp.cle)) || RESERVE_COULEUR_NEUTRE;
 }
+
+
+/** Conserve exactement la table AOR ; seuls les responsables supplémentaires reçoivent un repli. */
+export function couleursPlanning(lots: { id: string; lot_title: string; contact_name?: string }[], aor: Record<string, string> = {}): Map<string, string> {
+  const responsables = lots.map(l => ({ entreprises: l.contact_name ? [l.contact_name.split(' / ')[0]] : [], lots: [l.lot_title] }));
+  const repli = couleursParCle(construireLegende(responsables));
+  const table = new Map([...repli, ...Object.entries(aor)]);
+  return new Map(lots.map((l, i) => [l.id, couleurDe(responsables[i], table)]));
+}

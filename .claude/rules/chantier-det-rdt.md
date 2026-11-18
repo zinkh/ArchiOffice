@@ -240,7 +240,8 @@ vide (`available: false`) et refuse l'écriture en 503.
   passent avant le texte générique des chapitres réservés au CCTP (que le plafond de 900 caractères coupe en dernier).
 - **Enregistrement automatique** (1,2 s, écritures chaînées, rien avant la fin de la lecture), comme la consultation ACT.
 - **PDF** (`planningChantierPdf.ts`, charte du cabinet, « P1|2 ») : complet, ou un lot seul à remettre à son entreprise.
-- **Pas encore fait** : glisser-déposer des barres, dépendances entre tâches, liaison avec les jalons de mission.
+- **Affichage, couleurs AOR, dépendances fin à début, exports XML et PDF** : voir `docs/planning-chantier.md`. Les dépendances sont conservées dans le JSON existant, sans migration supplémentaire ; le serveur refuse les cycles. Les préférences sont locales par cabinet, compte et affaire.
+- **Pas encore fait** : glisser-déposer des barres, liaison avec les jalons de mission.
 
 ### Documents joints à l'export PDF du compte-rendu
 
