@@ -1,11 +1,12 @@
 // Export PDF du planning de chantier (Gantt par lot), à la charte du cabinet :
 // en-tête avec logo sur la première page, nuances de gris, pied et « P1|2 ».
 // Complet, ou limité à un lot pour remettre à chaque entreprise SON planning.
+import { reperesCalendrierPlanning } from './planningChantierCalendrier';
 import { hexVersRgb, RESERVE_COULEUR_NEUTRE } from './reserveCouleurs';
 import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import {
-  AFFICHAGE_PLANNING, periodesPlanning, positionPlanning, ajouterJours, etatTache, type AffichagePlanning,
+  CALENDRIER_PLANNING, AFFICHAGE_PLANNING, periodesPlanning, positionPlanning, ajouterJours, etatTache, type AffichagePlanning,
   aujourdhuiIso, bornesPlanning, planningParLot,
   type LotPlanifiable, type PlanningChantier,
 } from './planningChantier';
@@ -86,6 +87,20 @@ export async function exportPlanningToPDF(
   const xDate = (iso: string) => x0 + positionPlanning(iso, periodes) * colW;
   const xFin = (iso: string) => xDate(ajouterJours(iso, 1));
   const aujourdhui = aujourdhuiIso();
+  const reperes = reperesCalendrierPlanning(planning.calendrier ?? CALENDRIER_PLANNING, periodes[0].debut, periodes[periodes.length - 1].fin, affichage);
+  const bandes = reperes.map(r => ({ r, bx: xDate(r.debut), bw: Math.max(0.2, xFin(r.fin) - xDate(r.debut)) }));
+  const peindreCalendrier = (top: number, h: number) => {
+    for (const { r, bx, bw } of bandes) {
+      if (r.type === 'ferie') { doc.setFillColor(225, 236, 250); doc.rect(bx, top, bw, h, 'F'); }
+      else {
+        doc.setDrawColor(195, 200, 207); doc.setLineWidth(0.1);
+        for (let offset = -h; offset < bw; offset += 2) {
+          const a = Math.max(0, offset), b = Math.min(bw, offset + h);
+          doc.line(bx + a, top + h - (a - offset), bx + b, top + h - (b - offset));
+        }
+      }
+    }
+  };
 
   /** Axe des mois et des semaines, redessiné en tête de chaque page. */
   const axe = (top: number): number => {
@@ -99,6 +114,7 @@ export async function exportPlanningToPDF(
     periodes.forEach((p, i) => {
       if (i % pas === 0) doc.text(p.libelle, x0 + i * colW + 0.5, top + 5.6);
     });
+    peindreCalendrier(top + 7, 2);
     return top + 9;
   };
 
@@ -113,11 +129,13 @@ export async function exportPlanningToPDF(
 
   y = axe(y);
   let topGrille = y;
+  let dansGrille = true;
   const place = (h: number) => {
     if (y + h <= pageH - 16) return;
-    grille(topGrille, y);
+    if (dansGrille) grille(topGrille, y);
     doc.addPage();
-    y = axe(drawAgencyHeader(doc, settings, letterhead) + 2);
+    const haut = drawAgencyHeader(doc, settings, letterhead) + 2;
+    y = dansGrille ? axe(haut) : haut;
     topGrille = y;
   };
   const coupe = (texte: string, largeur: number) => (doc.splitTextToSize(texte, largeur) as string[])[0] ?? '';
@@ -127,6 +145,7 @@ export async function exportPlanningToPDF(
     place(ROW_H * 2);
     const nom = ligne.lot ? `Lot ${ligne.lot.lot_number}  ${ligne.lot.lot_title}` : 'Tâches générales du chantier';
     doc.setFillColor(...GRIS_FOND); doc.rect(MARGIN, y, pageW - MARGIN * 2, ROW_H, 'F');
+    peindreCalendrier(y, ROW_H);
     doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(17, 24, 39);
     doc.text(coupe(nom, LABEL_W - 3), MARGIN + 1.5, y + ROW_H * 0.7);
     // Barre de synthèse du lot, fine.
@@ -140,6 +159,7 @@ export async function exportPlanningToPDF(
     }
     for (const t of ligne.taches) {
       place(ROW_H);
+      peindreCalendrier(y, ROW_H);
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(17, 24, 39);
       const retard = etatTache(t, aujourdhui) === 'en_retard' ? ' [Retard]' : '';
       doc.text(coupe(`${affichage.avancement ? `${t.avancement} % ` : ''}${retard} ${t.libelle}`, LABEL_W - 24), MARGIN + 4, y + ROW_H * 0.7);
@@ -158,6 +178,7 @@ export async function exportPlanningToPDF(
     }
   }
   grille(topGrille, y);
+  dansGrille = false;
 
   const presentes = new Set(lignes.flatMap(l => l.taches.map(t => t.id)));
   const liaisons = planning.taches.flatMap(t => (t.dependencies ?? []).map(id => ({ t, p: planning.taches.find(p => p.id === id) }))).filter(l => l.p && presentes.has(l.t.id));
@@ -167,6 +188,16 @@ export async function exportPlanningToPDF(
     for (const { t, p } of liaisons) {
       y += 4; place(4); doc.setFontSize(7);
       doc.text(coupe(`${p!.libelle} -> ${t.libelle}${!presentes.has(p!.id) ? ' (prédécesseur hors périmètre)' : ''}${t.debut <= p!.fin ? ' : dates incohérentes' : ''}`, pageW - MARGIN * 2), MARGIN, y);
+    }
+  }
+
+  if (reperes.length) {
+    y += 5; place(8); doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(17, 24, 39);
+    doc.text('Calendrier : jours fériés en bleu, congés hachurés (dates inchangées)', MARGIN, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+    for (const r of reperes) {
+      y += 4; place(4);
+      doc.text(coupe(`${fmt(r.debut)}${r.fin !== r.debut ? ` - ${fmt(r.fin)}` : ''} : ${r.libelle}`, pageW - MARGIN * 2), MARGIN, y);
     }
   }
 

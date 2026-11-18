@@ -35,6 +35,8 @@ export interface PlanningChantier {
   /** Hypothèses retenues lors de la dernière génération IA, à relire. */
   hypotheses: string[];
   genereLe: string | null;
+  /** Calendrier partagé des entreprises de cette affaire, sans recalcul des dates. */
+  calendrier?: CalendrierPlanning;
 }
 
 export const PLANNING_VIDE: PlanningChantier = { version: 1, taches: [], hypotheses: [], genereLe: null };
@@ -124,6 +126,7 @@ export function sanitizePlanning(brut: unknown): PlanningChantier {
   return {
     version: 1,
     taches,
+    ...(source.calendrier && typeof source.calendrier === 'object' ? { calendrier: sanitizeCalendrierPlanning(source.calendrier) } : {}),
     hypotheses: (Array.isArray(source.hypotheses) ? source.hypotheses : [])
       .map(h => texte(h, MAX_HYPOTHESE)).filter(Boolean).slice(0, MAX_HYPOTHESES),
     genereLe: typeof source.genereLe === 'string' && !Number.isNaN(Date.parse(source.genereLe)) ? source.genereLe : null,
@@ -337,8 +340,10 @@ export interface AffichagePlanning {
   largeurLibelles: number;
   largeurPeriode: number;
   ajusterLargeur: boolean;
+  joursFeries: boolean;
+  conges: boolean;
 }
-export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [], avancement: true, largeurLibelles: 272, largeurPeriode: 84, ajusterLargeur: false };
+export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [], avancement: true, largeurLibelles: 272, largeurPeriode: 84, ajusterLargeur: false, joursFeries: true, conges: true };
 export function bornerLargeur(v: unknown, min: number, max: number, repli: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : repli;
 }
@@ -346,6 +351,7 @@ export function sanitizeAffichage(v: unknown): AffichagePlanning {
   const o = (v && typeof v === 'object' ? v : {}) as Partial<AffichagePlanning>;
   return { echelle: o.echelle === 'mois' ? 'mois' : 'semaines', relatif: o.relatif === true,
     numerosSemaines: o.numerosSemaines !== false, generales: o.generales !== false,
+    joursFeries: o.joursFeries !== false, conges: o.conges !== false,
     avancement: o.avancement !== false, ajusterLargeur: o.ajusterLargeur === true,
     largeurLibelles: bornerLargeur(o.largeurLibelles, 140, 560, AFFICHAGE_PLANNING.largeurLibelles),
     largeurPeriode: bornerLargeur(o.largeurPeriode, 28, 240, AFFICHAGE_PLANNING.largeurPeriode),
@@ -432,4 +438,36 @@ export function dimensionsPlanning(largeurDisponible: number, periodes: number, 
   const libelles = Math.min(affichage.largeurLibelles, Math.max(140, largeurDisponible - 96));
   const periode = affichage.ajusterLargeur && periodes > 0 ? Math.max(0.01, (largeurDisponible - libelles - 80) / periodes) : affichage.largeurPeriode;
   return { libelles, periode };
+}
+
+
+export type ZoneFeriesPlanning = 'france' | 'alsace_moselle' | 'aucun';
+export interface PeriodeCalendrierPlanning {
+  id: string;
+  libelle: string;
+  debut: string;
+  fin: string;
+  type: 'conge' | 'ferie';
+}
+export interface CalendrierPlanning {
+  joursFeries: ZoneFeriesPlanning;
+  periodes: PeriodeCalendrierPlanning[];
+}
+export const CALENDRIER_PLANNING: CalendrierPlanning = { joursFeries: 'france', periodes: [] };
+export const MAX_PERIODES_CALENDRIER = 100;
+export function sanitizeCalendrierPlanning(brut: unknown): CalendrierPlanning {
+  const o = (brut && typeof brut === 'object' ? brut : {}) as Record<string, unknown>;
+  const ids = new Set<string>();
+  const periodes: PeriodeCalendrierPlanning[] = [];
+  for (const entree of (Array.isArray(o.periodes) ? o.periodes : []).slice(0, MAX_PERIODES_CALENDRIER)) {
+    if (!entree || typeof entree !== 'object') continue;
+    const p = entree as Record<string, unknown>;
+    const libelle = texte(p.libelle, 100);
+    if (!libelle || !estDateIso(p.debut) || !estDateIso(p.fin) || p.fin < p.debut) continue;
+    let id = texte(p.id, 64) || `periode-${periodes.length + 1}`;
+    while (ids.has(id)) id += '-';
+    ids.add(id);
+    periodes.push({ id, libelle, debut: p.debut, fin: p.fin, type: p.type === 'ferie' ? 'ferie' : 'conge' });
+  }
+  return { joursFeries: o.joursFeries === 'aucun' || o.joursFeries === 'alsace_moselle' ? o.joursFeries : 'france', periodes };
 }

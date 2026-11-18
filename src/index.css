@@ -656,3 +656,23 @@ button, [role="button"], [role="tab"], .btn {
   .planning-resize-handle { display: none; }
   .planning-link-handle { width: 44px; height: 44px; top: -7px; right: -48px; }
 }
+
+
+/* Repères calendaires du chantier : fonds légers, les barres restent au premier plan. */
+.planning-calendar-ferie {
+  background: color-mix(in srgb, var(--tblr-primary) 12%, transparent);
+  border-inline: 1px solid color-mix(in srgb, var(--tblr-primary) 25%, transparent);
+}
+.planning-calendar-conge {
+  background: repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--tblr-muted) 16%, transparent) 4px 6px);
+}
+.planning-resize-handle { opacity: 0; }
+.planning-link-handle { opacity: .6; }
+[data-planning-task-id]:hover .planning-resize-handle,
+[data-planning-task-id]:focus-within .planning-resize-handle,
+[data-planning-task-id]:hover .planning-link-handle,
+[data-planning-task-id]:focus-within .planning-link-handle { opacity: 1; }
+.planning-resize-handle:disabled { opacity: 0; }
+@media (pointer: coarse), (max-width: 639px) {
+  .planning-link-handle { opacity: 1; }
+}

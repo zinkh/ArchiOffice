@@ -22,12 +22,14 @@ import { telechargerPdf } from '../../lib/observationsExport';
 import { exportPlanningToPDF } from '../../lib/planningChantierPdf';
 import {
   datesParGeste, dateDepuisPositionPlanning, dimensionsPlanning, verifierLienPlanning, joursEntre, type GesteDatesPlanning,
-  AFFICHAGE_PLANNING, sanitizeAffichage, periodesPlanning, positionPlanning, incoherencesDependances, type AffichagePlanning,
+  CALENDRIER_PLANNING, AFFICHAGE_PLANNING, sanitizeAffichage, periodesPlanning, positionPlanning, incoherencesDependances, type AffichagePlanning,
   PLANNING_VIDE, aujourdhuiIso, appliquerGeneration, bornesPlanning, etatTache, lundiDe, planningParLot,
   sanitizePlanning, ajouterJours, type EtatTache, type PlanningChantier, type PlanningGenere, type TachePlanning,
 } from '../../lib/planningChantier';
 import { PlanningTacheDialog } from './PlanningTacheDialog';
 import { usePlanningPressDrag } from '../../hooks/usePlanningPressDrag';
+import { PlanningCalendrierReglages } from './PlanningCalendrierReglages';
+import { reperesCalendrierPlanning } from '../../lib/planningChantierCalendrier';
 import { PlanningBarre } from './PlanningBarre';
 import { PlanningGenerateDialog } from './PlanningGenerateDialog';
 
@@ -289,6 +291,9 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const COLONNE_PX = dimensions.periode;
   // Une marge accueille la poignée de liaison, sans couper la dernière tâche.
   const largeur = periodes.length * COLONNE_PX;
+  const calendrier = planning.calendrier ?? CALENDRIER_PLANNING;
+  const reperes = useMemo(() => periodes.length ? reperesCalendrierPlanning(calendrier, periodes[0].debut, periodes[periodes.length - 1].fin, affichage) : [], [calendrier, bornes?.debut, bornes?.fin, affichage]);
+  const nomRepere = (r: typeof reperes[number]) => r.cle ? tr(`planning_holiday_${r.cle}`) : r.libelle;
   const margeLien = 80;
   const x = (iso: string) => positionPlanning(iso, periodes) * COLONNE_PX;
   const largeurBarre = (debut: string, fin: string) => Math.max(6, x(ajouterJours(fin, 1)) - x(debut));
@@ -378,6 +383,8 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
             catch (error) { showToast(error instanceof Error ? error.message : 'Export impossible.', 'error'); }
           }}><option value="">{tr('planning_choose_format')}</option><option value="msproject">Microsoft Project XML</option><option value="ganttproject">GanttProject XML (.gan)</option></select></label>
         </div>
+        <PlanningCalendrierReglages key={project.id} calendrier={calendrier} affichage={affichage} disabled={!disponible}
+          onChange={calendrier => modifier(sanitizePlanning({ ...dernier.current, calendrier }))} onAffichage={regler} />
         <p className="text-xs text-[var(--tblr-muted)] mt-2">{bornes ? tr('planning_origin', { date: bornes.debut }) : ''} {tr('planning_preferences_help')}</p>
       </details>
       <details className="text-xs text-[var(--tblr-muted)]"><summary className="cursor-pointer font-semibold">{tr('planning_gestures_title')}</summary><p className="mt-2">{tr('planning_gestures_help')}</p></details>
@@ -388,6 +395,10 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
       </div>}
       {liens.length > 0 && <details className="text-sm"><summary>{tr('planning_links_count', { count: liens.length, hidden: liensMasques.length })}</summary><ul>{liens.map(l => <li key={`${l.p.id}:${l.t.id}`}>{nomTache(l.p)} → {nomTache(l.t)} ({tr('planning_link_type')})</li>)}</ul></details>}
 
+      {reperes.length > 0 && <details className="text-xs text-[var(--tblr-muted)]"><summary className="cursor-pointer font-semibold">{tr('planning_calendar_visible', { count: reperes.length })}</summary>
+        <ul className="mt-2 space-y-1">{reperes.map(r => <li key={r.id}>{r.debut}{r.fin !== r.debut ? ` – ${r.fin}` : ''} · {nomRepere(r)} · {tr(`planning_calendar_type_${r.type}`)}</li>)}</ul>
+      </details>}
+
       {planning.taches.length === 0 ? (
         <div className="rounded-xl p-8 text-center text-sm text-[var(--tblr-muted)]" style={{ border: '1px dashed var(--tblr-border)' }}>
           <p className="font-semibold text-[var(--tblr-text)] mb-1">Aucun planning pour l’instant</p>
@@ -397,6 +408,10 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <div ref={regionRef} className="overflow-x-auto" role="region" aria-label="Diagramme de Gantt du chantier" tabIndex={0}>
             <div ref={diagrammeRef} className="relative" style={{ '--etiq': `${dimensions.libelles}px`, minWidth: `calc(var(--etiq) + ${largeur + margeLien}px)` } as React.CSSProperties}>
+              <div className="absolute pointer-events-none overflow-hidden" aria-hidden="true" data-planning-calendar-bands style={{ left: 'var(--etiq)', top: 38, width: largeur, height: Math.max(0, hauteur - 38) }}>
+                {reperes.map(r => <div key={r.id} data-calendar-type={r.type} data-calendar-start={r.debut} className={`absolute top-0 bottom-0 planning-calendar-${r.type}`}
+                  style={{ left: x(r.debut), width: Math.max(1, x(ajouterJours(r.fin, 1)) - x(r.debut)) }} />)}
+              </div>
               {/* Axe : mois puis lundis */}
               <div className="flex sticky top-0 z-10" style={{ background: surface2, borderBottom: '1px solid var(--tblr-border)' }}>
                 <div className="shrink-0 sticky left-0 z-20 px-3 py-2 text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)] w-[var(--etiq)]" style={{ background: surface2 }}>Lot / tâche
@@ -406,12 +421,16 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
                 </div>
                 <div className="relative" style={{ width: largeur, height: 38 }}>
                   {periodes.map((p, i) => <div key={p.debut} className="absolute top-2 text-xs text-center whitespace-nowrap text-[var(--tblr-text)]" style={{ left: i * COLONNE_PX, width: Math.max(70, COLONNE_PX) }}>{i % Math.max(1, Math.ceil(70 / COLONNE_PX)) === 0 ? p.libelle : ''}</div>)}
+                  <div className="absolute bottom-0 left-0 h-1.5 overflow-hidden" style={{ width: largeur }}>
+                    {reperes.map(r => <div key={r.id} title={`${nomRepere(r)} · ${r.debut}${r.fin !== r.debut ? ` – ${r.fin}` : ''}`} className={`absolute top-0 h-full planning-calendar-${r.type}`}
+                      style={{ left: x(r.debut), width: Math.max(1, x(ajouterJours(r.fin, 1)) - x(r.debut)) }} />)}
+                  </div>
                 </div>
               </div>
 
               {lignes.map(ligne => (
                 <div key={ligne.lot?.id ?? 'general'}>
-                  <div className="flex" style={{ height: 96, background: surface2, borderBottom: '1px solid var(--tblr-border)' }}>
+                  <div className="flex" style={{ height: 96, borderBottom: '1px solid var(--tblr-border)' }}>
                     <div className="shrink-0 sticky left-0 z-[5] px-3 py-1.5 w-[var(--etiq)]" style={{ background: surface2 }}>
                       <button type="button" className="flex items-center gap-1 text-xs font-bold min-h-11 text-left w-full" aria-expanded={!affichage.replies.includes(ligne.lot?.id ?? 'general')}
                         onClick={() => { const id = ligne.lot?.id ?? 'general'; regler({ replies: affichage.replies.includes(id) ? affichage.replies.filter(k => k !== id) : [...affichage.replies, id] }); }}>
@@ -493,6 +512,8 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
             <span>{tr(affichage.avancement ? 'planning_color_help' : 'planning_color_no_progress')}</span>
             <span>{tr('planning_arrow_help')}</span>
             <span>Trait vertical : aujourd’hui</span>
+            {reperes.some(r => r.type === 'ferie') && <span className="inline-flex items-center gap-1"><span className="w-3 h-3 planning-calendar-ferie" aria-hidden="true" />{tr('planning_calendar_type_ferie')}</span>}
+            {reperes.some(r => r.type === 'conge') && <span className="inline-flex items-center gap-1"><span className="w-3 h-3 planning-calendar-conge" aria-hidden="true" />{tr('planning_calendar_type_conge')}</span>}
           </div>
         </div>
       )}
