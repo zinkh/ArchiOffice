@@ -113,7 +113,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   const [reviewOpenOnly, setReviewOpenOnly] = useState(false);
   // Lot des observations saisies depuis le compte-rendu (vide = sans lot).
   const [newObsLotId, setNewObsLotId] = useState('');
-  // Option d'export et de diffusion, propre au poste : joindre les anciennes observations restées non levées.
+  // Bâtiment et phase de la prochaine observation : sans choix, ceux du compte-rendu.
+  const [newObsDecoupage, setNewObsDecoupage] = useState<{ batiment_id?: string | null; phase_id?: string | null }>({});  // Option d'export et de diffusion, propre au poste : joindre les anciennes observations restées non levées.
   const [includePrevious, setIncludePrevious] = useState(() => {
     try { return localStorage.getItem('chantier:pdf:previousOpen') === '1'; } catch { return false; }
   });
@@ -137,6 +138,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
 
   const [reports, setReports] = useState<SiteReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  useEffect(() => { setNewObsDecoupage({}); }, [selectedReportId]);
   const selectedReportIdRef = useRef(selectedReportId);
   selectedReportIdRef.current = selectedReportId;
   const [reportObservations, setReportObservations] = useState<Observation[]>([]);
@@ -829,8 +831,9 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     const body = {
       id, texte: '', statut: 'À faire' as const, type, created_report_id: selectedReportId,
       lot_id: lot?.id || undefined,
-      // Une observation relevée dans un compte-rendu hérite de son bâtiment et de sa phase.
-      batiment_id: selectedReport?.batiment_id || null, phase_id: selectedReport?.phase_id || null,
+      // Bâtiment et phase choisis avant l'ajout, à défaut ceux du compte-rendu.
+      batiment_id: ('batiment_id' in newObsDecoupage ? newObsDecoupage.batiment_id : selectedReport?.batiment_id) || null,
+      phase_id: ('phase_id' in newObsDecoupage ? newObsDecoupage.phase_id : selectedReport?.phase_id) || null,
     };
     // La création ne renvoie pas la jointure du lot : sans elle, l'observation tomberait sous « Sans lot ».
     const lotJoin = lot ? { lot: { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } } : {};
@@ -1709,6 +1712,13 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           <option value="">Sans lot</option>
                           {lots_list.map(l => <option key={l.id} value={l.id}>{l.lot_number} · {l.lot_title}</option>)}
                         </select>
+                        {/* Invisibles tant que l'affaire n'a ni bâtiment ni phase. */}
+                        <DecoupageSelects
+                          decoupage={decoupage}
+                          batimentId={'batiment_id' in newObsDecoupage ? newObsDecoupage.batiment_id : selectedReport.batiment_id}
+                          phaseId={'phase_id' in newObsDecoupage ? newObsDecoupage.phase_id : selectedReport.phase_id}
+                          onChange={patch => setNewObsDecoupage(prev => ({ ...prev, ...patch }))}
+                          className="contents" />
                         <button type="button" onClick={() => addObservation('observation')}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-xs font-bold transition">
                           <IconPlus size={14} /> Ajouter une observation
