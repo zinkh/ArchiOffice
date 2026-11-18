@@ -19,7 +19,7 @@ import { fetchAgencySettings } from '../../lib/pdfLetterhead';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { Project, ProjectLot } from '../../types';
 import { telechargerPdf } from '../../lib/observationsExport';
-import { exportPlanningToPDF } from '../../lib/planningChantierPdf';
+import { exportPlanningToPDF, type FormatPdfPlanning } from '../../lib/planningChantierPdf';
 import {
   placerApresPredecesseurs, datesParGeste, dateDepuisPositionPlanning, dimensionsPlanning, verifierLienPlanning, joursEntre, type GesteDatesPlanning,
   CALENDRIER_PLANNING, AFFICHAGE_PLANNING, sanitizeAffichage, periodesPlanning, positionPlanning, incoherencesDependances, type AffichagePlanning,
@@ -90,6 +90,10 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const [tacheOuverte, setTacheOuverte] = useState<{ tache: TachePlanning; nouvelle: boolean } | null>(null);
   const [genererOuvert, setGenererOuvert] = useState(false);
   const [enExport, setEnExport] = useState<string | null>(null);
+  // Réglages propres à l'export PDF : ne modifient ni l'écran ni le planning partagé.
+  const [formatPdf, setFormatPdf] = useState<FormatPdfPlanning>('a4');
+  const [plagePdf, setPlagePdf] = useState<{ debut: string; fin: string }>({ debut: '', fin: '' });
+  const plagePdfInvalide = !!plagePdf.debut && !!plagePdf.fin && plagePdf.debut > plagePdf.fin;
   // Le composant peut être monté avant la lecture, ou sans tâche : observer dès que la région existe.
   useEffect(() => {
     const region = regionRef.current;
@@ -197,10 +201,12 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const exporter = async (lotId?: string) => {
     const reglages = settings ?? await fetchAgencySettings().catch(() => null);
     if (!reglages) { showToast('Réglages du cabinet non chargés, réessayez dans un instant.', 'error'); return; }
+    if (plagePdfInvalide) { showToast(tr('planning_pdf_range_invalid'), 'error'); return; }
     setEnExport(lotId ?? '*');
     try {
       const pdf = await exportPlanningToPDF(planning, lotsPlanif, reglages, {
-        lotId, affichage, couleurs, project: { name: project.name, project_code: project.project_code, address: project.address },
+        lotId, affichage, couleurs, format: formatPdf,
+        plage: { debut: plagePdf.debut || undefined, fin: plagePdf.fin || undefined }, project: { name: project.name, project_code: project.project_code, address: project.address },
       });
       telechargerPdf(pdf);
     } catch (e: any) {
@@ -383,6 +389,16 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
             catch (error) { showToast(error instanceof Error ? error.message : 'Export impossible.', 'error'); }
           }}><option value="">{tr('planning_choose_format')}</option><option value="msproject">Microsoft Project XML</option><option value="ganttproject">GanttProject XML (.gan)</option></select></label>
         </div>
+        <fieldset className="flex flex-wrap items-center gap-4 mt-3 text-sm border-t border-[var(--tblr-border)] pt-3">
+          <legend className="text-xs font-semibold text-[var(--tblr-muted)] pr-2">{tr('planning_pdf_title')}</legend>
+          <label>{tr('planning_pdf_format')} <select className="ml-2 p-2 bg-[var(--tblr-surface)] border border-[var(--tblr-border)] rounded" value={formatPdf} onChange={e => setFormatPdf(e.target.value === 'a3' ? 'a3' : 'a4')}>
+            <option value="a4">A4</option><option value="a3">A3</option>
+          </select></label>
+          <label>{tr('planning_pdf_from')} <input type="date" className="ml-2 p-2 bg-[var(--tblr-surface)] border border-[var(--tblr-border)] rounded" value={plagePdf.debut} max={plagePdf.fin || undefined} onChange={e => setPlagePdf(p => ({ ...p, debut: e.target.value }))} /></label>
+          <label>{tr('planning_pdf_to')} <input type="date" className="ml-2 p-2 bg-[var(--tblr-surface)] border border-[var(--tblr-border)] rounded" value={plagePdf.fin} min={plagePdf.debut || undefined} onChange={e => setPlagePdf(p => ({ ...p, fin: e.target.value }))} /></label>
+          {(plagePdf.debut || plagePdf.fin) && <button type="button" className="btn btn-secondary" onClick={() => setPlagePdf({ debut: '', fin: '' })}>{tr('planning_pdf_all')}</button>}
+          {plagePdfInvalide && <span role="alert" className="text-xs text-red-600">{tr('planning_pdf_range_invalid')}</span>}
+        </fieldset>
         <PlanningCalendrierReglages key={project.id} calendrier={calendrier} affichage={affichage} disabled={!disponible}
           onChange={calendrier => modifier(sanitizePlanning({ ...dernier.current, calendrier }))} onAffichage={regler} />
         <p className="text-xs text-[var(--tblr-muted)] mt-2">{bornes ? tr('planning_origin', { date: bornes.debut }) : ''} {tr('planning_preferences_help')}</p>

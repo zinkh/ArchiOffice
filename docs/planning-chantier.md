@@ -24,6 +24,16 @@ Les liaisons visibles sont tracées sur le diagramme (pointillés en cas de conf
 - Les tests relisent les deux fichiers par `parsePlanningXml`, vérifient dates, avancements, jalons, dépendances et hiérarchie. L’import générique existant importe les groupes comme des tâches ordinaires ; il n’offre pas encore de reconstruction des lots dans le planning chantier. Il n’existe pas d’import chantier dans cette livraison.
 - MS Project et GanttProject ne sont pas installés dans l’environnement de validation : l’ouverture et les éventuelles décisions de recalcul propres à ces applications restent à vérifier. Les couleurs sont exportées dans GanttProject ; le format MS Project employé ne porte pas de couleur des barres. Les hypothèses IA ne sont pas des tâches et ne sont pas exportées en XML.
 
+## Export PDF : format, plage, axe et légende
+
+- **Format du papier** : A4 (défaut) ou A3 paysage, choisi sous « Affichage et exports > Export PDF ». L'A3 garde la même mise en page, avec caractères et lignes agrandis d'un quart et une colonne de libellés proportionnelle. Ce choix et la plage ne sont pas enregistrés : ils ne modifient ni l'écran ni le planning partagé.
+- **Plage de dates** : « Du ... au ... », chaque borne facultative. Seules les tâches qui rencontrent la plage sont imprimées, les barres qui dépassent sont tronquées au bord, et la numérotation S1 / M1 reste celle du planning complet (la première colonne peut donc être S4). Le périmètre est rappelé dans le résumé (« Période imprimée »). Une plage sans tâche donne un document court qui le dit ; une plage inversée est refusée avant l'export.
+- **Axe** : un bandeau au-dessus des périodes donne le mois (semaines) ou l'année (mois), avec un libellé raccourci quand la place manque. Une semaine appartient au mois de son jeudi, comme la numérotation ISO. Aucun bandeau en calendrier relatif. Un trait plus marqué sépare chaque début de mois ou d'année. L'axe est redessiné en tête de chaque page.
+- **Aujourd'hui** : le trait vertical porte une étiquette dans l'en-tête de l'axe, quand la date est dans la période imprimée.
+- **Pages suivantes** : un titre de lot n'est jamais laissé seul en bas de page (il emporte son entreprise et sa première tâche) ; quand la liste d'un lot continue sur la page suivante, une ligne « Lot 03 Couverture (suite) » est reprise sous l'axe.
+- **Légende** : elle ne cite que ce qui figure sur le document : prévu, réalisé (si l'avancement est affiché), jalon, tâche en retard, jour férié, congé ou fermeture, trait « Aujourd'hui ».
+- Pas encore fait : tracé des dépendances entre tâches (elles restent listées), repli par lot (tout est déplié), nombre de semaines par page, indice de diffusion du document.
+
 ## Base de données
 
 Aucune migration nouvelle : `project_chantier_planning.data` est déjà un JSONB sans liste blanche SQL de champs internes. `sanitizePlanning`, utilisé par GET, PUT et les opérations client, conserve désormais les dépendances valides. La migration initiale `migrate_chantier_planning.sql` reste le prérequis pour les anciennes instances non équipées ; aucune migration n’est appliquée par cette modification.
