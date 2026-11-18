@@ -23,7 +23,7 @@ import {
   addMembership, getMemberRole, listMemberships, removeMembership,
 } from '../tenantMemberships';
 import {
-  COMMENTABLE_KINDS, GUEST_ROLE_LABEL, GUEST_SYSTEM_ROLE, SHARE_KINDS, SHARE_LIMITS, WRITABLE_KINDS,
+  COMMENTABLE_KINDS, DETAIL_KINDS, GUEST_ROLE_LABEL, GUEST_SYSTEM_ROLE, SHARE_KINDS, SHARE_LIMITS, WRITABLE_KINDS,
   activeShareFor, activeSharesOfTenant, allows, checkShareLimits, loadGrants,
   normalizeGrants, replaceGrants,
   type ShareGrant, type ShareRow,
@@ -166,6 +166,7 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
         kinds: SHARE_KINDS,
         writableKinds: WRITABLE_KINDS,
         commentableKinds: COMMENTABLE_KINDS,
+        detailKinds: DETAIL_KINDS,
         lots: (lots || []).map((l: any) => pick(l, LOT_FIELDS)),
       });
     } catch (e: any) { fail(res, '[GET /api/projects/:id/shares]', e); }

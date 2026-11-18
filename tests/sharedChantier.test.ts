@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// Écrans de chantier du confrère : réserves (chiffres, retard, filtre, statut) et ACT (meilleur prix).
-// Données synthétiques.
+// Écrans de chantier du confrère : réserves (chiffres, retard, filtre, statut), ACT (meilleur prix) et le détail
+// accordé par le cabinet (présences, pénalités, photos, adresses, issue #688). Données synthétiques.
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,7 @@ vi.mock('../src/lib/planRender', () => ({ renderPlanExcerpt: vi.fn() }));
 vi.mock('../src/components/SignedImage', () => ({ SignedImage: () => null }));
 vi.mock('../src/lib/reservePhotoQueue', () => ({ photoDisplaySrc: () => '' }));
 
-import { SharedAct, SharedReserves } from '../src/components/SharedChantier';
+import { SharedAct, SharedReports, SharedReserves } from '../src/components/SharedChantier';
 
 const base = { batiment: null, local: null, lots: null, entreprises: null, description: null, reponse: null };
 const RESERVES = [
@@ -36,13 +36,27 @@ const ACT = {
   attributions: [], questions: [], marches: [],
 };
 
+const REPORT_BASE = { id: 'rep1', report_number: 4, date: '2026-11-13', statut: 'brouillon', meteo: null, temperature: null, meetingNotes: null, nextMeeting: null };
+const REPORTS = [{
+  ...REPORT_BASE,
+  attendance: [{ name: 'Ana Roy', role: 'Maçon', status: 'P', present: true, excused: false }, { name: 'Luc Pic', role: 'Plombier', status: 'ANE', present: false, excused: false }],
+  lot_tracking: [{
+    lot_id: 'l1', lot_label: '01 Gros œuvre', status: 'R', effectif: 6, retard_semaine: 2, retard_cumule: 5, intemperies_jours: 1,
+    penalites: [{ id: 'p1', type: 'retard_execution', motif: null, jours: 3, montant_jour: 150.5, montant: 451.5 }],
+  }],
+}];
+const NOTES = [{ id: 'n1', category: 'Gros œuvre', note_number: 1, responsible_company: null, issue_date: null, due_date: null, status: 'open', text: 'Chaînage', photoCount: 2 }];
+
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
   apiFetch.mockReset();
   apiFetch.mockImplementation(async (url: string) => {
+    if (url.includes('/photos/')) return { url: 'https://files.test/photo.jpg' };
     if (url.endsWith('/reserves')) return RESERVES;
     if (url.endsWith('/act')) return ACT;
+    if (url.endsWith('/reports')) return REPORTS;
+    if (url.endsWith('/notes')) return NOTES;
     return [];
   });
 });
@@ -88,6 +102,61 @@ describe('SharedReserves : suivi des réserves', () => {
     container.remove();
     await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true }));
     expect(container.querySelectorAll('select')).toHaveLength(4);
+  });
+});
+
+describe('Détail accordé par le cabinet (issue #688)', () => {
+  it('sans détail : le compte rendu n\'affiche ni présences, ni pénalités, ni photos', async () => {
+    // Le serveur n'envoie rien de tout cela sans détail ; l'écran ne l'invente pas.
+    apiFetch.mockImplementation(async (url: string) => (url.endsWith('/reports') ? [REPORT_BASE] : url.endsWith('/notes') ? [{ ...NOTES[0], photoCount: undefined }] : []));
+    await monter(React.createElement(SharedReports, { projectId: 'p', canWrite: false }));
+    expect(container.textContent).not.toContain('shared_attendance_title');
+    expect(container.textContent).not.toContain('shared_tracking_title');
+    expect(container.querySelectorAll('img')).toHaveLength(0);
+  });
+
+  it('avec le détail : présences, suivi par lot, pénalités et photos des rubriques', async () => {
+    await monter(React.createElement(SharedReports, { projectId: 'p', canWrite: false, detail: true }));
+    const texte = (container.textContent ?? '').replace(/[  ]/g, ' ');
+    expect(texte).toContain('Ana Roy');
+    expect(texte).toContain('ANE'); // statut de présence en pastille
+    expect(texte).toContain('01 Gros œuvre');
+    expect(texte).toContain('451,50 €'); // montant de la pénalité
+    expect(texte).toContain('shared_penalty_total');
+    // Deux photos : chacune lit son lien à l'affichage, jamais une adresse stockée dans les données.
+    const imgs = container.querySelectorAll('img');
+    expect(imgs).toHaveLength(2);
+    expect(imgs[0].getAttribute('src')).toBe('https://files.test/photo.jpg');
+    expect(apiFetch.mock.calls.map(c => String(c[0])).filter(u => u.includes('/photos/'))).toEqual([
+      '/api/shared/projects/p/reports/rep1/notes/n1/photos/0', '/api/shared/projects/p/reports/rep1/notes/n1/photos/1',
+    ]);
+  });
+
+  it('avec le détail : les photos d\'une réserve s\'affichent dans son détail, miniature puis grand format au clic', async () => {
+    apiFetch.mockImplementation(async (url: string) => {
+      if (url.includes('/photos/')) return { url: 'https://files.test/photo.jpg' };
+      if (url.endsWith('/reserves')) return [{ ...base, id: 'r1', number: 1, title: 'Fissure', status: 'A faire', due_date: null, photos: [{ id: 'ph1', caption: 'Vue Est', has_thumb: true }] }];
+      return [];
+    });
+    await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: false, detail: true }));
+    expect(container.querySelectorAll('img')).toHaveLength(0); // replié : rien n'est chargé
+    await act(async () => { (container.querySelector('button[aria-expanded]') as HTMLButtonElement).click(); });
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+    expect(apiFetch).toHaveBeenCalledWith('/api/shared/projects/p/reserves/r1/photos/ph1?thumb=1');
+  });
+
+  it('avec le détail : adresses des entreprises et rappel que la fiche reste au cabinet ; sans détail, rien', async () => {
+    const act1 = { ...ACT, entreprises: [{ ...ACT.entreprises[0], email: 'alpha@example.test', emails_supplementaires: 'b@example.test' }] };
+    apiFetch.mockImplementation(async (url: string) => (url.endsWith('/act') ? act1 : []));
+    await monter(React.createElement(SharedAct, { projectId: 'p', canPropose: false, detail: true }));
+    expect(container.textContent).toContain('alpha@example.test ; b@example.test');
+    expect(container.textContent).toContain('shared_contacts_note');
+    await act(async () => root.unmount());
+    container.remove();
+    await monter(React.createElement(SharedAct, { projectId: 'p', canPropose: false }));
+    expect(container.textContent).not.toContain('shared_contacts_note');
+    expect(container.textContent).not.toContain('shared_col_email');
   });
 });
 

@@ -13,7 +13,7 @@ import { SharedAct, SharedReports, SharedReserves } from '../components/SharedCh
 import { sharedInitialTab, sharedProSubTabs, sharedVisibleTabs } from '../lib/sharedTabs';
 import type { ProjectTabId } from '../lib/projectTabs';
 
-interface Grant { kind: 'lots' | 'tasks' | 'documents' | 'cctp' | 'dpgf' | 'act' | 'reports' | 'reserves' | 'gpa'; access: 'read' | 'comment' | 'write' }
+interface Grant { kind: 'lots' | 'tasks' | 'documents' | 'cctp' | 'dpgf' | 'act' | 'reports' | 'reserves' | 'gpa'; access: 'read' | 'comment' | 'write'; /** Le cabinet a coché le détail de cet atelier (issue #688). */ detail?: boolean }
 interface Doc { id: string; name: string; category: string | null; phase: string | null; version: number | null; uploaded_at: string | null; description: string | null }
 interface Summary { shareId: string; projectId: string; projectName: string; projectCode: string | null; address: string | null; tenantName: string | null; grants: Grant[] }
 interface View {
@@ -163,7 +163,7 @@ function SharedDetail({ projectId }: { projectId: string }) {
   // Suivi de chantier : l'écriture est un droit par type, et jamais sur une affaire archivée.
   const chantier = (kind: 'reports' | 'reserves' | 'gpa') => {
     const grant = view.grants.find(g => g.kind === kind);
-    return grant ? { canWrite: grant.access === 'write' && !view.archived } : null;
+    return grant ? { canWrite: grant.access === 'write' && !view.archived, detail: grant.detail === true } : null;
   };
   const reportsRight = chantier('reports');
   const reservesRight = chantier('reserves');
@@ -252,10 +252,10 @@ function SharedDetail({ projectId }: { projectId: string }) {
         </>
       )}
 
-      {activeTab === 'ACT' && <SharedAct projectId={projectId} canPropose={view.grants.some(g => g.kind === 'act' && g.access === 'write') && !view.archived} />}
-      {activeTab === 'RDT' && reportsRight && <SharedReports projectId={projectId} canWrite={reportsRight.canWrite} />}
-      {activeTab === 'AOR' && reservesRight && <SharedReserves projectId={projectId} kind="reserves" canWrite={reservesRight.canWrite} />}
-      {activeTab === 'GPA' && gpaRight && <SharedReserves projectId={projectId} kind="gpa" canWrite={gpaRight.canWrite} />}
+      {activeTab === 'ACT' && <SharedAct projectId={projectId} canPropose={view.grants.some(g => g.kind === 'act' && g.access === 'write') && !view.archived} detail={view.grants.some(g => g.kind === 'act' && g.detail === true)} />}
+      {activeTab === 'RDT' && reportsRight && <SharedReports projectId={projectId} canWrite={reportsRight.canWrite} detail={reportsRight.detail} />}
+      {activeTab === 'AOR' && reservesRight && <SharedReserves projectId={projectId} kind="reserves" canWrite={reservesRight.canWrite} detail={reservesRight.detail} />}
+      {activeTab === 'GPA' && gpaRight && <SharedReserves projectId={projectId} kind="gpa" canWrite={gpaRight.canWrite} detail={gpaRight.detail} />}
 
       {activeTab === 'TACHES' && tasksGrant && (
         <section className="space-y-3">

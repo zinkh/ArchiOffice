@@ -351,7 +351,8 @@ Autres types : voir ROADMAP.md.
   cabinet le redonne par atelier.
 - **Fichier `server/routes/projectShareChantier.ts`** : comptes rendus, réserves et ACT. Réponses construites champ par
   champ (`REPORT_FIELDS`, `NOTE_FIELDS`, `RESERVE_FIELDS`, `guestActView` dans `server/projectShares/actView.ts`) :
-  jamais présences, suivi des lots (pénalités), intervenants, photos, position sur le plan, e-mails ni fiches contact
+  jamais, SANS le détail de l'atelier (voir « Détail des ateliers de chantier » plus bas), présences, suivi des lots
+  (pénalités), photos ni e-mails ; jamais dans aucun cas intervenants, position sur le plan ni fiches contact
   des entreprises, fichiers du DCE et des offres, négociations détaillées, colonnes financières des marchés. La
   « modification » est DIRECTE mais bornée à une liste blanche de champs de la ligne visée (un compte rendu : météo,
   température, prochaine réunion, notes ; une rubrique : texte, statut, échéances, société ; une réserve : statut,
@@ -377,8 +378,29 @@ Autres types : voir ROADMAP.md.
   modification à son prochain enregistrement (l'écran du cabinet le dit : « rechargez l'onglet ACT »). Pas de révision de
   la consultation comme `dpgfs.revision` : à faire si le cas se présente. Écrans : `SharedAct` (confrère, saisie à la
   sortie du champ, « Mes propositions », retrait) et `ShareActProposalsInbox.tsx` (cabinet).
-- **Pas encore fait** : photos des comptes rendus et des réserves,
-  création d'une réserve ou d'un compte rendu par un confrère, commentaires sur les ateliers autres que CCTP et DPGF.
+- **Détail des ateliers de chantier** (issue #688, `project_share_grants.detail`, `supabase/migrate_project_share_detail.sql`
+  appliquée, `DETAIL_KINDS` et `allowsDetail` dans `access.ts`, `server/projectShares/reportDetailView.ts`,
+  `tests/projectShareDetail.test.ts`). Ce que les listes blanches ci-dessus cachent encore (présences, suivi par lot et
+  pénalités, photos, adresses e-mail) s'ouvre par **un indicateur `detail` posé par le cabinet atelier par atelier** (`reports`,
+  `reserves`, `gpa`, `act`), combinable avec la lecture comme avec la modification ; ce n'est pas un niveau de plus dans l'échelle
+  lire < commenter < écrire, parce qu'un niveau « détaillé » placé dans cette échelle aurait ouvert le détail à tout partage
+  qui a déjà « écriture ». **Aucun élargissement** : la colonne vaut FALSE pour les 18 droits existants, la lecture
+  (`loadGrants`) tolère son absence (instance non migrée : aucun détail, jamais « tout »), `normalizeGrants` refuse le détail sur un
+  autre atelier ou autrement qu'en booléen. Avec le détail : `GET .../reports` ajoute `attendance` (nom, fonction, statut P/R/AE/ANE/NC)
+  et `lot_tracking` (retards, intempéries, **pénalités** dont le montant est recalculé jours x montant par jour, lot nommé par numéro et
+  intitulé), jamais `contact_id`, diffusion ni bâtiments ; les rubriques portent `photoCount` et les réserves `photos` (identifiant,
+  légende, `has_thumb`), **jamais l'adresse d'un fichier** (le chemin porte l'identifiant du cabinet). Une photo se lit par
+  `GET .../reports/:reportId/notes/:noteId/photos/:index` ou `GET .../reserves|gpa-reserves/:reserveId/photos/:photoId[?thumb=1]` : partage,
+  détail (403 `SHARE_DETAIL_FORBIDDEN`), rattachement de la rubrique au compte rendu et de la réserve à l'affaire, photo à la réserve,
+  tout est revérifié, puis `linkForTenantFile` (même mécanisme que les documents). **Coordonnées (RGPD)** : seules `email` et
+  `emails_supplementaires` des entreprises consultées de l'ACT, jamais la fiche contact ni son identifiant ; la consultation est
+  **tracée avant la réponse** dans le journal d'activité (« confrère externe », `auditConsultation`, au plus une fois par demi-heure
+  et par personne, en mémoire du processus, un journal en panne ne prive pas le confrère de sa vue) et l'écran rappelle que la fiche
+  reste au cabinet. Écrans : case « Détail » sous chaque atelier concerné dans `ProjectSharesPanel.tsx`, `SharedPhoto.tsx` (lien
+  demandé à l'affichage, qui expire), `AttendanceTable` et `LotTrackingTable` dans `SharedChantier.tsx`. **Pas encore fait** : plan et
+  position des réserves, coordonnées des intervenants des comptes rendus (une ligne de présence ne porte que `contact_id`), contact des
+  entreprises des lots (atelier `lots`), trace des téléchargements de photos. Pas vérifié dans un navigateur.
+- **Pas encore fait** : création d'une réserve ou d'un compte rendu par un confrère, commentaires sur les ateliers autres que CCTP et DPGF.
 
 **Documents** : le droit couvre les documents de l'affaire (`resource_type =
 'projects'`), pas les pièces de devis, d'appel d'offres ou de bibliothèque
@@ -455,8 +477,8 @@ pour description, réponse et échéance) sous quatre chiffres (total, à lever,
 « pour mémoire » n'est jamais en retard (`reserveOverdueDays`, `isReserveForRecord`). Comptes rendus en liste à gauche et fiche
 à droite, libellés visibles au-dessus des champs. ACT en tableaux à en-têtes avec le repère « Meilleur prix » (offre conforme
 la moins chère du lot, jamais une offre non conforme). Tâches en tableau avec barre d'avancement. Mécaniques inchangées :
-enregistrement à la sortie du champ, proposition pour l'ACT, droits revérifiés par le serveur. **Pas encore fait** : photos
-et plan des réserves (voir la liste « Pas encore fait » plus haut) ; pas vérifié dans un navigateur.
+enregistrement à la sortie du champ, proposition pour l'ACT, droits revérifiés par le serveur. Le détail (photos, présences,
+pénalités, adresses) est décrit plus haut ; **pas encore fait** : plan des réserves ; pas vérifié dans un navigateur.
 
 **Écriture par proposition** (`project_share_proposals`,
 `supabase/migrate_project_share_proposals.sql`, `server/routes/projectShareProposals.ts`).

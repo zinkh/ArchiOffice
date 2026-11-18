@@ -2,6 +2,8 @@
 // Même présentation que les ateliers du cabinet (chiffres en tête, tableaux, pastilles de statut), limitée
 // à ce que le cabinet a accordé. Le serveur revérifie le droit à chaque requête
 // (server/routes/projectShareChantier.ts) ; l'écran ne fait que masquer ce qui n'est pas accordé.
+// Le DÉTAIL d'un atelier (issue #688 : présences, suivi par lot et pénalités, photos, coordonnées) n'apparaît que si le
+// cabinet l'a coché : sans lui le serveur n'envoie rien de tout cela, ces blocs ne s'affichent donc pas.
 // Chaque champ s'enregistre à la sortie du champ, jamais à chaque frappe : la réponse du serveur ne doit
 // pas écraser la saisie en cours.
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
@@ -10,19 +12,103 @@ import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import SharedKpis from './shared/SharedKpis';
+import SharedPhoto from './shared/SharedPhoto';
 import { RESERVE_STATUSES, isReserveClosed, isReserveForRecord, reserveOverdueDays, reserveStatusKey, statusPillClass } from './pro/reserveShared';
 
+interface SharedAttendee { name: string | null; role: string | null; status: string | null; present: boolean; excused: boolean }
+interface SharedPenalty { id: string; type: string; motif: string | null; jours: number; montant_jour: number; montant: number }
+interface SharedLotTracking {
+  lot_id: string; lot_label: string | null; status: string | null; effectif: number | null; retard_semaine: number | null; retard_cumule: number | null;
+  intemperies_jours: number | null; penalites: SharedPenalty[];
+}
 interface SharedReport {
   id: string; report_number: number; date: string; statut: string | null;
   meteo: string | null; temperature: string | null; meetingNotes: string | null; nextMeeting: string | null;
+  /** Avec le détail de l'atelier seulement. */
+  attendance?: SharedAttendee[]; lot_tracking?: SharedLotTracking[];
 }
 interface SharedNote {
   id: string; category: string; note_number: number; responsible_company: string | null;
   issue_date: string | null; due_date: string | null; status: string | null; text: string | null;
+  /** Avec le détail de l'atelier seulement : le nombre de photos, jamais leur adresse. */
+  photoCount?: number;
 }
 interface SharedReserve {
   id: string; number: number | null; title: string; batiment: string | null; local: string | null; status: string | null;
   lots: string | null; entreprises: string | null; due_date: string | null; description: string | null; reponse: string | null;
+  /** Avec le détail de l'atelier seulement. */
+  photos?: Array<{ id: string; caption: string | null; has_thumb: boolean }>;
+}
+
+const PRESENCE_CLASS: Record<string, string> = {
+  P: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+  R: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  AE: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700/50 dark:text-zinc-300',
+  ANE: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+  NC: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
+};
+
+/** Statut de présence P / R / AE / ANE / NC en pastille : la couleur porte la donnée, le libellé reste écrit. */
+function PresencePill({ status }: { status: string | null }) {
+  const { t } = useTranslation();
+  if (!status) return null;
+  return <span className={cn('inline-block rounded-full px-2 py-0.5 text-[0.6875rem] font-bold', PRESENCE_CLASS[status] ?? PRESENCE_CLASS.NC)} title={t(`shared_presence_${status}`)}>{status}</span>;
+}
+
+const jours = (n: number | null) => (n == null ? '' : String(n));
+
+/** Présences d'un compte rendu (nom, fonction, statut). Aucune coordonnée : la fiche de l'intervenant reste au cabinet. */
+function AttendanceTable({ attendance }: { attendance: SharedAttendee[] }) {
+  const { t } = useTranslation();
+  if (attendance.length === 0) return <p className="text-xs text-[var(--tblr-muted)]">{t('shared_attendance_empty')}</p>;
+  return (
+    <ActTable title={t('shared_attendance_title')} heads={[t('shared_col_name'), t('shared_col_role'), t('shared_col_presence')]}>
+      {attendance.map((a, i) => (
+        <tr key={`${a.name}-${i}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+          <td className="px-3 py-2 font-medium text-[var(--tblr-text)]">{a.name}</td>
+          <td className="px-3 py-2 text-[var(--tblr-muted)]">{a.role}</td>
+          <td className="px-3 py-2"><PresencePill status={a.status} /></td>
+        </tr>
+      ))}
+    </ActTable>
+  );
+}
+
+/** Suivi par lot d'un compte rendu : présence, effectif, retards, intempéries et pénalités (le cabinet a coché le détail). */
+function LotTrackingTable({ tracking }: { tracking: SharedLotTracking[] }) {
+  const { t } = useTranslation();
+  if (tracking.length === 0) return null;
+  const total = tracking.reduce((sum, l) => sum + l.penalites.reduce((s, p) => s + p.montant, 0), 0);
+  return (
+    <div className="space-y-1">
+      <ActTable title={t('shared_tracking_title')} heads={[t('shared_col_lot'), t('shared_col_presence'), t('shared_col_staff'), t('shared_col_delay_week'), t('shared_col_delay_total'), t('shared_col_weather_days'), t('shared_col_penalties')]}>
+        {tracking.map(l => (
+          <tr key={l.lot_id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+            <td className="px-3 py-2 align-top font-medium text-[var(--tblr-text)]">{l.lot_label ?? l.lot_id}</td>
+            <td className="px-3 py-2 align-top"><PresencePill status={l.status} /></td>
+            <td className="px-3 py-2 align-top tabular-nums">{jours(l.effectif)}</td>
+            <td className="px-3 py-2 align-top tabular-nums">{jours(l.retard_semaine)}</td>
+            <td className="px-3 py-2 align-top tabular-nums">{jours(l.retard_cumule)}</td>
+            <td className="px-3 py-2 align-top tabular-nums">{jours(l.intemperies_jours)}</td>
+            <td className="px-3 py-2 align-top">
+              {l.penalites.length === 0 ? <span className="text-[var(--tblr-muted)]">{t('shared_penalty_none')}</span> : (
+                <ul className="space-y-0.5">
+                  {l.penalites.map(p => (
+                    <li key={p.id} className="whitespace-nowrap">
+                      <span className="text-[var(--tblr-text)]">{t(`shared_penalty_${p.type}`)}{p.motif ? ` (${p.motif})` : ''}</span>
+                      <span className="text-[var(--tblr-muted)]"> · {p.jours} j × {euros(p.montant_jour)} = </span>
+                      <span className="font-mono tabular-nums font-semibold text-red-600">{euros(p.montant)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </td>
+          </tr>
+        ))}
+      </ActTable>
+      {total > 0 && <p className="text-xs font-semibold text-[var(--tblr-text)]">{t('shared_penalty_total', { amount: euros(total) })}</p>}
+    </div>
+  );
 }
 
 const cardStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' };
@@ -53,7 +139,7 @@ function CommitField({ value, label, disabled, multiline, type = 'text', maxLeng
   );
 }
 
-export function SharedReports({ projectId, canWrite }: { projectId: string; canWrite: boolean }) {
+export function SharedReports({ projectId, canWrite, detail = false }: { projectId: string; canWrite: boolean; /** Le cabinet a coché le détail : présences, suivi par lot, pénalités, photos. */ detail?: boolean }) {
   const { t } = useTranslation();
   const [reports, setReports] = useState<SharedReport[] | null>(null);
   const [reportId, setReportId] = useState('');
@@ -150,6 +236,9 @@ export function SharedReports({ projectId, canWrite }: { projectId: string; canW
             </div>
             <CommitField key={`g-${report.id}-${report.meetingNotes}`} value={report.meetingNotes} label={t('shared_report_notes')} disabled={!editable} multiline maxLength={5000} onCommit={v => patchReport({ meetingNotes: v })} />
 
+            {detail && report.attendance && <AttendanceTable attendance={report.attendance} />}
+            {detail && report.lot_tracking && <LotTrackingTable tracking={report.lot_tracking} />}
+
             <ul className="space-y-3">
               {notes.length === 0 && <li className="text-xs text-[var(--tblr-muted)]">{t('shared_notes_empty')}</li>}
               {notes.map(note => (
@@ -168,6 +257,13 @@ export function SharedReports({ projectId, canWrite }: { projectId: string; canW
                   </div>
                   <CommitField value={note.text} label={t('shared_note_text')} disabled={!editable} multiline maxLength={5000} onCommit={v => patchNote(note, { text: v })} />
                   <CommitField value={note.due_date} label={t('shared_note_due')} disabled={!editable} type="date" onCommit={v => patchNote(note, { due_date: v })} />
+                  {detail && (note.photoCount ?? 0) > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1" role="group" aria-label={t('shared_photos_label')}>
+                      {Array.from({ length: note.photoCount ?? 0 }, (_, i) => (
+                        <SharedPhoto key={i} route={`${base}/${report.id}/notes/${note.id}/photos/${i}`} alt={`${note.category} ${i + 1}`} />
+                      ))}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -195,7 +291,7 @@ function reserveState(item: SharedReserve) {
   return { closed: isReserveClosed(like), forRecord: isReserveForRecord(like), lateDays: reserveOverdueDays(like) };
 }
 
-export function SharedReserves({ projectId, kind, canWrite }: { projectId: string; kind: 'reserves' | 'gpa'; canWrite: boolean }) {
+export function SharedReserves({ projectId, kind, canWrite, detail = false }: { projectId: string; kind: 'reserves' | 'gpa'; canWrite: boolean; /** Le cabinet a coché le détail : photos des réserves. */ detail?: boolean }) {
   const { t } = useTranslation();
   const [items, setItems] = useState<SharedReserve[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -280,7 +376,10 @@ export function SharedReserves({ projectId, kind, canWrite }: { projectId: strin
                     <Fragment key={item.id}>
                       <tr style={{ borderTop: '1px solid var(--tblr-border)' }}>
                         <td className="px-3 py-2 align-top font-mono text-xs text-[var(--tblr-muted)]">{item.number ?? ''}</td>
-                        <td className="px-3 py-2 align-top font-medium text-[var(--tblr-text)]">{item.title}</td>
+                        <td className="px-3 py-2 align-top font-medium text-[var(--tblr-text)]">
+                          {item.title}
+                          {detail && (item.photos?.length ?? 0) > 0 && <span className="ml-2 text-xs font-normal text-[var(--tblr-muted)]">{t('shared_photos_count', { count: item.photos!.length })}</span>}
+                        </td>
                         <td className="px-3 py-2 align-top text-xs text-[var(--tblr-muted)]">{[item.batiment, item.local].filter(Boolean).join(' · ')}</td>
                         <td className="px-3 py-2 align-top text-xs text-[var(--tblr-muted)]">{[item.lots, item.entreprises].filter(Boolean).join(' · ')}</td>
                         <td className="px-3 py-2 align-top text-xs whitespace-nowrap">
@@ -315,6 +414,16 @@ export function SharedReserves({ projectId, kind, canWrite }: { projectId: strin
                               <CommitField key={`r-${item.id}-${item.reponse}`} value={item.reponse} label={t('shared_reserve_response')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patch(item, { reponse: v })} />
                               <CommitField key={`e-${item.id}-${item.due_date}`} value={item.due_date} label={t('shared_reserve_due')} disabled={!canWrite} type="date" onCommit={v => patch(item, { due_date: v })} />
                             </div>
+                            {detail && (item.photos?.length ?? 0) > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-3" role="group" aria-label={t('shared_photos_label')}>
+                                {item.photos!.map(p => (
+                                  <SharedPhoto
+                                    key={p.id} alt={p.caption || item.title}
+                                    route={`${path}/${item.id}/photos/${p.id}${p.has_thumb ? '?thumb=1' : ''}`} fullRoute={`${path}/${item.id}/photos/${p.id}`}
+                                  />
+                                ))}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )}
@@ -334,7 +443,8 @@ interface SharedActView {
   phase: string | null;
   lots: Array<{ id: string; name: string | null }>;
   documents: Array<{ id: string; nom: string | null; type_doc: string | null }>;
-  entreprises: Array<{ id: string; nom: string | null; lots_ids: string[]; dce_transmis_le: string | null; relance_le: string | null; offre_recue_le: string | null; ne_repond_pas: boolean }>;
+  /** `email` et `emails_supplementaires` avec le détail de l'atelier seulement. */
+  entreprises: Array<{ id: string; nom: string | null; lots_ids: string[]; dce_transmis_le: string | null; relance_le: string | null; offre_recue_le: string | null; ne_repond_pas: boolean; email?: string | null; emails_supplementaires?: string | null }>;
   offres: Array<{ id: string; lot_id: string | null; entreprise_id: string | null; montant_base: number | null; note_technique: number | null; conforme: boolean; motif_nc: string | null }>;
   attributions: Array<{ lot_id: string | null; entreprise_id: string | null; montant: number | null; directe: boolean }>;
   questions: Array<{ id: string; question: string | null; reponse: string | null; date_question: string | null }>;
@@ -371,7 +481,7 @@ function ActTable({ title, heads, children }: { title: string; heads: string[]; 
  * Atelier ACT d'un confrère : consultation, offres, attributions et marchés. La modification est une PROPOSITION :
  * le confrère n'écrit jamais dans la consultation, le cabinet approuve (server/routes/projectShareActProposals.ts).
  */
-export function SharedAct({ projectId, canPropose }: { projectId: string; canPropose: boolean }) {
+export function SharedAct({ projectId, canPropose, detail = false }: { projectId: string; canPropose: boolean; /** Le cabinet a coché le détail : adresses e-mail des entreprises consultées. */ detail?: boolean }) {
   const { t } = useTranslation();
   const [view, setView] = useState<SharedActView | null>(null);
   const [proposals, setProposals] = useState<ActProposal[]>([]);
@@ -434,8 +544,9 @@ export function SharedAct({ projectId, canPropose }: { projectId: string; canPro
       {notice && <p role="status" className="text-xs text-[var(--tblr-muted)]">{notice}</p>}
       {empty && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_act_empty')}</p>}
 
+      {detail && view.entreprises.length > 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_contacts_note')}</p>}
       {view.entreprises.length > 0 && (
-        <ActTable title={t('shared_act_entreprises')} heads={[t('shared_col_company'), t('shared_col_lots'), t('shared_col_state'), ...(canPropose ? [t('shared_col_proposal')] : [])]}>
+        <ActTable title={t('shared_act_entreprises')} heads={[t('shared_col_company'), t('shared_col_lots'), t('shared_col_state'), ...(detail ? [t('shared_col_email')] : []), ...(canPropose ? [t('shared_col_proposal')] : [])]}>
           {view.entreprises.map(e => (
             <tr key={e.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
               <td className="px-3 py-2 align-top font-medium text-[var(--tblr-text)]">{e.nom}</td>
@@ -445,6 +556,11 @@ export function SharedAct({ projectId, canPropose }: { projectId: string; canPro
                   : e.offre_recue_le ? t('shared_act_offer_received', { date: e.offre_recue_le })
                   : e.dce_transmis_le ? t('shared_act_dce_sent', { date: e.dce_transmis_le }) : ''}
               </td>
+              {detail && (
+                <td className="px-3 py-2 align-top text-[var(--tblr-muted)]">
+                  {[e.email, e.emails_supplementaires].filter(Boolean).join(' ; ')}
+                </td>
+              )}
               {canPropose && (
                 <td className="px-3 py-2 align-top whitespace-nowrap space-y-1">
                   <label className="inline-flex items-center gap-1 mr-3">

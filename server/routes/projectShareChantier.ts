@@ -17,8 +17,10 @@
 import type { Express } from 'express';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 import { isMissingReponseColumn, normalizeReponse } from '../reservePhotos';
-import { activeShareFor, allows, type ShareKind, type ShareRow } from '../projectShares/access';
+import { activeShareFor, allows, allowsDetail, type ShareKind, type ShareRow } from '../projectShares/access';
 import { guestActView } from '../projectShares/actView';
+import { guestAttendance, guestLotTracking } from '../projectShares/reportDetailView';
+import { linkForTenantFile } from '../projectShares/fileAccess';
 import { isProjectArchived } from './projectArchive';
 
 export interface RouteDeps {
@@ -130,8 +132,12 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
     return res.status(500).json({ error: 'Opération impossible, réessayez.' });
   };
 
-  /** Le partage actif de l'appelant, avec le droit demandé sur `kind`, sinon la réponse d'erreur est envoyée et on rend null. */
-  async function guard(req: any, res: any, kind: ShareKind, access: 'read' | 'write'): Promise<ShareRow | null> {
+  /**
+   * Le partage actif de l'appelant, avec le droit demandé sur `kind`, sinon la réponse d'erreur est envoyée et on rend null.
+   * `detail: true` exige en plus le DÉTAIL de l'atelier (issue #688) ; sans lui, `req.shareDetail` dit si le cabinet l'a accordé,
+   * pour que la route ajoute (ou non) les champs de détail à sa vue.
+   */
+  async function guard(req: any, res: any, kind: ShareKind, access: 'read' | 'write', options: { detail?: boolean } = {}): Promise<ShareRow | null> {
     const found = await activeShareFor(supabaseAdmin, req.user.id, req.params.id);
     // 404 et non 403 : on ne révèle pas l'existence d'une affaire non partagée.
     if (!found) { res.status(404).json({ error: 'Affaire introuvable ou non partagée avec vous.' }); return null; }
@@ -140,6 +146,11 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
         error: access === 'write' ? 'Vous n\'avez pas le droit de modifier ce suivi de chantier.' : 'Ce suivi de chantier n\'est pas partagé avec vous.',
         code: 'SHARE_FORBIDDEN',
       });
+      return null;
+    }
+    req.shareDetail = allowsDetail(found.grants, kind);
+    if (options.detail && !req.shareDetail) {
+      res.status(403).json({ error: 'Le détail de ce suivi n\'est pas partagé avec vous.', code: 'SHARE_DETAIL_FORBIDDEN' });
       return null;
     }
     if (access === 'write' && await isProjectArchived(supabaseAdmin, found.share.tenant_id, found.share.project_id)) {
@@ -152,6 +163,22 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
   const audit = async (share: ShareRow, req: any, action: string, target: string, id: string, type: string, category: string) => {
     const userName = await getUserName(share.tenant_id, req.user.id, req.user.email);
     logActivity(share.tenant_id, req.user.id, userName, `${action} (confrère externe)`, target, id, type, category);
+  };
+
+  /**
+   * Trace la consultation de données personnelles (coordonnées, RGPD) dans le journal d'activité, au plus une fois par
+   * demi-heure et par personne, affaire et type : un écran qui se recharge ne remplit pas le journal. En mémoire du
+   * processus, au mieux (comme `alertLimitReached` des propositions).
+   */
+  const TRACE_WINDOW_MS = 30 * 60 * 1000;
+  const lastTrace = new Map<string, number>();
+  const auditConsultation = async (share: ShareRow, req: any, action: string, target: string, type: string, category: string) => {
+    const key = `${req.user.id}|${share.project_id}|${type}`;
+    const now = Date.now();
+    if (now - (lastTrace.get(key) ?? 0) < TRACE_WINDOW_MS) return;
+    lastTrace.set(key, now);
+    if (lastTrace.size > 1000) for (const [k, at] of lastTrace) if (now - at > TRACE_WINDOW_MS) lastTrace.delete(k);
+    await audit(share, req, action, target, share.project_id, type, category);
   };
 
   // ─── Comptes rendus de chantier ──────────────────────────────────────────────
@@ -173,7 +200,18 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
       const { data, error } = await supabaseAdmin.from('site_reports').select('*')
         .eq('project_id', share.project_id).eq('tenant_id', share.tenant_id);
       if (error) throw error;
-      res.json((data || []).map(reportView).sort((a: any, b: any) => String(b.date).localeCompare(String(a.date))));
+      // Détail accordé par le cabinet : présences et suivi par lot (pénalités comprises). Les lots ne sont nommés que par
+      // numéro et intitulé, jamais par leur entreprise.
+      let labels = new Map<string, string>();
+      if (req.shareDetail) {
+        const { data: lots } = await supabaseAdmin.from('project_lots').select('id, lot_number, lot_title')
+          .eq('project_id', share.project_id).eq('tenant_id', share.tenant_id);
+        labels = new Map((lots || []).map((l: any) => [String(l.id), [l.lot_number, l.lot_title].filter(Boolean).join(' ')]));
+      }
+      const view = (row: any) => (req.shareDetail
+        ? { ...reportView(row), attendance: guestAttendance(row?.attendance), lot_tracking: guestLotTracking(row?.lot_tracking, labels) }
+        : reportView(row));
+      res.json((data || []).map(view).sort((a: any, b: any) => String(b.date).localeCompare(String(a.date))));
     } catch (e: any) { fail(res, '[GET /api/shared/projects/:id/reports]', e); }
   });
 
@@ -185,8 +223,28 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
       const { data, error } = await supabaseAdmin.from('site_report_notes').select('*')
         .eq('report_id', req.params.reportId).eq('tenant_id', share.tenant_id);
       if (error) throw error;
-      res.json((data || []).map((n: any) => pick(n, NOTE_FIELDS)).sort((a: any, b: any) => Number(a.note_number) - Number(b.note_number)));
+      // Les photos ne sortent JAMAIS en adresse (le chemin porte l'identifiant du cabinet) : avec le détail, seulement leur nombre,
+      // chaque photo se lit par la route de téléchargement ci-dessous.
+      const view = (n: any) => (req.shareDetail ? { ...pick(n, NOTE_FIELDS), photoCount: Array.isArray(n?.photos) ? n.photos.length : 0 } : pick(n, NOTE_FIELDS));
+      res.json((data || []).map(view).sort((a: any, b: any) => Number(a.note_number) - Number(b.note_number)));
     } catch (e: any) { fail(res, '[GET /api/shared/projects/:id/reports/:reportId/notes]', e); }
+  });
+
+  /** Lien (qui expire) vers UNE photo d'une rubrique : partage, droit de détail et rattachement à l'affaire revérifiés à chaque appel. */
+  app.get('/api/shared/projects/:id/reports/:reportId/notes/:noteId/photos/:index', async (req: any, res: any) => {
+    try {
+      const share = await guard(req, res, 'reports', 'read', { detail: true });
+      if (!share) return;
+      if (!(await ownReport(share, req.params.reportId))) return res.status(404).json({ error: 'Compte rendu introuvable.' });
+      const { data: note } = await supabaseAdmin.from('site_report_notes').select('id, photos')
+        .eq('id', req.params.noteId).eq('report_id', req.params.reportId).eq('tenant_id', share.tenant_id).maybeSingle();
+      const index = /^\d{1,3}$/.test(req.params.index) ? Number(req.params.index) : -1;
+      const fileUrl = Array.isArray(note?.photos) ? note.photos[index] : undefined;
+      if (!note || typeof fileUrl !== 'string') return res.status(404).json({ error: 'Photo introuvable.' });
+      const link = await linkForTenantFile(supabaseAdmin, share.tenant_id, fileUrl);
+      if (!link.ok) return res.status(link.status).json({ error: link.error });
+      res.json({ url: link.url, expiresIn: link.expiresIn });
+    } catch (e: any) { fail(res, '[GET /api/shared/projects/:id/reports/:reportId/notes/:noteId/photos/:index]', e); }
   });
 
   app.put('/api/shared/projects/:id/reports/:reportId', async (req: any, res: any) => {
@@ -261,15 +319,22 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
         supabaseAdmin.from('act_data').select('*').eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle(),
         supabaseAdmin.from('marches_entreprises').select('*').eq('project_id', share.project_id).eq('tenant_id', share.tenant_id),
       ]);
-      res.json(guestActView(row ?? null, marches || []));
+      // Les adresses e-mail des entreprises sont des données personnelles : leur consultation laisse une trace au cabinet,
+      // posée AVANT la réponse. Un journal en panne ne prive pas le confrère de sa vue (meilleur effort, erreur consignée).
+      if (req.shareDetail) {
+        try {
+          await auditConsultation(share, req, 'Consultation des coordonnées des entreprises de l\'ACT', 'ACT', 'act_contacts', 'ACT');
+        } catch (traceError) { console.error('[GET /api/shared/projects/:id/act] trace', traceError); }
+      }
+      res.json(guestActView(row ?? null, marches || [], { detail: !!req.shareDetail }));
     } catch (e: any) { fail(res, '[GET /api/shared/projects/:id/act]', e); }
   });
 
   // ─── Réserves AOR (`reserves`) et GPA (`gpa_reserves`) ────────────────────────
 
-  const RESERVE_SETS: Array<{ path: string; table: string; kind: ShareKind; label: string; type: string; category: string }> = [
-    { path: 'reserves', table: 'reserves', kind: 'reserves', label: 'la réserve', type: 'reserve', category: 'Réserves/Observations' },
-    { path: 'gpa-reserves', table: 'gpa_reserves', kind: 'gpa', label: 'la réserve GPA', type: 'gpa_reserve', category: 'Réserves GPA' },
+  const RESERVE_SETS: Array<{ path: string; table: string; kind: ShareKind; label: string; type: string; category: string; photoKind: 'opr' | 'gpa' }> = [
+    { path: 'reserves', table: 'reserves', kind: 'reserves', label: 'la réserve', type: 'reserve', category: 'Réserves/Observations', photoKind: 'opr' },
+    { path: 'gpa-reserves', table: 'gpa_reserves', kind: 'gpa', label: 'la réserve GPA', type: 'gpa_reserve', category: 'Réserves GPA', photoKind: 'gpa' },
   ];
 
   for (const set of RESERVE_SETS) {
@@ -283,8 +348,44 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
           if ((error as any).code === '42P01') return res.json([]); // table absente : instance non migrée
           throw error;
         }
-        res.json((data || []).map((r: any) => pick(r, RESERVE_FIELDS)).sort((a: any, b: any) => Number(a.number) - Number(b.number)));
+        // Avec le détail, chaque réserve porte ses photos (identifiant, légende, date), jamais leur adresse : elles se lisent
+        // par la route de téléchargement ci-dessous.
+        const photosByReserve = new Map<string, any[]>();
+        if (req.shareDetail && (data || []).length) {
+          const { data: photos, error: photoError } = await supabaseAdmin.from('reserve_photos')
+            .select('id, reserve_id, caption, uploaded_at, thumb_url')
+            .eq('tenant_id', share.tenant_id).eq('reserve_kind', set.photoKind).in('reserve_id', (data || []).map((r: any) => r.id));
+          // Table absente (instance non migrée) : pas de photos, la liste ne dépend pas d'elles.
+          if (!photoError) {
+            for (const p of photos || []) {
+              const list = photosByReserve.get(p.reserve_id) ?? [];
+              list.push({ id: p.id, caption: p.caption ?? null, uploaded_at: p.uploaded_at ?? null, has_thumb: !!p.thumb_url });
+              photosByReserve.set(p.reserve_id, list);
+            }
+          }
+        }
+        const view = (r: any) => (req.shareDetail ? { ...pick(r, RESERVE_FIELDS), photos: photosByReserve.get(r.id) ?? [] } : pick(r, RESERVE_FIELDS));
+        res.json((data || []).map(view).sort((a: any, b: any) => Number(a.number) - Number(b.number)));
       } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${set.path}]`, e); }
+    });
+
+    /** Lien (qui expire) vers UNE photo de réserve, ou sa miniature (`?thumb=1`) : partage, détail et rattachement revérifiés. */
+    app.get(`/api/shared/projects/:id/${set.path}/:reserveId/photos/:photoId`, async (req: any, res: any) => {
+      try {
+        const share = await guard(req, res, set.kind, 'read', { detail: true });
+        if (!share) return;
+        // La réserve doit appartenir à CETTE affaire, la photo à CETTE réserve et à CE cabinet : sinon introuvable.
+        const { data: reserve } = await supabaseAdmin.from(set.table).select('id')
+          .eq('id', req.params.reserveId).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
+        if (!reserve) return res.status(404).json({ error: 'Réserve introuvable.' });
+        const { data: photo } = await supabaseAdmin.from('reserve_photos').select('id, file_url, thumb_url')
+          .eq('id', req.params.photoId).eq('reserve_id', reserve.id).eq('reserve_kind', set.photoKind).eq('tenant_id', share.tenant_id).maybeSingle();
+        if (!photo?.file_url) return res.status(404).json({ error: 'Photo introuvable.' });
+        const wantsThumb = req.query.thumb === '1' && !!photo.thumb_url;
+        const link = await linkForTenantFile(supabaseAdmin, share.tenant_id, wantsThumb ? photo.thumb_url : photo.file_url);
+        if (!link.ok) return res.status(link.status).json({ error: link.error });
+        res.json({ url: link.url, expiresIn: link.expiresIn });
+      } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${set.path}/:reserveId/photos/:photoId]`, e); }
     });
 
     app.put(`/api/shared/projects/:id/${set.path}/:reserveId`, async (req: any, res: any) => {
