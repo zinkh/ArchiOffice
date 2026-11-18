@@ -333,12 +333,22 @@ export interface AffichagePlanning {
   numerosSemaines: boolean;
   generales: boolean;
   replies: string[];
+  avancement: boolean;
+  largeurLibelles: number;
+  largeurPeriode: number;
+  ajusterLargeur: boolean;
 }
-export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [] };
+export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [], avancement: true, largeurLibelles: 272, largeurPeriode: 84, ajusterLargeur: false };
+export function bornerLargeur(v: unknown, min: number, max: number, repli: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : repli;
+}
 export function sanitizeAffichage(v: unknown): AffichagePlanning {
   const o = (v && typeof v === 'object' ? v : {}) as Partial<AffichagePlanning>;
   return { echelle: o.echelle === 'mois' ? 'mois' : 'semaines', relatif: o.relatif === true,
     numerosSemaines: o.numerosSemaines !== false, generales: o.generales !== false,
+    avancement: o.avancement !== false, ajusterLargeur: o.ajusterLargeur === true,
+    largeurLibelles: bornerLargeur(o.largeurLibelles, 140, 560, AFFICHAGE_PLANNING.largeurLibelles),
+    largeurPeriode: bornerLargeur(o.largeurPeriode, 28, 240, AFFICHAGE_PLANNING.largeurPeriode),
     replies: Array.isArray(o.replies) ? o.replies.filter((s): s is string => typeof s === 'string').slice(0, MAX_TACHES) : [] };
 }
 
@@ -383,4 +393,43 @@ export function positionPlanning(iso: string, periodes: PeriodePlanning[]): numb
   if (i >= 0) return i + joursEntre(periodes[i].debut, iso) / (joursEntre(periodes[i].debut, periodes[i].fin) + 1);
   if (!periodes.length) return 0;
   return iso < periodes[0].debut ? 0 : periodes.length;
+}
+
+
+/** Inverse de l'axe, arrondi au jour le plus proche, y compris hors de l'intervalle visible. */
+export function dateDepuisPositionPlanning(position: number, periodes: PeriodePlanning[], echelle: AffichagePlanning['echelle']): string {
+  if (!periodes.length || !Number.isFinite(position)) throw new Error('Axe du planning invalide');
+  const i = Math.floor(position);
+  const origine = periodes[0].debut;
+  const debut = echelle === 'semaines' ? ajouterJours(origine, i * 7) : ajouterMois(origine, i);
+  const suivante = echelle === 'semaines' ? ajouterJours(debut, 7) : ajouterMois(origine, i + 1);
+  return ajouterJours(debut, Math.round((position - i) * joursEntre(debut, suivante)));
+}
+
+export type GesteDatesPlanning = 'deplacer' | 'debut' | 'fin';
+/** Préserve la durée d'un déplacement ; une borne redimensionnée ne croise jamais l'autre. */
+export function datesParGeste(tache: TachePlanning, geste: GesteDatesPlanning, date: string): TachePlanning {
+  if (!estDateIso(date)) return tache;
+  if (geste === 'deplacer' || tache.jalon) {
+    const delta = joursEntre(tache.debut, date);
+    const fin = ajouterJours(tache.fin, delta);
+    return estDateIso(fin) ? { ...tache, debut: date, fin } : tache;
+  }
+  return geste === 'debut' ? { ...tache, debut: date > tache.fin ? tache.fin : date }
+    : { ...tache, fin: date < tache.debut ? tache.debut : date };
+}
+
+export type ResultatLienPlanning = 'ajoute' | 'soi' | 'cycle' | 'existant' | 'introuvable';
+export function verifierLienPlanning(taches: TachePlanning[], precedent: string, suivant: string): ResultatLienPlanning {
+  if (precedent === suivant) return 'soi';
+  if (!taches.some(t => t.id === precedent) || !taches.some(t => t.id === suivant)) return 'introuvable';
+  if (taches.find(t => t.id === suivant)?.dependencies?.includes(precedent)) return 'existant';
+  return cycleDependances(taches.map(t => t.id === suivant ? { ...t, dependencies: [...(t.dependencies ?? []), precedent] } : t)) ? 'cycle' : 'ajoute';
+}
+
+/** Toutes les colonnes tiennent dans la région en mode ajusté, sans changer l'échelle calendaire. */
+export function dimensionsPlanning(largeurDisponible: number, periodes: number, affichage: AffichagePlanning) {
+  const libelles = Math.min(affichage.largeurLibelles, Math.max(140, largeurDisponible - 96));
+  const periode = affichage.ajusterLargeur && periodes > 0 ? Math.max(0.01, (largeurDisponible - libelles - 80) / periodes) : affichage.largeurPeriode;
+  return { libelles, periode };
 }

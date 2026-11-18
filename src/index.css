@@ -649,3 +649,10 @@ button, [role="button"], [role="tab"], .btn {
 .rt-content p.is-editor-empty:first-child::before {
   content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--tblr-muted);
 }
+
+
+/* Le planning garde le défilement tactile ; les dates précises restent dans la fiche. */
+@media (pointer: coarse), (max-width: 639px) {
+  .planning-resize-handle { display: none; }
+  .planning-link-handle { width: 44px; height: 44px; top: -7px; right: -48px; }
+}
