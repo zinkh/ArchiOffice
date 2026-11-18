@@ -37,11 +37,11 @@ export function PlanningBarre({ tache, left, width, hauteur, couleur, avancement
     {!tache.jalon && (['debut', 'fin'] as const).map(geste => <button key={geste} type="button" disabled={disabled}
       aria-label={etiquette(geste)} title={etiquette(geste)} onPointerDown={e => { e.stopPropagation(); onDateStart(e, geste); }}
       onKeyDown={e => clavier(e, geste)}
-      className="planning-resize-handle absolute top-0 bottom-0 w-2.5 cursor-ew-resize rounded border border-[var(--tblr-text)] bg-[var(--tblr-surface)] opacity-60 hover:opacity-100 focus:opacity-100 pointer-coarse:hidden"
-      style={{ [geste === 'debut' ? 'left' : 'right']: -4 }} />)}
+      className="planning-resize-handle absolute top-0 bottom-0 w-2.5 cursor-ew-resize rounded bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--tblr-primary)] pointer-coarse:hidden"
+      style={{ [geste === 'debut' ? 'left' : 'right']: -4 }}><span className="pointer-events-none absolute inset-y-1 left-1/2 w-0.5 bg-[var(--tblr-surface)] border-l border-[var(--tblr-text)]" /></button>)}
     <button type="button" disabled={disabled} aria-label={t('planning_link_from', { name: tache.libelle })}
       title={t('planning_link_from', { name: tache.libelle })} onClick={onLinkClick} onPointerDown={e => { e.stopPropagation(); onLinkStart(e); }}
-      className="planning-link-handle absolute -right-7 top-0 h-7 w-6 flex items-center justify-center rounded bg-[var(--tblr-surface)] border border-[var(--tblr-border)] text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--tblr-primary)] pointer-coarse:w-11 pointer-coarse:h-11 pointer-coarse:-top-2 pointer-coarse:-right-12">
+      className="planning-link-handle absolute -right-7 top-0 h-7 w-6 flex items-center justify-center rounded bg-transparent text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--tblr-primary)] pointer-coarse:w-11 pointer-coarse:h-11 pointer-coarse:-top-2 pointer-coarse:-right-12">
       <IconLink size={14} aria-hidden="true" />
     </button>
   </div>;

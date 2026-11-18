@@ -147,3 +147,60 @@ test('largeurs, ajustement et avancement persistants, édition clavier et liaiso
   await expect(page.getByLabel('Ajuster à la largeur', { exact: true })).toBeChecked();
   await page.screenshot({ path: `/tmp/chantier-gestes-${test.info().project.name}.png`, fullPage: true });
 });
+
+test('calendrier configurable, repères persistants et poignées discrètes', async ({ page, isMobile }) => {
+  test.setTimeout(120_000);
+  let saved: any = { version: 1, taches, hypotheses: [], genereLe: null };
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  const bands = page.locator('[data-planning-calendar-bands]');
+  await expect(bands.locator('[data-calendar-start="2026-12-25"]')).toHaveCount(1, { timeout: 30_000 });
+  await expect(bands.locator('[data-calendar-start="2027-01-01"]')).toHaveCount(1);
+  if (!isMobile) {
+    await page.mouse.move(0, 0);
+    const handle = page.getByRole('button', { name: 'Redimensionner la fin de « Fondations et dallage »', exact: true });
+    await expect(handle).toHaveCSS('opacity', '0');
+    await page.getByRole('button', { name: 'Déplacer « Fondations et dallage »', exact: true }).hover();
+    await expect(handle).toHaveCSS('opacity', '1');
+    await page.mouse.move(0, 0); await handle.focus();
+    await expect(handle).toHaveCSS('opacity', '1');
+  }
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await page.getByLabel('Jours fériés automatiques').selectOption('alsace_moselle');
+  await page.getByLabel('Nom de la période', { exact: true }).fill('Fermeture hivernale');
+  await page.getByLabel('Début de la période', { exact: true }).fill('2026-12-24');
+  await page.getByLabel('Fin de la période (incluse)', { exact: true }).fill('2027-01-03');
+  await page.getByRole('button', { name: 'Ajouter une période', exact: true }).click();
+  await expect.poll(() => saved.calendrier?.periodes.length).toBe(1);
+  expect(saved.calendrier.joursFeries).toBe('alsace_moselle');
+  await expect(bands.locator('[data-calendar-type="conge"]')).toHaveCount(1);
+  await expect(bands.locator('[data-calendar-start="2026-12-26"]')).toHaveCount(1);
+  const originalDates = saved.taches.map((t: any) => [t.debut, t.fin]);
+  await page.getByLabel('Afficher les congés', { exact: true }).uncheck();
+  await expect(bands.locator('[data-calendar-type="conge"]')).toHaveCount(0);
+  await page.reload();
+  await expect(bands.locator('[data-calendar-type="conge"]')).toHaveCount(0);
+  await expect(bands.locator('[data-calendar-start="2026-12-26"]')).toHaveCount(1);
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await expect(page.getByLabel('Afficher les congés', { exact: true })).not.toBeChecked();
+  await page.getByLabel('Afficher les congés', { exact: true }).check();
+  await page.getByRole('button', { name: 'Modifier « Fermeture hivernale »', exact: true }).click();
+  await page.getByLabel('Fin de la période (incluse)', { exact: true }).fill('2027-01-04');
+  await page.getByRole('button', { name: 'Enregistrer la période', exact: true }).click();
+  await expect.poll(() => saved.calendrier?.periodes[0].fin).toBe('2027-01-04');
+  await page.getByLabel('Afficher les jours fériés', { exact: true }).uncheck();
+  await expect(bands.locator('[data-calendar-type="ferie"]')).toHaveCount(0);
+  await page.getByLabel('Afficher les jours fériés', { exact: true }).check();
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await page.screenshot({ path: `/tmp/chantier-calendrier-${test.info().project.name}.png`, fullPage: true });
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Exporter PDF', exact: true }).click();
+  await (await download).saveAs(`/tmp/chantier-calendrier-${test.info().project.name}.pdf`);
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await page.getByRole('button', { name: 'Supprimer « Fermeture hivernale »', exact: true }).click();
+  await expect.poll(() => saved.calendrier?.periodes.length).toBe(0);
+  expect(saved.taches.map((t: any) => [t.debut, t.fin])).toEqual(originalDates);
+});

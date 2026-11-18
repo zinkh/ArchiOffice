@@ -77,6 +77,21 @@ describe('lecture et enregistrement', () => {
     expect(fakeSupabaseAdmin.getTable('project_chantier_planning').find(r => r.project_id === projectId)?.data.taches[1].dependencies).toEqual(['a']);
   });
 
+  it('conserve le calendrier partagé au PUT/GET, valide les périodes et ne change pas les tâches', async () => {
+    const { token, projectId } = seed();
+    const url = `/api/projects/${projectId}/planning-chantier`;
+    const periode = { id: 'hiver', libelle: 'Congés de chantier', debut: '2026-12-24', fin: '2027-01-03', type: 'conge' };
+    const put = await request(app).put(url).set(authHeader(token)).send({
+      taches: [{ id: 't', libelle: 'Intervention', debut: '2027-01-01', fin: '2027-01-02' }],
+      calendrier: { joursFeries: 'alsace_moselle', periodes: [periode, { ...periode, id: 'invalide', fin: '2026-12-01' }] },
+    });
+    expect(put.status).toBe(200);
+    const get = await request(app).get(url).set(authHeader(token));
+    expect(get.body.planning.calendrier).toEqual({ joursFeries: 'alsace_moselle', periodes: [periode] });
+    expect(get.body.planning.taches[0]).toMatchObject({ debut: '2027-01-01', fin: '2027-01-02' });
+    expect(fakeSupabaseAdmin.getTable('project_chantier_planning').find(r => r.project_id === projectId)?.data.calendrier.periodes).toEqual([periode]);
+  });
+
   it('refuse les cycles avant écriture et nettoie les références supprimées', async () => {
     const { token, projectId } = seed();
     const url = `/api/projects/${projectId}/planning-chantier`;

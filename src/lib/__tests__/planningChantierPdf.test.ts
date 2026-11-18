@@ -56,5 +56,18 @@ describe('périmètre PDF du chantier', () => {
     expect(capture.rectangles.some(([x]) => x === 152)).toBe(true);
     expect(capture.textes.join(' ')).toContain('Fondations');
   });
+  it('représente les fériés et congés configurés, et respecte leur masquage', async () => {
+    const avecCalendrier = { ...planning, calendrier: { joursFeries: 'france' as const, periodes: [{ id: 'h', libelle: 'Fermeture de fin d’année', debut: '2026-12-31', fin: '2027-01-03', type: 'conge' as const }] } };
+    capture.textes.length = 0; capture.couleurs.length = 0;
+    await exportPlanningToPDF(avecCalendrier, lots, {} as AgencySettings, { project: { name: 'École' } });
+    expect(capture.textes.join(' ')).toContain('Jour de l’an');
+    expect(capture.textes.join(' ')).toContain('Fermeture de fin d’année');
+    expect(capture.couleurs).toContainEqual([225, 236, 250]);
+    capture.textes.length = 0; capture.couleurs.length = 0;
+    await exportPlanningToPDF(avecCalendrier, lots, {} as AgencySettings, { project: { name: 'École' }, affichage: { ...AFFICHAGE_PLANNING, joursFeries: false, conges: false } });
+    expect(capture.textes.join(' ')).not.toContain('Fermeture de fin d’année');
+    expect(capture.textes.join(' ')).not.toContain('Jour de l’an');
+    expect(capture.couleurs).not.toContainEqual([225, 236, 250]);
+  });
 
 });

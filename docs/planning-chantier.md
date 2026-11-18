@@ -54,3 +54,13 @@ Les tests unitaires couvrent les semaines ISO, les changements d’année, le pa
 - Ces nouveaux réglages suivent la même préférence locale par cabinet, personne et affaire. Les anciens réglages sont complétés par les valeurs par défaut. Aucun nouveau champ serveur, aucune migration et aucune dépendance ajoutée.
 
 Fichiers de cette extension : `PlanningChantierTab.tsx`, `PlanningBarre.tsx`, `usePlanningPressDrag.ts`, `planningChantier.ts`, `planningChantierPdf.ts`, `pressDrag.ts`, `src/index.css`, traductions FR/EN, tests purs des gestes et du cycle de vie du pointeur, tests PDF et scénario navigateur de chantier. Les tests couvrent aussi les axes mensuels de longueur variable, l’année ISO et l’annulation sans écriture.
+
+## Jours fériés et congés du chantier
+
+Les réglages proposent les jours fériés de France métropolitaine, d’Alsace-Moselle ou aucun calendrier automatique. Les dates mobiles sont calculées en UTC. Le Vendredi saint doit être vérifié selon la commune ; les autres calendriers ou jours locaux peuvent être saisis manuellement.
+
+Les périodes de congés/fermeture et les jours fériés personnalisés ont un nom et des dates inclusives. Ce calendrier est partagé dans cette affaire, enregistré dans le champ facultatif `calendrier` du JSON existant et conservé par la validation serveur. Il est indépendant des congés RH et ne modifie jamais les dates des interventions. Aucune migration Supabase n’est nécessaire.
+
+Chaque utilisateur peut masquer séparément jours fériés et congés sur son appareil, pour cette affaire. Les bandes bleues et les hachures traversent le diagramme ; une liste accessible donne leurs noms et dates réelles, même en calendrier relatif. Le PDF reprend cette visibilité, les repères et leur liste. Les exports XML conservent leur calendrier de sept jours pour préserver les dates : ces repères visuels ne deviennent pas des contraintes de travail dans les applications externes.
+
+Les poignées de redimensionnement apparaissent au survol ou au focus clavier. Le bouton de liaison reste discret au repos et retrouve son contraste au survol/focus ; sa cible tactile est conservée. Les gestes et commandes clavier restent identiques.
