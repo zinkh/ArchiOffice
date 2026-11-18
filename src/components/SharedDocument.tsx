@@ -2,8 +2,9 @@
 // accordés, en lecture, avec des commentaires sur un lot, un chapitre ou un article
 // quand le droit « commentaire » est accordé. Le serveur ne construit que ces lots
 // (server/projectShares/documentView.ts) : cet écran n'a rien à masquer.
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { IconChevronDown, IconChevronRight, IconMessage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { texteBrut } from '../lib/cctpRichText';
 import { batimentsDuMetre, serialiserMetre } from '../lib/quantites';
@@ -362,6 +363,154 @@ function LigneRow({ ctx, lot, ligne, depth }: { ctx: NodeCtx; lot: LotView; lign
   );
 }
 
+interface LigneAplatie { ligne: Ligne; depth: number }
+const aplatir = (lignes: Ligne[], depth = 0): LigneAplatie[] =>
+  lignes.flatMap(l => [{ ligne: l, depth }, ...aplatir(l.children ?? [], depth + 1)]);
+const feuilles = (lignes: Ligne[]): Ligne[] => lignes.flatMap(l => (l.children?.length ? feuilles(l.children) : [l]));
+
+/** Sous-total d'un lot : la somme de ses articles chiffrés (jamais un « pour mémoire »), recalculée depuis les lignes vues. */
+function sousTotalLot(lot: LotView): number | null {
+  const chiffrees = lot.chapitres.flatMap(c => feuilles(c.lignes)).filter(l => l.quantite !== undefined);
+  return chiffrees.length === 0 ? null : chiffrees.reduce((somme, l) => somme + (l.pourMemoire ? 0 : l.prixTotal ?? 0), 0);
+}
+
+/**
+ * Plan du CCTP, à gauche de la feuille : les lots et leurs chapitres, comme l'arbre de l'éditeur. Un clic
+ * amène à l'endroit du document ; rien n'est masqué, la feuille reste lisible d'un bout à l'autre.
+ */
+function CctpOutline({ doc }: { doc: DocView }) {
+  const { t } = useTranslation();
+  const go = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return (
+    <nav aria-label={t('shared_outline')} className="hidden lg:block lg:sticky lg:top-4 lg:max-h-[calc(100dvh-8rem)] overflow-y-auto self-start rounded-lg p-2 text-sm"
+      style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+      <ul className="space-y-0.5">
+        {doc.lots.map(lot => (
+          <li key={lot.id}>
+            <button type="button" onClick={() => go(`cctp-lot-${lot.id}`)}
+              className="w-full text-left px-2 py-1 rounded-md font-semibold hover:bg-[var(--tblr-surface-2)] text-[var(--tblr-text)]">
+              <span className="font-mono text-xs text-[var(--tblr-muted)]">{lot.numero}</span> {lot.titre}
+            </button>
+            <ul className="ml-3 pl-2 space-y-0.5" style={{ borderLeft: '1px solid var(--tblr-border)' }}>
+              {lot.chapitres.map(chap => (
+                <li key={chap.id}>
+                  <button type="button" onClick={() => go(`cctp-chap-${chap.id}`)}
+                    className="w-full text-left px-2 py-0.5 rounded-md text-xs hover:bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]">
+                    {chap.numero} {chap.titre}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+/**
+ * Le DPGF du confrère en grille, comme dans l'éditeur : lots, chapitres et articles en lignes, colonnes
+ * unité, quantité, prix unitaire et total. Un clic sur une ligne en ouvre le détail (propositions, métré,
+ * commentaires) : la grille reste lisible, les gestes d'écriture sont à portée.
+ */
+function DpgfGrid({ ctx, doc }: { ctx: NodeCtx; doc: DocView }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState<string | null>(null);
+  const toggle = (key: string) => setOpen(current => (current === key ? null : key));
+  const COLS = 7;
+  const activite = (type: TargetType, id: string) =>
+    ctx.comments.filter(c => c.resourceKind === ctx.mode && c.targetType === type && c.targetId === id).length
+    + ctx.proposals.filter(p => p.targetType === type && p.targetId === id && p.status === 'pending').length;
+
+  const bouton = (key: string, type: TargetType, id: string) => {
+    const n = activite(type, id);
+    return (
+      <button type="button" aria-expanded={open === key} aria-label={t('shared_row_details')} title={t('shared_row_details')} onClick={() => toggle(key)}
+        className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)] hover:text-[var(--tblr-text)]">
+        {open === key ? <IconChevronDown size={14} aria-hidden /> : <IconChevronRight size={14} aria-hidden />}
+        {n > 0 && <span className="inline-flex items-center gap-0.5 text-[0.6875rem] font-semibold"><IconMessage size={12} aria-hidden />{n}</span>}
+      </button>
+    );
+  };
+  const detail = (key: string, content: React.ReactNode) => open === key && (
+    <tr key={`${key}-detail`}><td colSpan={COLS} className="px-4 py-2" style={{ background: 'var(--tblr-surface-2)' }}>{content}</td></tr>
+  );
+  const cell = 'px-2 py-1.5 align-top';
+
+  return (
+    <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
+      <table className="w-full text-sm border-collapse" style={{ minWidth: 720 }}>
+        <thead>
+          <tr className="text-xs text-left" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+            <th scope="col" className="px-2 py-2 w-20 font-semibold">{t('shared_col_numero')}</th>
+            <th scope="col" className="px-2 py-2 font-semibold">{t('shared_col_designation')}</th>
+            <th scope="col" className="px-2 py-2 w-16 text-center font-semibold">{t('shared_col_unite')}</th>
+            <th scope="col" className="px-2 py-2 w-24 text-right font-semibold">{t('shared_col_quantite')}</th>
+            <th scope="col" className="px-2 py-2 w-28 text-right font-semibold">{t('shared_col_pu')}</th>
+            <th scope="col" className="px-2 py-2 w-32 text-right font-semibold">{t('shared_col_total')}</th>
+            <th scope="col" className="px-2 py-2 w-16"><span className="sr-only">{t('shared_row_details')}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {doc.lots.map(lot => {
+            const total = sousTotalLot(lot);
+            return (
+              <Fragment key={lot.id}>
+                <tr className="font-bold" style={{ background: 'var(--tblr-surface-2)', borderTop: '1px solid var(--tblr-border)' }}>
+                  <td className={cell}>{lot.numero}</td>
+                  <td className={cell} colSpan={4}>{lot.titre}</td>
+                  <td className={`${cell} text-right font-mono tabular-nums`}>{total == null ? '' : eur.format(total)}</td>
+                  <td className={`${cell} text-right`}>{bouton(`lot:${lot.id}`, 'lot', lot.id)}</td>
+                </tr>
+                {detail(`lot:${lot.id}`, <NodeComments ctx={ctx} lot={lot} targetType="lot" targetId={lot.id} />)}
+                {lot.chapitres.map(chap => (
+                  <Fragment key={chap.id}>
+                    <tr className="font-semibold" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                      <td className={cell}>{chap.numero}</td>
+                      <td className={cell} colSpan={5}>{chap.titre}</td>
+                      <td className={`${cell} text-right`}>{bouton(`chap:${chap.id}`, 'chapitre', chap.id)}</td>
+                    </tr>
+                    {detail(`chap:${chap.id}`, <NodeComments ctx={ctx} lot={lot} targetType="chapitre" targetId={chap.id} />)}
+                    {aplatir(chap.lignes).map(({ ligne, depth }) => {
+                      const key = `ligne:${ligne.id}`;
+                      const chiffre = ligne.quantite !== undefined;
+                      const feuille = !ligne.children?.length;
+                      return (
+                        <Fragment key={ligne.id}>
+                          <tr style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                            <td className={`${cell} text-xs text-[var(--tblr-muted)]`}>{ligne.numero}</td>
+                            <td className={cell} style={{ paddingLeft: 8 + depth * 14 }}>
+                              {ligne.designation}
+                              {ligne.localisation ? <span className="text-xs text-[var(--tblr-muted)]"> · {ligne.localisation}</span> : null}
+                            </td>
+                            <td className={`${cell} text-center`}>{chiffre ? ligne.unite : ''}</td>
+                            <td className={`${cell} text-right font-mono tabular-nums`}>{chiffre && ligne.quantite != null ? num.format(ligne.quantite) : ''}</td>
+                            <td className={`${cell} text-right font-mono tabular-nums`}>{chiffre && ligne.prixUnitaire != null ? eur.format(ligne.prixUnitaire) : ''}</td>
+                            <td className={`${cell} text-right font-mono tabular-nums`}>
+                              {chiffre ? (ligne.pourMemoire ? t('shared_pm') : eur.format(ligne.prixTotal ?? 0)) : ''}
+                            </td>
+                            <td className={`${cell} text-right`}>{bouton(key, 'ligne', ligne.id)}</td>
+                          </tr>
+                          {detail(key, (
+                            <>
+                              {chiffre && feuille && <ChiffresBlock ctx={ctx} lot={lot} ligne={ligne} />}
+                              <NodeComments ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} />
+                            </>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
+                  </Fragment>
+                ))}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function SharedDocument({ projectId, mode, grants, archived }: {
   projectId: string; mode: Mode; grants: SharedGrant[]; archived: boolean;
 }) {
@@ -440,13 +589,18 @@ export default function SharedDocument({ projectId, mode, grants, archived }: {
         </div>
       )}
       {doc.lots.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_doc_empty')}</p>}
+      {mode === 'dpgf' && doc.lots.length > 0 && <DpgfGrid ctx={ctx} doc={doc} />}
+      {mode === 'cctp' && doc.lots.length > 0 && (
+      <div className="lg:grid lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-4">
+      <CctpOutline doc={doc} />
+      <div className="space-y-6 min-w-0">
       {doc.lots.map(lot => (
-        <div key={lot.id} className="space-y-2">
-          <h3 className="text-sm font-bold text-[var(--tblr-text)]">{lot.numero} {lot.titre}</h3>
+        <div key={lot.id} id={`cctp-lot-${lot.id}`} className="space-y-2 scroll-mt-4">
+          <h3 className="text-base font-bold text-[var(--tblr-text)]">{lot.numero} {lot.titre}</h3>
           {mode === 'cctp' && <ProposeEdit ctx={ctx} lot={lot} targetType="lot" targetId={lot.id} field="titre" current={lot.titre ?? ''} />}
           <NodeComments ctx={ctx} lot={lot} targetType="lot" targetId={lot.id} />
           {lot.chapitres.map(chap => (
-            <div key={chap.id} className="pl-2" style={{ borderLeft: '2px solid var(--tblr-border)' }}>
+            <div key={chap.id} id={`cctp-chap-${chap.id}`} className="pl-3 scroll-mt-4" style={{ borderLeft: '2px solid var(--tblr-border)' }}>
               <h4 className="text-sm font-semibold text-[var(--tblr-text)]">{chap.numero} {chap.titre}</h4>
               {mode === 'cctp' && chap.cctpDescription && (
                 <p className="text-xs text-[var(--tblr-muted)] whitespace-pre-wrap">{texteBrut(chap.cctpDescription)}</p>
@@ -463,6 +617,9 @@ export default function SharedDocument({ projectId, mode, grants, archived }: {
           ))}
         </div>
       ))}
+      </div>
+      </div>
+      )}
     </section>
   );
 }

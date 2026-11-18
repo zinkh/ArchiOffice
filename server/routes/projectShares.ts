@@ -378,8 +378,11 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
         const { data } = await supabaseAdmin.from('project_lots').select('id, lot_number, lot_title').eq('project_id', share.project_id).eq('tenant_id', share.tenant_id);
         lots = data || [];
       }
+      // Le nom du cabinet que la liste des affaires partagées montre déjà : l'en-tête de la fiche le reprend.
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name').eq('id', share.tenant_id).maybeSingle();
       res.json({
         project: pick(project, PROJECT_FIELDS), grants,
+        tenantName: tenant?.name ?? null,
         archived: await isProjectArchived(supabaseAdmin, share.tenant_id, share.project_id),
         ...(lots ? { lots: lots.map(l => pick(l, LOT_FIELDS)) } : {}),
       });

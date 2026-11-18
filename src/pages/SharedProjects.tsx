@@ -1,20 +1,23 @@
 // Affaires partagées avec moi : l'espace d'un confrère invité sur l'affaire d'un
-// autre cabinet. Il ne montre que ce que le cabinet a choisi de partager ; le
-// serveur revérifie chaque droit à chaque requête (server/routes/projectShares.ts).
+// autre cabinet. Il montre la vraie fiche ArchiOffice (en-tête, familles d'onglets) limitée à ce que le
+// cabinet a choisi de partager ; le serveur revérifie chaque droit à chaque requête
+// (server/routes/projectShares.ts).
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { IconArrowLeft } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import SharedDocument from '../components/SharedDocument';
+import SharedProjectShell from '../components/shared/SharedProjectShell';
 import { SharedAct, SharedReports, SharedReserves } from '../components/SharedChantier';
+import { sharedInitialTab, sharedProSubTabs, sharedVisibleTabs } from '../lib/sharedTabs';
+import type { ProjectTabId } from '../lib/projectTabs';
 
 interface Grant { kind: 'lots' | 'tasks' | 'documents' | 'cctp' | 'dpgf' | 'act' | 'reports' | 'reserves' | 'gpa'; access: 'read' | 'comment' | 'write' }
 interface Doc { id: string; name: string; category: string | null; phase: string | null; version: number | null; uploaded_at: string | null; description: string | null }
 interface Summary { shareId: string; projectId: string; projectName: string; projectCode: string | null; address: string | null; tenantName: string | null; grants: Grant[] }
 interface View {
   project: { id: string; name: string; project_code: string | null; address: string | null };
-  grants: Grant[]; archived: boolean;
+  grants: Grant[]; archived: boolean; tenantName?: string | null;
   lots?: Array<{ id: string; lot_number: string; lot_title: string }>;
 }
 interface Task { id: string; title: string; start_date: string; end_date: string; progress: number | null; status: string | null; due_date: string | null }
@@ -95,12 +98,36 @@ function TaskRow({ projectId, task, canWrite, onSaved, onError }: {
   );
 }
 
+/** Sous-onglets CCTP et DPGF du dossier PRO, avec la même ligne d'onglets que la fiche du cabinet. */
+function ProSubTabs({ modes, active, onChange }: { modes: Array<'cctp' | 'dpgf'>; active: 'cctp' | 'dpgf'; onChange: (m: 'cctp' | 'dpgf') => void }) {
+  const { t } = useTranslation();
+  if (modes.length < 2) return null;
+  return (
+    <div role="tablist" aria-label={t('project_tab_title_pro')} className="flex items-center gap-1 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
+      {modes.map(mode => {
+        const isActive = mode === active;
+        return (
+          <button
+            key={mode} type="button" role="tab" aria-selected={isActive} onClick={() => onChange(mode)}
+            className={`-mb-px px-3 py-2 border-b-2 text-[0.8125rem] ${isActive ? 'font-semibold' : 'font-medium hover:text-[var(--tblr-text)]'}`}
+            style={{ borderColor: isActive ? 'var(--tblr-primary)' : 'transparent', color: isActive ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}
+          >
+            {t(mode === 'cctp' ? 'shared_cctp_title' : 'shared_dpgf_title')}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SharedDetail({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
+  const [params, setParams] = useSearchParams();
   const [view, setView] = useState<View | null>(null);
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [docs, setDocs] = useState<Doc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [proMode, setProMode] = useState<'cctp' | 'dpgf' | null>(null);
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
@@ -124,6 +151,7 @@ function SharedDetail({ projectId }: { projectId: string }) {
 
   if (error && !view) return <p role="alert" className="text-sm text-red-600">{error}</p>;
   if (!view) return null;
+
   const tasksGrant = view.grants.find(g => g.kind === 'tasks');
   const canWrite = tasksGrant?.access === 'write' && !view.archived;
   // Suivi de chantier : l'écriture est un droit par type, et jamais sur une affaire archivée.
@@ -134,7 +162,19 @@ function SharedDetail({ projectId }: { projectId: string }) {
   const reportsRight = chantier('reports');
   const reservesRight = chantier('reserves');
   const gpaRight = chantier('gpa');
+  const canWriteAnything = !view.archived && view.grants.some(g => g.access === 'write');
   const reload = () => loadTasks(view.grants).catch(e => setError(e?.message || t('share_error')));
+
+  const visible = sharedVisibleTabs(view.grants);
+  const activeTab = sharedInitialTab(params.get('tab'), visible);
+  const changeTab = (tab: ProjectTabId) => {
+    const next = new URLSearchParams(params);
+    if (tab === 'INFOS') next.delete('tab'); else next.set('tab', tab);
+    setParams(next, { replace: true });
+  };
+  const proModes = sharedProSubTabs(view.grants);
+  const activeProMode = proMode && proModes.includes(proMode) ? proMode : proModes[0];
+
   // Le lien est demandé au serveur à chaque ouverture (il expire) : le fichier n'est jamais
   // une adresse stockée côté page.
   const download = async (docId: string) => {
@@ -154,64 +194,64 @@ function SharedDetail({ projectId }: { projectId: string }) {
   };
 
   return (
-    <div className="space-y-4">
-      <Link to="/partages" className="inline-flex items-center gap-1 text-xs font-medium text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]">
-        <IconArrowLeft size={14} />{t('shared_back')}
-      </Link>
-      <div>
-        <h1 className="text-lg font-bold text-[var(--tblr-text)]">
-          {view.project.project_code ? `${view.project.project_code} · ` : ''}{view.project.name}
-        </h1>
-        {view.project.address && <p className="text-xs text-[var(--tblr-muted)]">{view.project.address}</p>}
-        {view.archived && <p className="text-xs text-[var(--tblr-muted)] mt-1">{t('shared_archived')}</p>}
-        {!view.archived && !canWrite && !reportsRight?.canWrite && !reservesRight?.canWrite && !gpaRight?.canWrite && <p className="text-xs text-[var(--tblr-muted)] mt-1">{t('shared_readonly')}</p>}
-      </div>
+    <SharedProjectShell
+      project={view.project} tenantName={view.tenantName ?? null} grants={view.grants}
+      archived={view.archived} canWriteAnything={canWriteAnything} activeTab={activeTab} onTabChange={changeTab}
+    >
       {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      {view.archived && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_archived')}</p>}
 
-      {view.lots && (
-        <section className="rounded-lg p-4" style={cardStyle}>
-          <h2 className="text-sm font-bold mb-2 text-[var(--tblr-text)]">{t('shared_lots_title')}</h2>
-          <ul className="text-sm space-y-1">
-            {view.lots.map(lot => <li key={lot.id}><span className="font-medium">{lot.lot_number}</span> {lot.lot_title}</li>)}
-          </ul>
-        </section>
+      {activeTab === 'INFOS' && (
+        <>
+          {view.lots && (
+            <section className="rounded-lg p-4" style={cardStyle}>
+              <h2 className="text-sm font-bold mb-2 text-[var(--tblr-text)]">{t('shared_lots_title')}</h2>
+              <ul className="text-sm space-y-1">
+                {view.lots.map(lot => <li key={lot.id}><span className="font-medium">{lot.lot_number}</span> {lot.lot_title}</li>)}
+              </ul>
+            </section>
+          )}
+          {docs && (
+            <section className="rounded-lg p-4" style={cardStyle}>
+              <h2 className="text-sm font-bold mb-2 text-[var(--tblr-text)]">{t('shared_documents_title')}</h2>
+              {docs.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_documents_empty')}</p>}
+              <ul className="space-y-2">
+                {docs.map(doc => (
+                  <li key={doc.id} className="flex items-center justify-between gap-3" style={{ borderTop: '1px solid var(--tblr-border)', paddingTop: '0.5rem' }}>
+                    <div className="min-w-0">
+                      <div className="text-sm text-[var(--tblr-text)] truncate">{doc.name}</div>
+                      <div className="text-xs text-[var(--tblr-muted)] truncate">
+                        {[doc.category, doc.phase, doc.version ? `v${doc.version}` : null, doc.uploaded_at].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                    <button
+                      type="button" onClick={() => download(doc.id)} aria-label={`${t('shared_download')} ${doc.name}`}
+                      className="shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)]"
+                    >
+                      {t('shared_download')}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {!view.lots && !docs && <p className="text-sm text-[var(--tblr-muted)]">{t('shared_infos_empty')}</p>}
+        </>
       )}
 
-      {(['cctp', 'dpgf'] as const).filter(mode => view.grants.some(g => g.kind === mode)).map(mode => (
-        <SharedDocument key={mode} projectId={projectId} mode={mode} grants={view.grants} archived={view.archived} />
-      ))}
-
-      {docs && (
-        <section className="rounded-lg p-4" style={cardStyle}>
-          <h2 className="text-sm font-bold mb-2 text-[var(--tblr-text)]">{t('shared_documents_title')}</h2>
-          {docs.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_documents_empty')}</p>}
-          <ul className="space-y-2">
-            {docs.map(doc => (
-              <li key={doc.id} className="flex items-center justify-between gap-3" style={{ borderTop: '1px solid var(--tblr-border)', paddingTop: '0.5rem' }}>
-                <div className="min-w-0">
-                  <div className="text-sm text-[var(--tblr-text)] truncate">{doc.name}</div>
-                  <div className="text-xs text-[var(--tblr-muted)] truncate">
-                    {[doc.category, doc.phase, doc.version ? `v${doc.version}` : null, doc.uploaded_at].filter(Boolean).join(' · ')}
-                  </div>
-                </div>
-                <button
-                  type="button" onClick={() => download(doc.id)} aria-label={`${t('shared_download')} ${doc.name}`}
-                  className="shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)]"
-                >
-                  {t('shared_download')}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {activeTab === 'PRO' && activeProMode && (
+        <>
+          <ProSubTabs modes={proModes} active={activeProMode} onChange={setProMode} />
+          <SharedDocument key={activeProMode} projectId={projectId} mode={activeProMode} grants={view.grants} archived={view.archived} />
+        </>
       )}
 
-      {view.grants.some(g => g.kind === 'act') && <SharedAct projectId={projectId} canPropose={view.grants.some(g => g.kind === 'act' && g.access === 'write') && !view.archived} />}
-      {reportsRight && <SharedReports projectId={projectId} canWrite={reportsRight.canWrite} />}
-      {reservesRight && <SharedReserves projectId={projectId} kind="reserves" canWrite={reservesRight.canWrite} />}
-      {gpaRight && <SharedReserves projectId={projectId} kind="gpa" canWrite={gpaRight.canWrite} />}
+      {activeTab === 'ACT' && <SharedAct projectId={projectId} canPropose={view.grants.some(g => g.kind === 'act' && g.access === 'write') && !view.archived} />}
+      {activeTab === 'RDT' && reportsRight && <SharedReports projectId={projectId} canWrite={reportsRight.canWrite} />}
+      {activeTab === 'AOR' && reservesRight && <SharedReserves projectId={projectId} kind="reserves" canWrite={reservesRight.canWrite} />}
+      {activeTab === 'GPA' && gpaRight && <SharedReserves projectId={projectId} kind="gpa" canWrite={gpaRight.canWrite} />}
 
-      {tasksGrant && (
+      {activeTab === 'TACHES' && tasksGrant && (
         <section className="rounded-lg p-4 overflow-x-auto" style={cardStyle}>
           <h2 className="text-sm font-bold mb-2 text-[var(--tblr-text)]">{t('shared_tasks_title')}</h2>
           {tasks && tasks.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_tasks_empty')}</p>}
@@ -234,7 +274,7 @@ function SharedDetail({ projectId }: { projectId: string }) {
           )}
         </section>
       )}
-    </div>
+    </SharedProjectShell>
   );
 }
 
@@ -242,10 +282,11 @@ export default function SharedProjects() {
   const { t } = useTranslation();
   const [params] = useSearchParams();
   const projectId = params.get('affaire');
+  if (projectId) return <SharedDetail projectId={projectId} />;
   return (
     <div className="space-y-4">
-      {!projectId && <h1 className="text-lg font-bold text-[var(--tblr-text)]">{t('shared_page_title')}</h1>}
-      {projectId ? <SharedDetail projectId={projectId} /> : <SharedList />}
+      <h1 className="text-lg font-bold text-[var(--tblr-text)]">{t('shared_page_title')}</h1>
+      <SharedList />
     </div>
   );
 }

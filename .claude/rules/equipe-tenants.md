@@ -437,6 +437,21 @@ administrateur ou manager), `SharedProjects.tsx` (`/partages`), entrée de menu
 « Affaires partagées ». `ProtectedLayout` ramène un `guest` sur `/partages`.
 Tests : `tests/projectShares.test.ts`.
 
+**La fiche d'un confrère est la vraie interface d'ArchiOffice** (`SharedProjectShell.tsx`, `src/lib/sharedTabs.ts`,
+`tests/sharedDocumentDpgf.test.ts`, `src/lib/__tests__/sharedTabs.test.ts`). `/partages?affaire=<id>` reprend l'en-tête de
+la fiche du cabinet (retour, nom, code, pastille, cabinet qui partage) et sa vraie barre d'onglets (`ProjectTabBar`, prop
+`isTabVisible`) ; l'onglet ouvert vit dans `?tab=`. **Un onglet n'existe que si l'atelier est accordé** (`sharedVisibleTabs` :
+`lots` et `documents` sous INFOS, `tasks` TACHES, `cctp` et `dpgf` PRO avec deux sous-onglets, `act` ACT, `reports` RDT,
+`reserves` AOR, `gpa` GPA) ; un onglet non accordé demandé dans l'adresse retombe sur INFOS (`sharedInitialTab`). Rien n'a changé
+côté serveur hormis `tenantName` dans `GET /api/shared/projects/:id` (le nom que la liste montrait déjà) : le garde
+`guestAccessGuard` et les listes blanches restent la seule barrière, la fiche du confrère n'appelle que `/api/shared`. **Pas de
+réutilisation de `ProjectDetail.tsx` ni des éditeurs PRO** (ils lisent des routes du cabinet fermées aux invités) : le CCTP est
+une feuille avec un plan des lots et chapitres, le DPGF une grille (unité, quantité, P.U., total, sous-total de lot recalculé
+depuis les articles, jamais un « pour mémoire ») avec une ligne de détail repliable pour proposer et commenter. **Promotion** :
+pastille et bouton « Essayer ArchiOffice » (`/register`) dans l'en-tête, mention en pied de page ; rien sur les boutons
+grisés. **Pas encore fait** : les onglets ACT, comptes rendus, réserves et tâches gardent leur présentation en cartes
+(seulement rangés sous la bonne famille d'onglets) ; pas vérifié dans un navigateur.
+
 **Écriture par proposition** (`project_share_proposals`,
 `supabase/migrate_project_share_proposals.sql`, `server/routes/projectShareProposals.ts`).
 Un confrère n'écrit JAMAIS dans le document : le droit `write` sur le CCTP ou le DPGF,
