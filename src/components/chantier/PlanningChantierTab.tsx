@@ -21,7 +21,7 @@ import type { Project, ProjectLot } from '../../types';
 import { telechargerPdf } from '../../lib/observationsExport';
 import { exportPlanningToPDF } from '../../lib/planningChantierPdf';
 import {
-  datesParGeste, dateDepuisPositionPlanning, dimensionsPlanning, verifierLienPlanning, joursEntre, type GesteDatesPlanning,
+  placerApresPredecesseurs, datesParGeste, dateDepuisPositionPlanning, dimensionsPlanning, verifierLienPlanning, joursEntre, type GesteDatesPlanning,
   CALENDRIER_PLANNING, AFFICHAGE_PLANNING, sanitizeAffichage, periodesPlanning, positionPlanning, incoherencesDependances, type AffichagePlanning,
   PLANNING_VIDE, aujourdhuiIso, appliquerGeneration, bornesPlanning, etatTache, lundiDe, planningParLot,
   sanitizePlanning, ajouterJours, type EtatTache, type PlanningChantier, type PlanningGenere, type TachePlanning,
@@ -247,7 +247,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     setMessageGeste(tr(`planning_link_${resultat}`));
     setLienSource(null); setLienGeste(null);
     if (resultat !== 'ajoute') return;
-    modifier(sanitizePlanning({ ...dernier.current, taches: dernier.current.taches.map(t => t.id === cible ? { ...t, source: 'manuel', dependencies: [...(t.dependencies ?? []), source] } : t) }));
+    modifier(sanitizePlanning({ ...dernier.current, taches: dernier.current.taches.map(t => t.id === cible ? placerApresPredecesseurs({ ...t, source: 'manuel', dependencies: [...(t.dependencies ?? []), source] }, dernier.current.taches) : t) }));
   };
   const cibleAuPoint = (x: number, y: number) => {
     const cible = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-planning-task-id]');
