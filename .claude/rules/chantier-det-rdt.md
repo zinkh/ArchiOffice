@@ -248,7 +248,10 @@ vide (`available: false`) et refuse l'écriture en 503.
 - **Barre de réglages compacte** : `PlanningCalendrierOptions` et `PlanningCalendrierPeriodes` (anciennement un seul composant), panneau en quatre colonnes. Détail et mesures dans `docs/planning-chantier.md`.
 - **Aperçu du décalage** : pendant le glisser, un fantôme en pointillés avec « +N j » montre où iraient les successeurs ; rien n'est écrit avant le relâché.
 - **PDF** : flèches de dépendance sur une même page (pointillés si conflit), synthèse par lot, « [Retard] » et soulignement en rouge, indice de diffusion (`docs/planning-chantier.md`).
-- **Pas encore fait** : liaison avec les jalons de mission, décalage vers l'avant, nombre de semaines par page du PDF.
+- **Rapprocher les successeurs** : case locale sous « Décaler les successeurs » ; une tâche qui avance entraîne ses successeurs en gardant leur marge, jamais avant le minimum permis, jamais une tâche terminée ou déjà en conflit (`decalerSuccesseurs(..., { avant, rapprocher })`).
+- **Jalons de mission** : `jalonMission` (id de `milestones`) sur un jalon du planning, simple référence ; écart affiché (losange vide, ligne d'écart, PDF) et deux gestes explicites dans la fiche (reprendre la date / mettre à jour la mission par `PUT /api/milestones/:id`). Rien ne se synchronise tout seul. `src/lib/planningJalonsMission.ts`.
+- **PDF par tranches** : « Par page » (8 à 52 périodes), même échelle sur toutes les tranches, colonne des libellés répétée ; listes et légende une fois à la fin.
+- **Pas encore fait** : relecture des jalons de mission après un changement fait ailleurs sans rouvrir l'onglet, liaison automatique avec les phases du contrat MOE.
 
 ### Documents joints à l'export PDF du compte-rendu
 

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { ModalShell } from '../ui/ModalShell';
+import { ecartJalonMission, type JalonMission } from '../../lib/planningJalonsMission';
 import { placerApresPredecesseurs, cycleDependances, incoherencesDependances, dureeJours, dureeOuvree, MAX_DELAI, TOUS_LES_JOURS, type EstOuvre, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
 
 interface Props {
@@ -14,6 +15,10 @@ interface Props {
   /** Jours travaillés du chantier ; tous les jours tant que le calcul en jours ouvrés n'est pas demandé. */
   ouvre?: EstOuvre;
   joursOuvres?: boolean;
+  /** Jalons de mission de l'affaire, auxquels un jalon du planning peut renvoyer. */
+  jalonsMission?: JalonMission[];
+  /** Écrit la date donnée sur le jalon de mission (geste explicite) ; rend vrai si la mission a été mise à jour. */
+  onAlignerMission?: (id: string, date: string) => Promise<boolean>;
   onSave: (tache: TachePlanning) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -22,9 +27,11 @@ interface Props {
 const champ = 'w-full rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] px-3 py-2 text-sm pointer-coarse:min-h-11';
 const etiquette = 'block text-xs font-semibold text-[var(--tblr-muted)] mb-1';
 
-export function PlanningTacheDialog({ tache, nouvelle, lots, taches, ouvre = TOUS_LES_JOURS, joursOuvres = false, onSave, onDelete, onClose }: Props) {
+export function PlanningTacheDialog({ tache, nouvelle, lots, taches, ouvre = TOUS_LES_JOURS, joursOuvres = false, jalonsMission = [], onAlignerMission, onSave, onDelete, onClose }: Props) {
   const { t: tr } = useTranslation();
   const [form, setForm] = useState<TachePlanning>(tache);
+  const [missionEnCours, setMissionEnCours] = useState(false);
+  const ecartMission = ecartJalonMission(form, jalonsMission);
   const set = <K extends keyof TachePlanning>(cle: K, valeur: TachePlanning[K]) => setForm(prev => ({ ...prev, [cle]: valeur }));
 
   const libelle = form.libelle.trim();
@@ -90,6 +97,34 @@ export function PlanningTacheDialog({ tache, nouvelle, lots, taches, ouvre = TOU
             <input type="checkbox" checked={!!form.jalon} onChange={e => set('jalon', e.target.checked)} />
             Jalon (échéance sans durée : hors d’eau, réception...)
           </label>
+          {form.jalon && jalonsMission.length > 0 && (
+            <div className="space-y-1">
+              <label className={etiquette} htmlFor="planning-mission">{tr('planning_mission_link')}</label>
+              <select id="planning-mission" className={champ} value={form.jalonMission ?? ''} onChange={e => set('jalonMission', e.target.value || undefined)}>
+                <option value="">{tr('planning_mission_none')}</option>
+                {jalonsMission.map(m => <option key={m.id} value={m.id}>{m.title} · {m.due_date}{m.completed ? ` · ${tr('planning_mission_done')}` : ''}</option>)}
+              </select>
+              {ecartMission && ecartMission.jours === 0 && <p className="text-xs text-[var(--tblr-muted)]">{tr('planning_mission_same')}</p>}
+              {ecartMission && ecartMission.jours !== 0 && (
+                <>
+                  <p role="status" className="text-xs text-[var(--tblr-text)]">
+                    {tr('planning_mission_gap', { title: ecartMission.mission.title, date: ecartMission.mission.due_date, n: Math.abs(ecartMission.jours), sens: tr(ecartMission.jours > 0 ? 'planning_mission_later' : 'planning_mission_earlier') })}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn btn-secondary" onClick={() => setForm(prev => ({ ...prev, debut: ecartMission.mission.due_date, fin: ecartMission.mission.due_date }))}>
+                      {tr('planning_mission_take')}
+                    </button>
+                    {onAlignerMission && (
+                      <button type="button" className="btn btn-secondary disabled:opacity-60" disabled={missionEnCours || !form.debut}
+                        onClick={async () => { setMissionEnCours(true); try { await onAlignerMission(ecartMission.mission.id, form.debut); } finally { setMissionEnCours(false); } }}>
+                        {tr('planning_mission_push')}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={etiquette} htmlFor="planning-debut">{form.jalon ? 'Date' : 'Début'}</label>

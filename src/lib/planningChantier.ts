@@ -33,6 +33,11 @@ export interface TachePlanning {
    * ouvrés quand le calendrier du chantier est en jours ouvrés.
    */
   delais?: Record<string, number>;
+  /**
+   * Jalon (`jalon: true`) seulement : identifiant du jalon de mission de l'affaire (`milestones.id`) auquel il
+   * renvoie. Simple référence : aucune date n'est synchronisée automatiquement (voir planningJalonsMission.ts).
+   */
+  jalonMission?: string;
 }
 
 export interface PlanningChantier {
@@ -116,6 +121,8 @@ export function sanitizePlanning(brut: unknown): PlanningChantier {
       avancement: Number.isFinite(avancement) ? Math.min(100, Math.max(0, Math.round(avancement))) : 0,
       source: t.source === 'ia' ? 'ia' : 'manuel',
       ...(jalon ? { jalon: true } : {}),
+      // Une référence à un jalon de mission n'a de sens que pour un jalon.
+      ...(jalon && texte(t.jalonMission, 64) ? { jalonMission: texte(t.jalonMission, 64) } : {}),
     });
   }
   // Nettoyage après lecture de tous les identifiants : suppression / remplacement IA.
@@ -359,8 +366,10 @@ export interface AffichagePlanning {
   conges: boolean;
   /** Réglage de saisie, local à l'appareil : décale les successeurs d'une tâche dont les dates changent. */
   cascade: boolean;
+  /** Avec `cascade` : une tâche qui avance rapproche aussi ses successeurs, en gardant leur marge. */
+  cascadeRapprocher: boolean;
 }
-export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [], avancement: true, largeurLibelles: 272, largeurPeriode: 84, ajusterLargeur: false, joursFeries: true, conges: true, cascade: false };
+export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [], avancement: true, largeurLibelles: 272, largeurPeriode: 84, ajusterLargeur: false, joursFeries: true, conges: true, cascade: false, cascadeRapprocher: false };
 export function bornerLargeur(v: unknown, min: number, max: number, repli: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : repli;
 }
@@ -369,7 +378,7 @@ export function sanitizeAffichage(v: unknown): AffichagePlanning {
   return { echelle: o.echelle === 'mois' ? 'mois' : 'semaines', relatif: o.relatif === true,
     numerosSemaines: o.numerosSemaines !== false, generales: o.generales !== false,
     joursFeries: o.joursFeries !== false, conges: o.conges !== false,
-    avancement: o.avancement !== false, ajusterLargeur: o.ajusterLargeur === true, cascade: o.cascade === true,
+    avancement: o.avancement !== false, ajusterLargeur: o.ajusterLargeur === true, cascade: o.cascade === true, cascadeRapprocher: o.cascadeRapprocher === true,
     largeurLibelles: bornerLargeur(o.largeurLibelles, 140, 560, AFFICHAGE_PLANNING.largeurLibelles),
     largeurPeriode: bornerLargeur(o.largeurPeriode, 28, 240, AFFICHAGE_PLANNING.largeurPeriode),
     replies: Array.isArray(o.replies) ? o.replies.filter((s): s is string => typeof s === 'string').slice(0, MAX_TACHES) : [] };
@@ -563,7 +572,19 @@ export interface DecalageSuccesseurs {
  * Fonction pure : le planning reçu n'est pas modifié. Les cycles sont refusés ailleurs, une borne
  * de passes garantit malgré tout l'arrêt.
  */
-export function decalerSuccesseurs(taches: TachePlanning[], modifiees: string[], ouvre: EstOuvre = TOUS_LES_JOURS): DecalageSuccesseurs {
+export interface OptionsDecalage {
+  /** Planning d'avant la modification : nécessaire pour rapprocher (on compare les contraintes d'avant et d'après). */
+  avant?: TachePlanning[];
+  /**
+   * Rapproche aussi : un successeur dont la contrainte s'est relâchée (son prédécesseur avance) avance de la même
+   * quantité, en gardant sa marge d'avant ; jamais avant le minimum permis par ses prédécesseurs, jamais une tâche
+   * qui était déjà en conflit, jamais une tâche terminée.
+   */
+  rapprocher?: boolean;
+}
+
+export function decalerSuccesseurs(taches: TachePlanning[], modifiees: string[], ouvre: EstOuvre = TOUS_LES_JOURS, options: OptionsDecalage = {}): DecalageSuccesseurs {
+  const avantParId = new Map((options.avant ?? []).map(t => [t.id, t]));
   const parId = new Map(taches.map(t => [t.id, t]));
   const successeurs = new Map<string, string[]>();
   for (const t of taches) for (const p of t.dependencies ?? []) successeurs.set(p, [...(successeurs.get(p) ?? []), t.id]);
@@ -581,7 +602,25 @@ export function decalerSuccesseurs(taches: TachePlanning[], modifiees: string[],
       if (!estDateIso(actuelle.debut) || !estDateIso(actuelle.fin)) continue;
       const liens = (actuelle.dependencies ?? []).flatMap(id => { const fin = courantes.get(id)?.fin; return fin && estDateIso(fin) ? [{ fin, delai: delaiDuLien(actuelle, id) }] : []; });
       // Même critère que l'alerte de dates incohérentes : on ne pousse que ce qui est en conflit.
-      if (!liens.some(l => ecartInsuffisant(l.fin, actuelle.debut, l.delai, ouvre))) continue;
+      if (!liens.some(l => ecartInsuffisant(l.fin, actuelle.debut, l.delai, ouvre))) {
+        // Pas de conflit : le successeur n'est rapproché que si la contrainte de ses prédécesseurs s'est relâchée.
+        const origine = avantParId.get(t.id);
+        if (!options.rapprocher || !origine) continue;
+        const liensAvant = (actuelle.dependencies ?? []).flatMap(id => { const fin = avantParId.get(id)?.fin ?? courantes.get(id)?.fin; return fin && estDateIso(fin) ? [{ fin, delai: delaiDuLien(actuelle, id) }] : []; });
+        if (!liensAvant.length) continue;
+        const minAvant = liensAvant.map(l => debutMinimalLien(l.fin, l.delai, ouvre)).reduce((m, d) => (d > m ? d : m));
+        const minApres = liens.map(l => debutMinimalLien(l.fin, l.delai, ouvre)).reduce((m, d) => (d > m ? d : m));
+        // Contrainte inchangée ou plus forte, ou tâche déjà en conflit avant l'action : on n'y touche pas.
+        if (minApres >= minAvant || origine.debut < minAvant) continue;
+        // Marge d'avant (jours travaillés si le calendrier l'est), reportée sur la nouvelle contrainte.
+        const marge = joursOuvresEntre(minAvant, ajouterJours(origine.debut, -1), ouvre);
+        const nouveauDebut = avancerOuvres(minApres, marge, ouvre);
+        if (nouveauDebut >= actuelle.debut) continue;
+        if (actuelle.avancement >= 100) { terminees.add(t.id); continue; }
+        courantes.set(t.id, { ...deplacerTacheAu(actuelle, nouveauDebut, ouvre), source: 'manuel' });
+        change = true;
+        continue;
+      }
       if (actuelle.avancement >= 100) { terminees.add(t.id); continue; }
       const debutMin = liens.map(l => debutMinimalLien(l.fin, l.delai, ouvre)).reduce((m, d) => (d > m ? d : m));
       courantes.set(t.id, { ...deplacerTacheAu(actuelle, debutMin, ouvre), source: 'manuel' });

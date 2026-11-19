@@ -31,6 +31,7 @@ import { usePlanningPressDrag } from '../../hooks/usePlanningPressDrag';
 import { PlanningCalendrierOptions, PlanningCalendrierPeriodes } from './PlanningCalendrierReglages';
 import { estOuvreDuPlanning, reperesCalendrierPlanning } from '../../lib/planningChantierCalendrier';
 import { canRedo, canUndo, createHistory, pushHistory, redoHistory, undoHistory, type History } from '../../lib/croquis/history';
+import { ecartJalonMission, jalonMissionAvecDate, jalonsMissionDepuisApi } from '../../lib/planningJalonsMission';
 import { PlanningBarre } from './PlanningBarre';
 import { PlanningGenerateDialog } from './PlanningGenerateDialog';
 
@@ -106,6 +107,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const [formatPdf, setFormatPdf] = useState<FormatPdfPlanning>('a4');
   const [synthesePdf, setSynthesePdf] = useState(false);
   const [indicePdf, setIndicePdf] = useState('');
+  const [periodesPdf, setPeriodesPdf] = useState(0);
   const [plagePdf, setPlagePdf] = useState<{ debut: string; fin: string }>({ debut: '', fin: '' });
   const plagePdfInvalide = !!plagePdf.debut && !!plagePdf.fin && plagePdf.debut > plagePdf.fin;
   // Le composant peut être monté avant la lecture, ou sans tâche : observer dès que la région existe.
@@ -118,6 +120,31 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   }, [lu, planning.taches.length === 0]);
 
   const base = `/api/projects/${encodeURIComponent(project.id)}/planning-chantier`;
+  // Jalons de mission de l'affaire (table milestones), lus tels quels : un PUT les réécrit en entier.
+  const [missionsBrutes, setMissionsBrutes] = useState<unknown[]>([]);
+  const missions = useMemo(() => jalonsMissionDepuisApi(missionsBrutes), [missionsBrutes]);
+  useEffect(() => {
+    let annule = false;
+    setMissionsBrutes([]);
+    apiFetch<unknown>(`/api/milestones?project_id=${encodeURIComponent(project.id)}`)
+      .then(r => { if (!annule) setMissionsBrutes(Array.isArray(r) ? r : []); })
+      .catch(() => { /* sans jalons de mission, le planning fonctionne comme avant */ });
+    return () => { annule = true; };
+  }, [project.id]);
+  /** Geste explicite : écrit la date sur le jalon de mission. Rien d'automatique ailleurs. */
+  const alignerMission = async (id: string, date: string): Promise<boolean> => {
+    const corps = jalonMissionAvecDate(missionsBrutes, id, date);
+    if (!corps) { showToast(tr('planning_mission_error'), 'error'); return false; }
+    try {
+      await apiFetch(`/api/milestones/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(corps) });
+      setMissionsBrutes(prev => prev.map(m => (m && typeof m === 'object' && (m as { id?: unknown }).id === id ? corps : m)));
+      showToast(tr('planning_mission_updated', { date }));
+      return true;
+    } catch (e: any) {
+      showToast(e?.message || tr('planning_mission_error'), 'error');
+      return false;
+    }
+  };
   // Entreprises titulaires issues des marchés, rapprochés des lots par le serveur : la fiche du lot n'en porte pas toujours.
   const [entreprises, setEntreprises] = useState<Record<string, string>>({});
   const lotsPlanif = useMemo(
@@ -235,9 +262,9 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   };
 
   /** Décale les successeurs si le réglage est actif ; sinon rend les tâches telles quelles. */
-  const avecCascade = (taches: TachePlanning[], modifiees: string[]) => {
+  const avecCascade = (taches: TachePlanning[], modifiees: string[], avant?: TachePlanning[]) => {
     if (!affichage.cascade) return { taches, decalees: 0, terminees: 0 };
-    const r = decalerSuccesseurs(taches, modifiees, ouvre);
+    const r = decalerSuccesseurs(taches, modifiees, ouvre, { avant, rapprocher: affichage.cascadeRapprocher });
     return { taches: r.taches, decalees: r.decalees.length, terminees: r.terminees.length };
   };
   const messageCascade = (c: { decalees: number; terminees: number }) =>
@@ -249,7 +276,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     const finale: TachePlanning = { ...tache, source: 'manuel' };
     const taches = avant ? planning.taches.map(t => (t.id === tache.id ? finale : t)) : [...planning.taches, finale];
     const datesChangees = !!avant && (avant.debut !== finale.debut || avant.fin !== finale.fin);
-    const cascade = datesChangees ? avecCascade(taches, [finale.id]) : { taches, decalees: 0, terminees: 0 };
+    const cascade = datesChangees ? avecCascade(taches, [finale.id], planning.taches) : { taches, decalees: 0, terminees: 0 };
     modifier(sanitizePlanning({ ...planning, taches: cascade.taches }));
     setTacheOuverte(null);
     const message = messageCascade(cascade);
@@ -275,7 +302,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     setEnExport(lotId ?? '*');
     try {
       const pdf = await exportPlanningToPDF(planning, lotsPlanif, reglages, {
-        lotId, affichage, couleurs, format: formatPdf, synthese: synthesePdf && !lotId, indice: indicePdf,
+        lotId, affichage, couleurs, format: formatPdf, synthese: synthesePdf && !lotId, indice: indicePdf, periodesParPage: periodesPdf, jalonsMission: missions,
         plage: { debut: plagePdf.debut || undefined, fin: plagePdf.fin || undefined }, project: { name: project.name, project_code: project.project_code, address: project.address },
       });
       telechargerPdf(pdf);
@@ -289,7 +316,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const enregistrerDates = (tache: TachePlanning) => {
     const originale = dernier.current.taches.find(t => t.id === tache.id);
     if (!originale || (originale.debut === tache.debut && originale.fin === tache.fin)) return;
-    const cascade = avecCascade(dernier.current.taches.map(t => t.id === tache.id ? { ...t, debut: tache.debut, fin: tache.fin, source: 'manuel' } : t), [tache.id]);
+    const cascade = avecCascade(dernier.current.taches.map(t => t.id === tache.id ? { ...t, debut: tache.debut, fin: tache.fin, source: 'manuel' } : t), [tache.id], dernier.current.taches);
     modifier(sanitizePlanning({ ...dernier.current, taches: cascade.taches }));
     setMessageGeste([tr('planning_dates_saved', { name: tache.libelle, start: tache.debut, end: tache.fin }), messageCascade(cascade)].filter(Boolean).join(' '));
   };
@@ -308,7 +335,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
       candidate = datesParGeste(tache, geste, geste === 'fin' ? ajouterJours(date, -1) : date);
       setApercu(prev => prev?.debut === candidate.debut && prev?.fin === candidate.fin ? prev : candidate);
       // Le nombre de successeurs qui seraient décalés est annoncé avant le relâché.
-      const simulation = affichage.cascade ? decalerSuccesseurs(dernier.current.taches.map(t => t.id === tache.id ? candidate : t), [tache.id], ouvre) : null;
+      const simulation = affichage.cascade ? decalerSuccesseurs(dernier.current.taches.map(t => t.id === tache.id ? candidate : t), [tache.id], ouvre, { avant: dernier.current.taches, rapprocher: affichage.cascadeRapprocher }) : null;
       const n = simulation?.decalees.length ?? 0;
       const fantomes = simulation ? simulation.decalees.map(d => { const t = simulation.taches.find(x => x.id === d.id)!; return { id: d.id, debut: t.debut, fin: t.fin, jours: d.jours }; }) : [];
       setApercuSucc(prev => JSON.stringify(prev) === JSON.stringify(fantomes) ? prev : fantomes);
@@ -491,6 +518,8 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
               onChange={calendrier => modifier(sanitizePlanning({ ...dernier.current, calendrier }))} onAffichage={regler} />
             <label className={ligneCase} title={tr('planning_cascade_help')}><input type="checkbox" checked={affichage.cascade} aria-describedby="planning-cascade-help" onChange={event => regler({ cascade: event.target.checked })} />{tr('planning_cascade')}</label>
             <span id="planning-cascade-help" className="sr-only">{tr('planning_cascade_help')}</span>
+            <label className={`${ligneCase} pl-6`} title={tr('planning_cascade_pull_help')}><input type="checkbox" disabled={!affichage.cascade} checked={affichage.cascadeRapprocher} aria-describedby="planning-cascade-pull-help" onChange={event => regler({ cascadeRapprocher: event.target.checked })} />{tr('planning_cascade_pull')}</label>
+            <span id="planning-cascade-pull-help" className="sr-only">{tr('planning_cascade_pull_help')}</span>
           </div>
           <fieldset className="space-y-1 min-w-0">
             <legend className={titreGroupe}>{tr('planning_group_export')}</legend>
@@ -502,7 +531,13 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
                 <option value="detail">{tr('planning_pdf_detailed')}</option><option value="synthese">{tr('planning_pdf_summary')}</option>
               </select></label>
             </div>
-            <label className="block">{tr('planning_pdf_index')} <input className={`${champCompact} ml-1 w-24`} maxLength={12} placeholder="A, B, C…" value={indicePdf} onChange={e => setIndicePdf(e.target.value)} /></label>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label>{tr('planning_pdf_index')} <input className={`${champCompact} ml-1 w-24`} maxLength={12} placeholder="A, B, C…" value={indicePdf} onChange={e => setIndicePdf(e.target.value)} /></label>
+              <label>{tr('planning_pdf_per_page')} <select className={`${champCompact} ml-1`} value={periodesPdf} onChange={e => setPeriodesPdf(Number(e.target.value))}>
+                <option value={0}>{tr('planning_pdf_all_periods')}</option>
+                {[8, 12, 16, 26, 52].map(n => <option key={n} value={n}>{tr(affichage.echelle === 'mois' ? 'planning_pdf_n_months' : 'planning_pdf_n_weeks', { n })}</option>)}
+              </select></label>
+            </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <label>{tr('planning_pdf_from')} <input type="date" className={`${champCompact} ml-1`} value={plagePdf.debut} max={plagePdf.fin || undefined} onChange={e => setPlagePdf(p => ({ ...p, debut: e.target.value }))} /></label>
               <label>{tr('planning_pdf_to')} <input type="date" className={`${champCompact} ml-1`} value={plagePdf.fin} min={plagePdf.debut || undefined} onChange={e => setPlagePdf(p => ({ ...p, fin: e.target.value }))} /></label>
@@ -533,6 +568,12 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
       {conflits.length > 0 && <div role="status" className="text-sm text-[var(--tblr-text)]">
         {conflits.map(c => <p key={`${c.tache.id}:${c.precedent.id}`}>{tr('planning_dates_conflict', { task: c.tache.libelle, predecessor: c.precedent.libelle, date: c.precedent.fin })}</p>)}
       </div>}
+      {(() => {
+        const ecarts = planning.taches.flatMap(t => { const e = ecartJalonMission(t, missions); return e && e.jours !== 0 ? [{ t, e }] : []; });
+        return ecarts.length > 0 ? <div className="text-xs text-[var(--tblr-muted)]">
+          {ecarts.map(({ t, e }) => <p key={t.id}>{tr('planning_mission_line', { task: t.libelle, title: e.mission.title, date: e.mission.due_date, n: Math.abs(e.jours), sens: tr(e.jours > 0 ? 'planning_mission_later' : 'planning_mission_earlier') })}</p>)}
+        </div> : null;
+      })()}
       <div className="flex flex-wrap items-start gap-x-6 gap-y-1 empty:hidden">
       {liens.length > 0 && <details className="text-xs text-[var(--tblr-muted)]"><summary className="cursor-pointer font-semibold">{tr('planning_links_count', { count: liens.length, hidden: liensMasques.length })}</summary><ul>{liens.map(l => <li key={`${l.p.id}:${l.t.id}`}>{nomTache(l.p)} → {nomTache(l.t)} ({tr('planning_link_type')})</li>)}</ul></details>}
 
@@ -621,6 +662,14 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
                             onDateKeyboard={(geste, date) => enregistrerDates(datesParGeste(originale, geste, date))}
                             onLinkStart={event => commencerLien(event, originale)}
                             onLinkClick={() => { setLienSource(t.id); setMessageGeste(tr('planning_link_choose_target', { name: t.libelle })); }} />
+                          {(() => {
+                            // Jalon de mission lié et à une autre date : un losange vide marque la date de la mission.
+                            const ecartM = ecartJalonMission(t, missions);
+                            if (!ecartM || ecartM.jours === 0 || !periodes.length || ecartM.mission.due_date < periodes[0].debut || ecartM.mission.due_date > periodes[periodes.length - 1].fin) return null;
+                            const couleur = couleurs.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE;
+                            return <div data-planning-mission={t.id} aria-hidden="true" title={tr('planning_mission_marker', { title: ecartM.mission.title, date: ecartM.mission.due_date })}
+                              className="absolute pointer-events-none" style={{ left: x(ecartM.mission.due_date), top: 15, width: 14, height: 14, border: `2px solid ${couleur}`, transform: 'rotate(45deg)', background: 'var(--tblr-surface)' }} />;
+                          })()}
                           {apercuSucc.filter(f => f.id === t.id).map(f => {
                             // Fantôme : où la barre irait au relâché. La barre réelle reste en place jusque-là.
                             const couleur = couleurs.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE;
@@ -683,6 +732,8 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
           taches={planning.taches}
           ouvre={ouvre}
           joursOuvres={!!calendrier.joursOuvres}
+          jalonsMission={missions}
+          onAlignerMission={alignerMission}
           onSave={enregistrerTache}
           onDelete={() => supprimerTache(tacheOuverte.tache.id)}
           onClose={() => setTacheOuverte(null)}

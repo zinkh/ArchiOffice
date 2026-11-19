@@ -232,6 +232,102 @@ test('aperçu des successeurs décalés pendant le glisser, annulé par Échap',
   await expect(page.locator('[data-planning-ghost]')).toHaveCount(0);
 });
 
+test('jalon du planning lié à un jalon de mission : écart visible, alignement dans un sens ou dans l’autre', async ({ page }) => {
+  test.setTimeout(90_000);
+  let saved: any = { version: 1, taches, hypotheses: [], genereLe: null };
+  let mission: any = { id: 'm-aor', title: 'AOR', due_date: '2027-01-22T00:00:00.000Z', completed: false, duration_days: 30, dependencies: [] };
+  const puts: any[] = [];
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.route('**/api/milestones**', route => {
+    if (route.request().method() === 'PUT') { mission = route.request().postDataJSON(); puts.push(mission); return route.fulfill({ json: { success: true } }); }
+    return route.fulfill({ json: [mission] });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  const tache = (id: string) => saved.taches.find((t: any) => t.id === id);
+  await page.getByRole('button', { name: /Réception, .*du/ }).click({ timeout: 30_000 });
+  // Seul un jalon propose la liaison.
+  await page.getByLabel('Jalon de mission lié', { exact: true }).selectOption('m-aor');
+  await expect(page.getByText('La mission « AOR » est au 2027-01-22, 4 jour(s) plus tard que ce jalon.')).toBeVisible();
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect.poll(() => tache('reception')?.jalonMission).toBe('m-aor');
+  expect(puts).toHaveLength(0); // lier n'écrit jamais la mission
+  await expect(page.locator('[data-planning-mission="reception"]')).toBeVisible();
+  await expect(page.getByText('Jalon « Réception » : la mission « AOR » est au 2027-01-22, 4 jour(s) plus tard.')).toBeVisible();
+
+  // Mettre à jour la mission : écriture explicite, corps complet, seule l'échéance change.
+  await page.getByRole('button', { name: /Réception, .*du/ }).click();
+  await page.getByLabel('Date', { exact: true }).fill('2027-01-20');
+  await page.getByRole('button', { name: 'Mettre à jour le jalon de mission', exact: true }).click();
+  await expect.poll(() => puts.length).toBe(1);
+  expect(puts[0]).toMatchObject({ id: 'm-aor', title: 'AOR', due_date: '2027-01-20', duration_days: 30, completed: false });
+  await expect(page.getByText('La date de ce jalon est celle de la mission.')).toBeVisible();
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect.poll(() => tache('reception')?.debut).toBe('2027-01-20');
+  await expect(page.locator('[data-planning-mission]')).toHaveCount(0);
+
+  // Reprendre la date de la mission : le jalon du planning suit, la mission n'est pas touchée.
+  mission = { ...mission, due_date: '2027-01-22' };
+  await page.reload();
+  await page.getByRole('button', { name: /Réception, .*du/ }).click({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Reprendre la date de la mission', exact: true }).click();
+  await expect(page.getByLabel('Date', { exact: true })).toHaveValue('2027-01-22');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect.poll(() => tache('reception')?.debut).toBe('2027-01-22');
+  expect(puts).toHaveLength(1);
+
+  // Une tâche ordinaire ne propose pas la liaison.
+  await page.getByRole('button', { name: /Pose de la charpente, .*du/ }).click();
+  await expect(page.getByLabel('Jalon de mission lié', { exact: true })).toHaveCount(0);
+});
+
+test('rapprocher les successeurs quand une tâche avance, au choix', async ({ page }) => {
+  test.setTimeout(90_000);
+  // Planning sans conflit : chaque tâche est collée à son prédécesseur.
+  const collees = [
+    taches[0],
+    { ...taches[1] },
+    { ...taches[2], debut: '2027-01-09', fin: '2027-01-17' },
+    { ...taches[3] },
+  ];
+  let saved: any = { version: 1, taches: collees, hypotheses: [], genereLe: null };
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  const bar = page.getByRole('button', { name: 'Déplacer « Fondations et dallage »', exact: true });
+  await expect(bar).toBeVisible({ timeout: 30_000 });
+  const tache = (id: string) => saved.taches.find((t: any) => t.id === id);
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  const rapprocher = page.getByLabel('Rapprocher aussi quand une tâche avance', { exact: true });
+  await expect(rapprocher).toBeDisabled(); // sans « Décaler les successeurs », rien à rapprocher
+  await page.getByLabel('Décaler les successeurs', { exact: true }).check();
+  await expect(rapprocher).toBeEnabled();
+
+  // Décaler seulement : une tâche qui avance laisse ses successeurs en place.
+  await bar.focus(); await page.keyboard.press('Shift+ArrowLeft');
+  await expect.poll(() => tache('fondations')?.debut).toBe('2026-12-23');
+  expect(tache('charpente')).toMatchObject({ debut: '2027-01-09', fin: '2027-01-17' });
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => tache('fondations')?.debut).toBe('2026-12-30');
+
+  // Rapprocher : les successeurs suivent, durée conservée, jalon sur son jour.
+  await rapprocher.check();
+  await bar.focus(); await page.keyboard.press('Shift+ArrowLeft');
+  await expect.poll(() => tache('charpente')?.debut).toBe('2027-01-02');
+  expect(tache('charpente')).toMatchObject({ fin: '2027-01-10' });
+  expect(tache('reception')).toMatchObject({ debut: '2027-01-11', fin: '2027-01-11' });
+  expect(tache('installation')).toMatchObject({ debut: '2026-12-23', fin: '2026-12-29' });
+
+  // Le réglage est mémorisé.
+  await page.reload();
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await expect(page.getByLabel('Rapprocher aussi quand une tâche avance', { exact: true })).toBeChecked();
+});
+
 test('annuler et rétablir un décalage en cascade, au bouton et au clavier', async ({ page }) => {
   test.setTimeout(90_000);
   let saved = { version: 1, taches, hypotheses: [], genereLe: null };

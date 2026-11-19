@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AFFICHAGE_PLANNING, periodesPlanning, sanitizePlanning } from '../planningChantier';
-import { bandesAxePlanning, exportPlanningToPDF, indiceDiffusion, periodesDansPlage, tacheDansPlage } from '../planningChantierPdf';
+import { bandesAxePlanning, exportPlanningToPDF, indiceDiffusion, periodesDansPlage, periodesParPageValide, tacheDansPlage, tranchesPeriodes } from '../planningChantierPdf';
 import type { AgencySettings } from '../proposalExport';
 const capture = vi.hoisted(() => ({ textes: [] as string[], couleurs: [] as unknown[][], rectangles: [] as number[][], triangles: [] as number[][] }));
 vi.mock('../pdfLetterhead', () => ({ drawAgencyHeader: () => 30, drawAgencyFooters: vi.fn(), loadLogoDataUrl: async () => null }));
@@ -110,6 +110,109 @@ describe('lot qui déborde sur la page suivante', () => {
     await exportPlanningToPDF(sanitizePlanning({ taches }), lots, {} as AgencySettings, { project: { name: 'École' } });
     expect(capture.textes.filter(t => t === 'Lot 01  GO (suite)').length).toBeGreaterThanOrEqual(1);
     expect(capture.textes.filter(t => t === 'Lot 01  GO')).toHaveLength(1);
+  });
+});
+
+describe('jalons de mission dans le PDF', () => {
+  const exporter = (p: ReturnType<typeof sanitizePlanning>, options: Record<string, unknown> = {}) =>
+    exportPlanningToPDF(p, lots, {} as AgencySettings, { project: { name: 'École' }, ...options } as any);
+  const missions = [{ id: 'm-aor', title: 'AOR', due_date: '2027-02-01', completed: false }];
+  const avecJalon = (debut: string) => sanitizePlanning({ taches: [
+    { id: 'a', lotId: 'lot', libelle: 'Gros œuvre', debut: '2027-01-04', fin: '2027-01-15' },
+    { id: 'r', lotId: 'lot', libelle: 'Réception', debut, fin: debut, jalon: true, jalonMission: 'm-aor' },
+    { id: 'f', lotId: 'lot', libelle: 'Finitions', debut: '2027-02-08', fin: '2027-02-12' }, // l'axe couvre la date de la mission
+  ] });
+
+  it('dit la mission liée et la date de la mission quand elle diffère, avec une entrée de légende', async () => {
+    capture.textes.length = 0;
+    await exporter(avecJalon('2027-01-25'), { jalonsMission: missions });
+    expect(capture.textes).toContain('Réception (mission AOR 01/02)');
+    expect(capture.textes).toContain('Date du jalon de mission');
+  });
+
+  it('ne cite que le nom de la mission quand les dates coïncident, et rien sans les jalons de mission', async () => {
+    capture.textes.length = 0;
+    await exporter(avecJalon('2027-02-01'), { jalonsMission: missions });
+    expect(capture.textes).toContain('Réception (mission AOR)');
+    expect(capture.textes).not.toContain('Date du jalon de mission');
+    capture.textes.length = 0;
+    await exporter(avecJalon('2027-01-25'));
+    expect(capture.textes).toContain('Réception');
+    expect(capture.textes.join('\n')).not.toContain('mission');
+  });
+});
+
+describe('nombre de périodes par page', () => {
+  const exporter = (p: ReturnType<typeof sanitizePlanning>, options: Record<string, unknown> = {}) =>
+    exportPlanningToPDF(p, lots, {} as AgencySettings, { project: { name: 'École' }, ...options } as any);
+  // Janvier à juin 2027 : une vingtaine de semaines, trois tâches espacées.
+  const longue = sanitizePlanning({ taches: [
+    { id: 'a', lotId: 'lot', libelle: 'Gros œuvre', debut: '2027-01-04', fin: '2027-01-15' },
+    { id: 'b', lotId: 'lot', libelle: 'Charpente', debut: '2027-03-01', fin: '2027-03-12', dependencies: ['a'] },
+    { id: 'c', lotId: 'lot', libelle: 'Finitions', debut: '2027-06-07', fin: '2027-06-18', dependencies: ['b'] },
+  ] });
+
+  it('valide et découpe l’axe', () => {
+    expect([periodesParPageValide(undefined), periodesParPageValide(3), periodesParPageValide(4), periodesParPageValide(12.5), periodesParPageValide(500)]).toEqual([0, 0, 4, 0, 120]);
+    expect(tranchesPeriodes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4)).toEqual([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10]]);
+    expect(tranchesPeriodes([1, 2, 3], 0)).toEqual([[1, 2, 3]]);
+    expect(tranchesPeriodes([1, 2, 3], 10)).toEqual([[1, 2, 3]]);
+    expect(tranchesPeriodes([], 4)).toEqual([]);
+  });
+
+  it('imprime chaque tranche sur sa page, colonne des libellés répétée, avec les seules lignes qui la rencontrent', async () => {
+    capture.textes.length = 0;
+    await exporter(longue);
+    expect(capture.textes.filter(t => t === 'Lot / tâche')).toHaveLength(1);
+    expect(capture.textes).not.toContain('Tranche 1/3 : 2027-S01 à 2027-S08');
+    capture.textes.length = 0;
+    await exporter(longue, { periodesParPage: 8 });
+    const tranches = capture.textes.filter(t => t.startsWith('Tranche '));
+    expect(tranches.length).toBeGreaterThanOrEqual(3);
+    expect(tranches[0]).toMatch(/^Tranche 1\/\d+ : 2027-S01 à 2027-S08$/);
+    expect(capture.textes.filter(t => t === 'Lot / tâche').length).toBe(tranches.length);
+    expect(capture.textes.join('\n')).toContain('Axe découpé en');
+    // Chaque tâche n'est imprimée que sur la tranche où elle se trouve.
+    for (const nom of ['Gros œuvre', 'Charpente', 'Finitions']) expect(capture.textes.filter(t => t === nom)).toHaveLength(1);
+  });
+
+  it('garde la même échelle sur toutes les tranches', async () => {
+    const courtes = sanitizePlanning({ taches: [
+      { id: 'a', lotId: 'lot', libelle: 'Première', debut: '2027-01-04', fin: '2027-01-10' },
+      { id: 'b', lotId: 'lot', libelle: 'Dernière', debut: '2027-06-07', fin: '2027-06-13' },
+    ] });
+    capture.rectangles.length = 0;
+    await exporter(courtes, { periodesParPage: 8 });
+    // Une semaine = une colonne : A4 paysage, libellés de 78 mm, 8 périodes par page, soit (297 - 12 - 90) / 8 mm.
+    // Les deux barres, sur deux tranches différentes, ont cette même largeur.
+    const colonne = (297 - 12 - 90) / 8;
+    const barres = capture.rectangles.filter(r => Math.abs(r[3] - 3.2) < 0.01 && r[2] > 15);
+    expect(barres).toHaveLength(2);
+    for (const b of barres) expect(b[2]).toBeCloseTo(colonne, 2);
+  });
+
+  it('ne trace une flèche que dans une même tranche, et liste les autres liens', async () => {
+    capture.triangles.length = 0; capture.textes.length = 0;
+    await exporter(longue, { periodesParPage: 8 });
+    expect(capture.triangles).toHaveLength(0); // a, b et c sont sur trois tranches
+    expect(capture.textes.join('\n')).toContain('Gros œuvre -> Charpente');
+    expect(capture.textes.join('\n')).toContain('Charpente -> Finitions');
+    const proches = sanitizePlanning({ taches: [
+      { id: 'a', lotId: 'lot', libelle: 'Gros œuvre', debut: '2027-01-04', fin: '2027-01-08' },
+      { id: 'b', lotId: 'lot', libelle: 'Charpente', debut: '2027-01-12', fin: '2027-01-15', dependencies: ['a'] },
+      { id: 'c', lotId: 'lot', libelle: 'Finitions', debut: '2027-06-07', fin: '2027-06-18' },
+    ] });
+    capture.triangles.length = 0;
+    await exporter(proches, { periodesParPage: 8 });
+    expect(capture.triangles).toHaveLength(2); // la flèche de a vers b et la pastille de légende
+  });
+
+  it('ne change rien sans l’option ou si tout tient sur une tranche', async () => {
+    capture.textes.length = 0;
+    await exporter(longue, { periodesParPage: 120 });
+    expect(capture.textes.some(t => t.startsWith('Tranche '))).toBe(false);
+    expect(capture.textes.join('\n')).not.toContain('Axe découpé en');
+    expect(capture.textes.filter(t => t === 'Lot / tâche')).toHaveLength(1);
   });
 });
 

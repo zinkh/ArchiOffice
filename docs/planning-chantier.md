@@ -42,7 +42,24 @@ Quand il est actif, un changement de dates déclenche `decalerSuccesseurs` (`src
 
 **Aperçu visuel** : pendant le glisser, chaque successeur que le relâché décalerait montre un **fantôme** en pointillés (couleur du lot, fond translucide) à sa future position, avec le décalage en jours (« +12 j »). La barre réelle reste en place jusqu'au relâché ; le fantôme disparaît au relâché, à Échap ou en cas d'interruption, et rien n'est écrit tant que le geste n'est pas validé. Le calcul de l'aperçu est celui du relâché (`decalerSuccesseurs`, délais et jours ouvrés compris). Sans le réglage « Décaler les successeurs », aucun fantôme.
 
-Pas encore fait : décalage vers l'avant (tirer les successeurs).
+### Rapprocher aussi les successeurs
+
+Case « Rapprocher aussi quand une tâche avance » sous « Décaler les successeurs » (local à l'appareil, désactivée par défaut, inactive tant que le décalage ne l'est pas). Quand une tâche **avance**, ses successeurs avancent de la même quantité **en gardant leur marge**, au lieu de rester en place.
+
+- On compare la contrainte d'avant et d'après l'action : début minimal permis par les prédécesseurs (fin + délai du lien, jours ouvrés compris). Si elle s'est relâchée, le successeur est placé sur la nouvelle contrainte plus la marge qu'il avait (jours travaillés si le calendrier l'est) ; une tâche collée à son prédécesseur reste collée.
+- **Jamais avant le minimum permis** : avec un autre prédécesseur plus contraignant, rien ne bouge. Une tâche **déjà en conflit** avant l'action et une tâche **terminée** (100 %, signalée) ne sont pas touchées. Pousser ce qui entre en conflit reste prioritaire et ne dépend pas de la case.
+- Même chemin que le décalage vers l'arrière : gestes, clavier, fiche de la tâche ; aperçu par fantômes (« -6 j ») ; annulation d'un seul coup ; tâches déplacées en `manuel`. La création d'un lien ne rapproche pas.
+- Logique : `decalerSuccesseurs(taches, modifiees, ouvre, { avant, rapprocher })` ; `avant` est le planning d'avant l'action.
+
+## Jalons de mission
+
+Les jalons de mission sont les lignes de la table `milestones` de l'affaire (un jalon par mission incluse du contrat MOE : ESQ, APS, ..., DET, AOR, avec son échéance). Un **jalon du planning** peut y renvoyer : champ `jalonMission` (identifiant du jalon de mission) dans le JSON existant du planning, sans migration, conservé par `sanitizePlanning` pour un jalon seulement. **C'est une référence, jamais une synchronisation** : aucune date n'est modifiée sans geste explicite.
+
+- **Fiche d'un jalon** : liste « Jalon de mission lié » (les jalons de l'affaire, lus par `GET /api/milestones?project_id=`). Quand les dates diffèrent, l'écart est écrit (« La mission « AOR » est au 2027-01-22, 4 jour(s) plus tard que ce jalon ») avec deux actions : « Reprendre la date de la mission » (le jalon du planning prend la date, à enregistrer avec la fiche) et « Mettre à jour le jalon de mission » (écrit la date de la fiche sur la mission par `PUT /api/milestones/:id`, corps complet avec la seule échéance changée, comme le fait la fiche affaire ; geste isolé de l'enregistrement du planning). Lier ou délier ne touche jamais la mission.
+- **Diagramme** : un losange vide, de la couleur du lot, marque la date de la mission quand elle diffère de celle du jalon et tombe sur l'axe affiché ; une ligne sous la barre de réglages énumère les écarts. Une mission supprimée (lien orphelin) est simplement ignorée.
+- **PDF** : l'intitulé du jalon est complété (« Réception (mission AOR 01/02) », sans date quand elles coïncident), un anneau vide marque la date de la mission quand elle diffère, la légende l'explique.
+- Un jalon de mission **terminé** est signalé dans la liste. La date d'un jalon de mission modifiée depuis la fiche affaire n'est relue qu'à l'ouverture de l'onglet Planning.
+- Logique pure : `src/lib/planningJalonsMission.ts` (`jalonsMissionDepuisApi`, `ecartJalonMission`, `jalonMissionAvecDate`).
 
 ## Annuler et rétablir
 
@@ -78,15 +95,13 @@ Réorganisée pour prendre moins de place : l'en-tête tient sur une ligne (titr
 
 ## Export PDF : format, plage, axe et légende
 
-## Export PDF : format, plage, axe et légende
-
 - **Format du papier** : A4 (défaut) ou A3 paysage, choisi sous « Affichage et exports > Export PDF ». L'A3 garde la même mise en page, avec caractères et lignes agrandis d'un quart et une colonne de libellés proportionnelle. Ce choix et la plage ne sont pas enregistrés : ils ne modifient ni l'écran ni le planning partagé.
 - **Plage de dates** : « Du ... au ... », chaque borne facultative. Seules les tâches qui rencontrent la plage sont imprimées, les barres qui dépassent sont tronquées au bord, et la numérotation S1 / M1 reste celle du planning complet (la première colonne peut donc être S4). Le périmètre est rappelé dans le résumé (« Période imprimée »). Une plage sans tâche donne un document court qui le dit ; une plage inversée est refusée avant l'export.
 - **Axe** : un bandeau au-dessus des périodes donne le mois (semaines) ou l'année (mois), avec un libellé raccourci quand la place manque. Une semaine appartient au mois de son jeudi, comme la numérotation ISO. Aucun bandeau en calendrier relatif. Un trait plus marqué sépare chaque début de mois ou d'année. L'axe est redessiné en tête de chaque page.
 - **Aujourd'hui** : le trait vertical porte une étiquette dans l'en-tête de l'axe, quand la date est dans la période imprimée.
 - **Pages suivantes** : un titre de lot n'est jamais laissé seul en bas de page (il emporte son entreprise et sa première tâche) ; quand la liste d'un lot continue sur la page suivante, une ligne « Lot 03 Couverture (suite) » est reprise sous l'axe.
 - **Légende** : elle ne cite que ce qui figure sur le document : prévu, réalisé (si l'avancement est affiché), jalon, tâche en retard, jour férié, congé ou fermeture, trait « Aujourd'hui ».
-- Pas encore fait : nombre de semaines par page.
+- **Nombre de périodes par page** (réglage « Par page » : tout sur une page, 8, 12, 16, 26 ou 52 semaines ou mois selon l'échelle) : l'axe est découpé en **tranches** imprimées l'une après l'autre. Même largeur de colonne sur toutes les tranches (l'échelle ne change pas d'une page à l'autre, la dernière tranche est simplement plus courte) ; colonne des libellés et axe répétés avec une étiquette « Tranche 2/3 : 2027-S09 à 2027-S16 » ; seules les lignes qui rencontrent la tranche y figurent (une tâche longue est donc répétée sur chaque tranche qu'elle traverse). Les flèches de dépendance sont tracées dans une tranche seulement quand les deux tâches y sont ; les listes (dépendances, calendrier, hypothèses) et la légende ne sont imprimées qu'une fois, à la suite de la dernière tranche. Le résumé le dit (« Axe découpé en 3 tranches de 12 semaines par page »). Sans effet quand tout tient déjà sur une tranche. Non enregistré, comme les autres réglages d'export.
 
 ## Export PDF : dépendances, synthèse, retard et indice
 
