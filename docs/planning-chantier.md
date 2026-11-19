@@ -18,7 +18,7 @@ Les liaisons visibles sont tracées sur le diagramme (pointillés en cas de conf
 
 ## Exports et compatibilité
 
-- **PDF** : applique l’échelle, le calendrier relatif ou réel, les numéros ISO, les couleurs et la visibilité des tâches générales. Tous les lots sont toujours dépliés à l’export ; ce périmètre est annoncé près des réglages et dans le document. L’export individuel par lot reste disponible. Les dépendances figurent dans une liste, avec mention des prédécesseurs hors périmètre et des dates incohérentes ; elles ne sont pas tracées entre pages.
+- **PDF** : applique l’échelle, le calendrier relatif ou réel, les numéros ISO, les couleurs et la visibilité des tâches générales. Tous les lots sont toujours dépliés à l’export ; ce périmètre est annoncé près des réglages et dans le document. L’export individuel par lot reste disponible. Les dépendances figurent dans une liste, avec mention des délais, des prédécesseurs hors périmètre et des dates incohérentes ; elles sont aussi tracées en flèches quand les deux tâches sont sur la même page (voir « Export PDF : dépendances, synthèse, retard et indice »).
 - **Microsoft Project XML** et **GanttProject XML (.gan)** : exportent le planning complet, indépendamment du repli et des filtres, avec les dates réelles. L’adaptateur `planningChantierXml.ts` appelle les exporteurs existants ; il ajoute des groupes récapitulatifs par lot et pour les tâches générales. Les identifiants numériques sont uniques dans chaque fichier, et toutes les références utilisent la même table. Une tâche ordinaire d’un jour reste distincte d’un jalon. Les liens fin à début, noms, dates et pourcentages sont conservés.
 - Les exporteurs communs acceptent des métadonnées hiérarchiques et une option de calendrier de sept jours. Cette option est activée pour le chantier, dont les durées sont calendaires ; les exports des tâches internes gardent leurs valeurs par défaut. Le XML MS Project contient un calendrier explicite et des tâches manuelles pour conserver les dates. Le calendrier GanttProject suit la structure de l’exemple officiel `bardsoftware/ganttproject/ganttproject-builder/HouseBuildingSample.gan`.
 - Les tests relisent les deux fichiers par `parsePlanningXml`, vérifient dates, avancements, jalons, dépendances et hiérarchie. L’import générique existant importe les groupes comme des tâches ordinaires ; il n’offre pas encore de reconstruction des lots dans le planning chantier. Il n’existe pas d’import chantier dans cette livraison.
@@ -40,7 +40,9 @@ Quand il est actif, un changement de dates déclenche `decalerSuccesseurs` (`src
 - le décalage compte des jours calendaires, ou des jours ouvrés quand le calcul en jours ouvrés est actif (voir plus bas) ; les délais des liens sont respectés ;
 - le message qui annonce le décalage rappelle que Ctrl+Z l'annule (voir « Annuler et rétablir »).
 
-Pas encore fait : aperçu visuel des barres décalées pendant le geste et décalage vers l'avant (tirer les successeurs).
+**Aperçu visuel** : pendant le glisser, chaque successeur que le relâché décalerait montre un **fantôme** en pointillés (couleur du lot, fond translucide) à sa future position, avec le décalage en jours (« +12 j »). La barre réelle reste en place jusqu'au relâché ; le fantôme disparaît au relâché, à Échap ou en cas d'interruption, et rien n'est écrit tant que le geste n'est pas validé. Le calcul de l'aperçu est celui du relâché (`decalerSuccesseurs`, délais et jours ouvrés compris). Sans le réglage « Décaler les successeurs », aucun fantôme.
+
+Pas encore fait : décalage vers l'avant (tirer les successeurs).
 
 ## Annuler et rétablir
 
@@ -84,7 +86,14 @@ Réorganisée pour prendre moins de place : l'en-tête tient sur une ligne (titr
 - **Aujourd'hui** : le trait vertical porte une étiquette dans l'en-tête de l'axe, quand la date est dans la période imprimée.
 - **Pages suivantes** : un titre de lot n'est jamais laissé seul en bas de page (il emporte son entreprise et sa première tâche) ; quand la liste d'un lot continue sur la page suivante, une ligne « Lot 03 Couverture (suite) » est reprise sous l'axe.
 - **Légende** : elle ne cite que ce qui figure sur le document : prévu, réalisé (si l'avancement est affiché), jalon, tâche en retard, jour férié, congé ou fermeture, trait « Aujourd'hui ».
-- Pas encore fait : tracé des dépendances entre tâches (elles restent listées), repli par lot (tout est déplié), nombre de semaines par page, indice de diffusion du document.
+- Pas encore fait : nombre de semaines par page.
+
+## Export PDF : dépendances, synthèse, retard et indice
+
+- **Dépendances tracées** : une flèche fin à début relie deux tâches dessinées sur la **même page** (le trait ne traverse pas un saut de page) ; en pointillés quand le lien est en conflit (même critère que l'écran : chevauchement ou délai non respecté, jours ouvrés compris). Un lien entre deux pages n'est pas tracé mais reste dans la liste des dépendances sous le diagramme, avec son délai. La légende ne cite les flèches que si le document en porte. Pas de flèche en synthèse.
+- **Synthèse par lot** (réglage « Contenu > Synthèse par lot ») : une ligne par lot (nom, entreprise, nombre de tâches, dates, barre du lot avec son avancement) au lieu de toutes les tâches ; tient en une page pour une réunion de chantier ou le maître d'ouvrage. Le nom du fichier porte `_synthese`. L'export d'un lot seul (bouton « PDF » du lot) reste détaillé : c'est ce qui se remet à l'entreprise.
+- **Retard en couleur** : une tâche en retard porte « [Retard] » en rouge gras devant son intitulé et un soulignement rouge sous sa barre (cercle rouge pour un jalon) ; la légende l'explique. La couleur sert ici une donnée, le reste du document reste dans les nuances de gris de la charte.
+- **Indice de diffusion** : champ libre (lettres, chiffres, tiret, 12 caractères) imprimé dans le résumé (« Indice B ») et ajouté au nom du fichier (`_indB`). Il n'est pas enregistré : à ressaisir à chaque export.
 
 ## Base de données
 

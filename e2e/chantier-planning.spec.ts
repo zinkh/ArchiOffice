@@ -182,6 +182,56 @@ test('décalage des successeurs : désactivé par défaut, puis activé et mémo
   await expect(page.getByLabel('Décaler les successeurs', { exact: true })).toBeChecked();
 });
 
+test('aperçu des successeurs décalés pendant le glisser, annulé par Échap', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'Glisser à la souris : le geste tactile est couvert par le scénario des gestes.');
+  test.setTimeout(90_000);
+  let saved = { version: 1, taches, hypotheses: [], genereLe: null };
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  const bar = page.getByRole('button', { name: 'Déplacer « Fondations et dallage »', exact: true });
+  await expect(bar).toBeVisible({ timeout: 30_000 });
+  const fantome = (id: string) => page.locator(`[data-planning-ghost="${id}"]`);
+  const tache = (id: string) => saved.taches.find(t => t.id === id);
+
+  // Sans le réglage, aucun fantôme.
+  let box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2, { steps: 6 });
+  await expect(page.getByText(/^Aperçu/)).toBeVisible();
+  await expect(page.locator('[data-planning-ghost]')).toHaveCount(0);
+  await page.keyboard.press('Escape'); await page.mouse.up();
+
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await page.getByLabel('Décaler les successeurs', { exact: true }).check();
+  await page.getByText('Affichage et exports', { exact: true }).click();
+
+  // Avec le réglage : les successeurs (directs et indirects) ont un fantôme, pas le prédécesseur ; rien n'est enregistré.
+  const avant = JSON.stringify(saved);
+  box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2, { steps: 6 });
+  await expect(fantome('charpente')).toBeVisible();
+  await expect(fantome('charpente')).toHaveText(/^\+\d+ j$/);
+  await expect(fantome('reception')).toBeVisible();
+  await expect(fantome('installation')).toHaveCount(0);
+  await expect(page.getByText(/successeur\(s\) décalé\(s\)\. Relâchez/)).toBeVisible();
+  await page.keyboard.press('Escape'); await page.mouse.up();
+  await expect(page.locator('[data-planning-ghost]')).toHaveCount(0);
+  expect(JSON.stringify(saved)).toBe(avant);
+
+  // Un relâché valide enregistre les dates que montrait le fantôme.
+  box = (await bar.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2, { steps: 6 });
+  await expect(fantome('charpente')).toBeVisible();
+  await page.mouse.up();
+  await expect.poll(() => tache('charpente')?.debut).toBe('2027-01-19');
+  await expect(page.locator('[data-planning-ghost]')).toHaveCount(0);
+});
+
 test('annuler et rétablir un décalage en cascade, au bouton et au clavier', async ({ page }) => {
   test.setTimeout(90_000);
   let saved = { version: 1, taches, hypotheses: [], genereLe: null };

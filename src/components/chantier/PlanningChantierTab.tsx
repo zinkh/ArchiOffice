@@ -78,6 +78,8 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const diagrammeRef = useRef<HTMLDivElement>(null);
   const [largeurDisponible, setLargeurDisponible] = useState(1000);
   const [apercu, setApercu] = useState<TachePlanning | null>(null);
+  // Aperçu des successeurs que le relâché décalerait (réglage « Décaler les successeurs ») : dates provisoires, jamais enregistrées.
+  const [apercuSucc, setApercuSucc] = useState<{ id: string; debut: string; fin: string; jours: number }[]>([]);
   const [lienSource, setLienSource] = useState<string | null>(null);
   const [lienGeste, setLienGeste] = useState<{ source: string; x: number; y: number; cible: string | null } | null>(null);
   const [messageGeste, setMessageGeste] = useState('');
@@ -87,7 +89,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     window.addEventListener('keydown', annuler);
     return () => { window.removeEventListener('keydown', annuler); };
   }, []);
-  useEffect(() => { setLienSource(null); setLienGeste(null); setApercu(null); setMessageGeste(''); }, [cleAffichage]);
+  useEffect(() => { setLienSource(null); setLienGeste(null); setApercu(null); setApercuSucc([]); setMessageGeste(''); }, [cleAffichage]);
   const [couleursAor, setCouleursAor] = useState<Record<string, string>>({});
   const [planning, setPlanning] = useState<PlanningChantier>(PLANNING_VIDE);
   // Calendrier partagé et jours travaillés : tous les jours tant que le calcul en jours ouvrés n'est pas demandé.
@@ -102,6 +104,8 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const [enExport, setEnExport] = useState<string | null>(null);
   // Réglages propres à l'export PDF : ne modifient ni l'écran ni le planning partagé.
   const [formatPdf, setFormatPdf] = useState<FormatPdfPlanning>('a4');
+  const [synthesePdf, setSynthesePdf] = useState(false);
+  const [indicePdf, setIndicePdf] = useState('');
   const [plagePdf, setPlagePdf] = useState<{ debut: string; fin: string }>({ debut: '', fin: '' });
   const plagePdfInvalide = !!plagePdf.debut && !!plagePdf.fin && plagePdf.debut > plagePdf.fin;
   // Le composant peut être monté avant la lecture, ou sans tâche : observer dès que la région existe.
@@ -271,7 +275,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     setEnExport(lotId ?? '*');
     try {
       const pdf = await exportPlanningToPDF(planning, lotsPlanif, reglages, {
-        lotId, affichage, couleurs, format: formatPdf,
+        lotId, affichage, couleurs, format: formatPdf, synthese: synthesePdf && !lotId, indice: indicePdf,
         plage: { debut: plagePdf.debut || undefined, fin: plagePdf.fin || undefined }, project: { name: project.name, project_code: project.project_code, address: project.address },
       });
       telechargerPdf(pdf);
@@ -304,16 +308,19 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
       candidate = datesParGeste(tache, geste, geste === 'fin' ? ajouterJours(date, -1) : date);
       setApercu(prev => prev?.debut === candidate.debut && prev?.fin === candidate.fin ? prev : candidate);
       // Le nombre de successeurs qui seraient décalés est annoncé avant le relâché.
-      const n = affichage.cascade ? decalerSuccesseurs(dernier.current.taches.map(t => t.id === tache.id ? candidate : t), [tache.id]).decalees.length : 0;
+      const simulation = affichage.cascade ? decalerSuccesseurs(dernier.current.taches.map(t => t.id === tache.id ? candidate : t), [tache.id], ouvre) : null;
+      const n = simulation?.decalees.length ?? 0;
+      const fantomes = simulation ? simulation.decalees.map(d => { const t = simulation.taches.find(x => x.id === d.id)!; return { id: d.id, debut: t.debut, fin: t.fin, jours: d.jours }; }) : [];
+      setApercuSucc(prev => JSON.stringify(prev) === JSON.stringify(fantomes) ? prev : fantomes);
       setMessageGeste(tr(n ? 'planning_dates_preview_cascade' : 'planning_dates_preview', { start: candidate.debut, end: candidate.fin, n }));
     };
     commencerGeste(e, {
       onLift: (start, current) => { depart = start.x; actualiser(current.x); },
       onMove: current => actualiser(current.x),
       onEnd: end => {
-        setApercu(null);
+        setApercu(null); setApercuSucc([]);
         if (end.cancelled) { setMessageGeste(tr('planning_gesture_cancelled')); return; }
-        actualiser(end.x); setApercu(null); enregistrerDates(candidate);
+        actualiser(end.x); setApercu(null); setApercuSucc([]); enregistrerDates(candidate);
       },
     });
   };
@@ -487,9 +494,15 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
           </div>
           <fieldset className="space-y-1 min-w-0">
             <legend className={titreGroupe}>{tr('planning_group_export')}</legend>
-            <label className="block">{tr('planning_pdf_format')} <select className={`${champCompact} ml-1`} value={formatPdf} onChange={e => setFormatPdf(e.target.value === 'a3' ? 'a3' : 'a4')}>
-              <option value="a4">A4</option><option value="a3">A3</option>
-            </select></label>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label>{tr('planning_pdf_format')} <select className={`${champCompact} ml-1`} value={formatPdf} onChange={e => setFormatPdf(e.target.value === 'a3' ? 'a3' : 'a4')}>
+                <option value="a4">A4</option><option value="a3">A3</option>
+              </select></label>
+              <label>{tr('planning_pdf_content')} <select className={`${champCompact} ml-1`} value={synthesePdf ? 'synthese' : 'detail'} onChange={e => setSynthesePdf(e.target.value === 'synthese')}>
+                <option value="detail">{tr('planning_pdf_detailed')}</option><option value="synthese">{tr('planning_pdf_summary')}</option>
+              </select></label>
+            </div>
+            <label className="block">{tr('planning_pdf_index')} <input className={`${champCompact} ml-1 w-24`} maxLength={12} placeholder="A, B, C…" value={indicePdf} onChange={e => setIndicePdf(e.target.value)} /></label>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <label>{tr('planning_pdf_from')} <input type="date" className={`${champCompact} ml-1`} value={plagePdf.debut} max={plagePdf.fin || undefined} onChange={e => setPlagePdf(p => ({ ...p, debut: e.target.value }))} /></label>
               <label>{tr('planning_pdf_to')} <input type="date" className={`${champCompact} ml-1`} value={plagePdf.fin} min={plagePdf.debut || undefined} onChange={e => setPlagePdf(p => ({ ...p, fin: e.target.value }))} /></label>
@@ -608,6 +621,14 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
                             onDateKeyboard={(geste, date) => enregistrerDates(datesParGeste(originale, geste, date))}
                             onLinkStart={event => commencerLien(event, originale)}
                             onLinkClick={() => { setLienSource(t.id); setMessageGeste(tr('planning_link_choose_target', { name: t.libelle })); }} />
+                          {apercuSucc.filter(f => f.id === t.id).map(f => {
+                            // Fantôme : où la barre irait au relâché. La barre réelle reste en place jusque-là.
+                            const couleur = couleurs.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE;
+                            return <div key={f.id} data-planning-ghost={f.id} aria-hidden="true" className="absolute pointer-events-none rounded flex items-center justify-center text-[0.6875rem] font-semibold text-[var(--tblr-text)]"
+                              style={{ left: x(f.debut), width: t.jalon ? 14 : Math.max(28, largeurBarre(f.debut, f.fin)), top: 7, height: LIGNE_PX - 14, border: `2px dashed ${couleur}`, background: `color-mix(in srgb, ${couleur} 22%, transparent)` }}>
+                              {!t.jalon && `${f.jours > 0 ? '+' : ''}${f.jours} j`}
+                            </div>;
+                          })}
                         </div>
                       </div>
                     );

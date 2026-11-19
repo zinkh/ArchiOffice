@@ -26,7 +26,17 @@ export interface PlanningPdfOptions {
   /** A4 par défaut ; A3 agrandit la page et les caractères (plannings longs). */
   format?: FormatPdfPlanning;
   plage?: PlagePdfPlanning;
+  /** Une seule ligne par lot (barre du lot, avancement, dates) au lieu de toutes les tâches ; les dépendances ne sont pas tracées. */
+  synthese?: boolean;
+  /** Indice de diffusion du document (A, B, C...), imprimé dans le résumé et le nom du fichier. */
+  indice?: string;
 }
+
+/** Indice de diffusion court et sûr pour un nom de fichier : lettres, chiffres, tiret, 12 caractères. */
+export const indiceDiffusion = (brut?: string): string => (brut ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9-]+/g, '').slice(0, 12);
+
+const ROUGE_RETARD = [185, 28, 28] as const;
+const GRIS_FLECHE = [60, 60, 60] as const;
 
 const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 const MOIS_COURTS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
@@ -103,7 +113,9 @@ export async function exportPlanningToPDF(
   const letterhead = { title: titre, subtitle: opts.project.name, reference: opts.project.project_code, margin: MARGIN, logo };
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const filename = `Planning_${nettoyer(opts.project.project_code || '')}_${nettoyer(opts.project.name)}${lot ? `_lot${nettoyer(lot.lot_number)}` : ''}.pdf`;
+  const indice = indiceDiffusion(opts.indice);
+  const synthese = opts.synthese === true && !lot;
+  const filename = `Planning_${nettoyer(opts.project.project_code || '')}_${nettoyer(opts.project.name)}${lot ? `_lot${nettoyer(lot.lot_number)}` : ''}${synthese ? '_synthese' : ''}${indice ? `_ind${indice}` : ''}.pdf`;
 
   let y = drawAgencyHeader(doc, settings, letterhead) + 2;
   doc.setFont('helvetica', 'bold'); taille(14); doc.setTextColor(17, 24, 39);
@@ -116,9 +128,10 @@ export async function exportPlanningToPDF(
     bornes ? `Du ${fmt(bornes.debut)} au ${fmt(bornes.fin)}` : null,
     plage?.debut || plage?.fin ? `Période imprimée : ${plage.debut ? `du ${fmt(plage.debut)}` : 'depuis le début'} ${plage.fin ? `au ${fmt(plage.fin)}` : 'jusqu’à la fin'}` : null,
     lot?.contact_name ? `Entreprise : ${lot.contact_name}` : null,
-    `Tous les lots dépliés ; tâches générales ${affichage.generales ? 'incluses' : 'masquées'}.`,
+    `${synthese ? 'Synthèse : une barre par lot' : 'Tous les lots dépliés'} ; tâches générales ${affichage.generales ? 'incluses' : 'masquées'}.`,
     affichage.relatif ? `Origine S1 / M1 : ${bornesPlanning(planning)?.debut ?? ''}` : 'Dates calendaires',
     planning.calendrier?.joursOuvres ? 'Délais et décalages calculés en jours ouvrés' : null,
+    indice ? `Indice ${indice}` : null,
     `Édité le ${new Date().toLocaleDateString('fr-FR')}`,
   ].filter(Boolean).join('   ·   ');
   const resumeLignes = doc.splitTextToSize(resume, pageW - MARGIN * 2) as string[];
@@ -243,8 +256,30 @@ export async function exportPlanningToPDF(
   };
   function coupe(texte: string, largeur: number) { return (doc.splitTextToSize(texte, largeur) as string[])[0] ?? ''; }
 
+  /** Où chaque tâche est dessinée (page, axe vertical, extrémités), pour tracer les dépendances. */
+  const positions = new Map<string, { page: number; y: number; xa: number; xb: number }>();
   for (const ligne of lignes) {
     const couleur = hexVersRgb(opts.couleurs?.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE);
+    if (synthese) {
+      // Une ligne par lot : nom, entreprise, nombre de tâches, dates, barre et avancement du lot.
+      const h = ROW_H * 1.5;
+      lotCourant = null;
+      place(h);
+      peindreCalendrier(y, h);
+      const nomLot = ligne.lot ? `Lot ${ligne.lot.lot_number}  ${ligne.lot.lot_title}` : 'Tâches générales du chantier';
+      doc.setFont('helvetica', 'bold'); taille(7.5); doc.setTextColor(17, 24, 39);
+      doc.text(coupe(nomLot, LABEL_W - 24 * K), MARGIN + 1.5, y + h * 0.42);
+      doc.setFont('helvetica', 'italic'); taille(6.5); doc.setTextColor(90, 90, 90);
+      doc.text(coupe([ligne.lot?.contact_name, `${ligne.taches.length} tâche${ligne.taches.length > 1 ? 's' : ''}`].filter(Boolean).join(' · '), LABEL_W - 24 * K), MARGIN + 1.5, y + h * 0.82);
+      doc.setFont('helvetica', 'normal'); taille(6);
+      doc.text(`${fmt(ligne.debut).slice(0, 5)} - ${fmt(ligne.fin).slice(0, 5)}`, x0 - 1.5, y + h * 0.58, { align: 'right' });
+      const bx = xDate(ligne.debut), bw = Math.max(0.8, xFin(ligne.fin) - bx);
+      doc.setFillColor(...couleur); doc.rect(bx, y + 1.3, bw, h - 2.6, 'F');
+      if (affichage.avancement && ligne.avancement > 0) { doc.setFillColor(...GRIS_FAIT); doc.rect(bx, y + 1.3, bw * (ligne.avancement / 100), h - 2.6, 'F'); }
+      doc.setDrawColor(...GRIS_GRILLE); doc.setLineWidth(0.1); doc.line(MARGIN, y + h, pageW - MARGIN, y + h);
+      y += h;
+      continue;
+    }
     // Un titre de lot n'est jamais seul en bas de page : il emporte avec lui son entreprise et sa première tâche.
     lotCourant = null;
     place(ROW_H + (ligne.lot?.contact_name ? ROW_H * 0.85 : 0) + ROW_H);
@@ -267,19 +302,30 @@ export async function exportPlanningToPDF(
       place(ROW_H);
       peindreCalendrier(y, ROW_H);
       doc.setFont('helvetica', 'normal'); taille(7); doc.setTextColor(17, 24, 39);
-      const retard = etatTache(t, aujourdhui) === 'en_retard' ? ' [Retard]' : '';
-      doc.text(coupe(`${affichage.avancement ? `${t.avancement} % ` : ''}${retard} ${t.libelle}`, LABEL_W - 24 * K), MARGIN + 4, y + ROW_H * 0.7);
+      const enRetardT = etatTache(t, aujourdhui) === 'en_retard';
+      // Pourcentage, puis « [Retard] » en rouge (la couleur sert ici une donnée), puis l'intitulé.
+      let xt = MARGIN + 4;
+      if (affichage.avancement) { const pct = `${t.avancement} % `; doc.text(pct, xt, y + ROW_H * 0.7); xt += doc.getTextWidth(pct); }
+      if (enRetardT) {
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(...ROUGE_RETARD);
+        doc.text('[Retard] ', xt, y + ROW_H * 0.7); xt += doc.getTextWidth('[Retard] ');
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(17, 24, 39);
+      }
+      doc.text(coupe(t.libelle, Math.max(8, LABEL_W - 24 * K - (xt - MARGIN - 4))), xt, y + ROW_H * 0.7);
       taille(6); doc.setTextColor(90, 90, 90);
       doc.text(`${fmt(t.debut).slice(0, 5)} - ${fmt(t.fin).slice(0, 5)}`, x0 - 1.5, y + ROW_H * 0.7, { align: 'right' });
       if (t.jalon) {
         doc.setFillColor(...couleur);
         doc.circle(xDate(t.debut) + 0.5, y + ROW_H / 2, 1.3 * K, 'F');
+        if (enRetardT) { doc.setDrawColor(...ROUGE_RETARD); doc.setLineWidth(0.35); doc.circle(xDate(t.debut) + 0.5, y + ROW_H / 2, 1.3 * K + 0.3, 'S'); }
       } else {
         const bx = xDate(t.debut);
         const bw = Math.max(0.8, xFin(t.fin) - bx);
         doc.setFillColor(...couleur); doc.rect(bx, y + 1, bw, ROW_H - 2, 'F');
         if (affichage.avancement && t.avancement > 0) { doc.setFillColor(...GRIS_FAIT); doc.rect(bx, y + 1, bw * (t.avancement / 100), ROW_H - 2, 'F'); }
+        if (enRetardT) { doc.setFillColor(...ROUGE_RETARD); doc.rect(bx, y + ROW_H - 1.2, bw, 0.6, 'F'); }
       }
+      positions.set(t.id, { page: doc.getNumberOfPages(), y: y + ROW_H / 2, xa: xDate(t.debut), xb: t.jalon ? xDate(t.debut) + 0.5 + 1.3 * K : xFin(t.fin) });
       y += ROW_H;
     }
   }
@@ -289,10 +335,37 @@ export async function exportPlanningToPDF(
 
   const presentes = new Set(lignes.flatMap(l => l.taches.map(t => t.id)));
   const liaisons = planning.taches.flatMap(t => (t.dependencies ?? []).map(id => ({ t, p: planning.taches.find(p => p.id === id) }))).filter(l => l.p && presentes.has(l.t.id));
-  if (liaisons.length) {
-    // Même critère que l'écran : écart insuffisant, délai du lien et jours ouvrés compris.
-    const ouvre = estOuvreDuPlanning(planning.calendrier);
-    const incoherentes = new Set(incoherencesDependances(planning.taches, ouvre).map(c => `${c.precedent.id}:${c.tache.id}`));
+  // Même critère que l'écran : écart insuffisant, délai du lien et jours ouvrés compris.
+  const incoherentes = new Set(incoherencesDependances(planning.taches, estOuvreDuPlanning(planning.calendrier)).map(c => `${c.precedent.id}:${c.tache.id}`));
+
+  /**
+   * Flèches fin à début, tracées seulement quand les deux tâches sont sur la même page (le trait ne peut pas
+   * traverser un saut de page) ; les autres liens restent dans la liste ci-dessous. Pointillés en cas de conflit.
+   */
+  const liensTraces = { normaux: 0, conflits: 0 };
+  if (!synthese) {
+    const derniere = doc.getNumberOfPages();
+    doc.setLineWidth(0.22);
+    for (const { t, p } of liaisons) {
+      const a = positions.get(p!.id), b = positions.get(t.id);
+      if (!a || !b || a.page !== b.page) continue;
+      const conflit = incoherentes.has(`${p!.id}:${t.id}`);
+      doc.setPage(a.page);
+      doc.setDrawColor(...GRIS_FLECHE); doc.setFillColor(...GRIS_FLECHE);
+      doc.setLineDashPattern(conflit ? [0.8, 0.6] : [], 0);
+      const sortie = a.xb + 1.2, entree = b.xa;
+      const trace: [number, number][] = entree - 0.8 > sortie
+        ? [[a.xb, a.y], [sortie, a.y], [sortie, b.y], [entree - 1.4, b.y]]
+        : [[a.xb, a.y], [sortie, a.y], [sortie, b.y - ROW_H * 0.5], [entree - 1.9, b.y - ROW_H * 0.5], [entree - 1.9, b.y], [entree - 1.4, b.y]];
+      for (let i = 1; i < trace.length; i++) doc.line(trace[i - 1][0], trace[i - 1][1], trace[i][0], trace[i][1]);
+      doc.setLineDashPattern([], 0);
+      doc.triangle(entree, b.y, entree - 1.6, b.y - 0.8, entree - 1.6, b.y + 0.8, 'F');
+      if (conflit) liensTraces.conflits++; else liensTraces.normaux++;
+    }
+    doc.setPage(derniere);
+  }
+
+  if (liaisons.length && !synthese) {
     const unite = planning.calendrier?.joursOuvres ? 'ouvré' : 'calendaire';
     y += 5; place(8); taille(8); doc.setTextColor(17, 24, 39);
     doc.text('Dépendances (fin à début, dates modifiables)', MARGIN, y);
@@ -331,7 +404,9 @@ export async function exportPlanningToPDF(
   ];
   if (affichage.avancement) elements.push({ texte: 'Réalisé', largeur: 8, dessiner: (x, yy) => { doc.setFillColor(...GRIS_FAIT); doc.rect(x, yy - 2.5, 8, 3, 'F'); } });
   elements.push({ texte: 'Jalon', largeur: 3, dessiner: (x, yy) => { doc.setFillColor(...GRIS_BARRE); doc.circle(x + 1.3, yy - 1, 1.3, 'F'); } });
-  if (enRetard) elements.push({ texte: '[Retard] tâche en retard', largeur: 0, dessiner: () => undefined });
+  if (enRetard && !synthese) elements.push({ texte: 'Tâche en retard', largeur: 8, dessiner: (x, yy) => { doc.setFillColor(...ROUGE_RETARD); doc.rect(x, yy - 1.6, 8, 0.7, 'F'); } });
+  if (liensTraces.normaux) elements.push({ texte: 'Dépendance fin à début', largeur: 8, dessiner: (x, yy) => { doc.setDrawColor(...GRIS_FLECHE); doc.setFillColor(...GRIS_FLECHE); doc.setLineWidth(0.22); doc.line(x, yy - 1, x + 6.4, yy - 1); doc.triangle(x + 8, yy - 1, x + 6.4, yy - 1.8, x + 6.4, yy - 0.2, 'F'); } });
+  if (liensTraces.conflits) elements.push({ texte: 'Dépendance en conflit', largeur: 8, dessiner: (x, yy) => { doc.setDrawColor(...GRIS_FLECHE); doc.setLineWidth(0.22); doc.setLineDashPattern([0.8, 0.6], 0); doc.line(x, yy - 1, x + 8, yy - 1); doc.setLineDashPattern([], 0); } });
   if (reperes.some(r => r.type === 'ferie')) elements.push({ texte: 'Jour férié', largeur: 8, dessiner: (x, yy) => { doc.setFillColor(225, 236, 250); doc.rect(x, yy - 2.5, 8, 3, 'F'); } });
   if (reperes.some(r => r.type !== 'ferie')) elements.push({ texte: 'Congé ou fermeture', largeur: 8, dessiner: (x, yy) => { doc.setDrawColor(195, 200, 207); doc.setLineWidth(0.1); doc.rect(x, yy - 2.5, 8, 3, 'S'); hachures(x, yy - 2.5, 8, 3); } });
   if (aujourdhuiVisible) elements.push({ texte: 'Aujourd’hui', largeur: 0, dessiner: (x, yy) => { doc.setDrawColor(60, 60, 60); doc.setLineWidth(0.35); doc.line(x + 1, yy - 3, x + 1, yy + 0.6); } });

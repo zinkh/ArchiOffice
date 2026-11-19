@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AFFICHAGE_PLANNING, periodesPlanning, sanitizePlanning } from '../planningChantier';
-import { bandesAxePlanning, exportPlanningToPDF, periodesDansPlage, tacheDansPlage } from '../planningChantierPdf';
+import { bandesAxePlanning, exportPlanningToPDF, indiceDiffusion, periodesDansPlage, tacheDansPlage } from '../planningChantierPdf';
 import type { AgencySettings } from '../proposalExport';
-const capture = vi.hoisted(() => ({ textes: [] as string[], couleurs: [] as unknown[][], rectangles: [] as number[][] }));
+const capture = vi.hoisted(() => ({ textes: [] as string[], couleurs: [] as unknown[][], rectangles: [] as number[][], triangles: [] as number[][] }));
 vi.mock('../pdfLetterhead', () => ({ drawAgencyHeader: () => 30, drawAgencyFooters: vi.fn(), loadLogoDataUrl: async () => null }));
 vi.mock('jspdf', async original => {
   const { default: RealPdf } = await original<typeof import('jspdf')>();
@@ -12,6 +12,8 @@ vi.mock('jspdf', async original => {
       const text = doc.text.bind(doc);
       const rect = doc.rect.bind(doc);
       doc.rect = ((...args: any[]) => { capture.rectangles.push(args.slice(0, 4)); return (rect as any)(...args); }) as any;
+      const triangle = doc.triangle.bind(doc);
+      doc.triangle = ((...args: any[]) => { capture.triangles.push(args.slice(0, 6)); return (triangle as any)(...args); }) as any;
       const color = doc.setFillColor.bind(doc);
       doc.text = ((value: any, ...args: any[]) => { capture.textes.push(...(Array.isArray(value) ? value : [value])); return (text as any)(value, ...args); }) as any;
       doc.setFillColor = ((...args: any[]) => { capture.couleurs.push(args); return (color as any)(...args); }) as any;
@@ -125,5 +127,88 @@ describe('axe du PDF chantier', () => {
     expect(plage[0].libelle).toBe('S4');
     expect(tacheDansPlage({ debut: '2027-01-01', fin: '2027-01-10' }, { debut: '2027-01-11' })).toBe(false);
     expect(tacheDansPlage({ debut: '2027-01-01', fin: '2027-01-11' }, { debut: '2027-01-11' })).toBe(true);
+  });
+});
+
+describe('dépendances tracées, synthèse par lot, retard coloré et indice', () => {
+  const taches = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `t${i}`, lotId: 'lot', libelle: `Tâche ${i + 1}`, debut: '2027-01-04', fin: '2027-01-08' }));
+  const exporter = (p: ReturnType<typeof sanitizePlanning>, options: Record<string, unknown> = {}) =>
+    exportPlanningToPDF(p, lots, {} as AgencySettings, { project: { name: 'École', project_code: 'P-1' }, ...options } as any);
+
+  it('trace une flèche entre deux tâches de la même page, en pointillés en cas de conflit, et la légende le dit', async () => {
+    const lie = sanitizePlanning({ taches: [
+      { id: 'a', lotId: 'lot', libelle: 'Fondations', debut: '2027-01-04', fin: '2027-01-08' },
+      { id: 'b', lotId: 'lot', libelle: 'Dallage', debut: '2027-01-12', fin: '2027-01-15', dependencies: ['a'] },
+    ] });
+    capture.triangles.length = 0; capture.textes.length = 0;
+    await exporter(lie);
+    expect(capture.triangles).toHaveLength(2); // la flèche du lien et la pastille de la légende
+    expect(capture.textes).toContain('Dépendance fin à début');
+    expect(capture.textes).not.toContain('Dépendance en conflit');
+    const conflit = sanitizePlanning({ taches: [
+      { id: 'a', lotId: 'lot', libelle: 'Fondations', debut: '2027-01-04', fin: '2027-01-08' },
+      { id: 'b', lotId: 'lot', libelle: 'Dallage', debut: '2027-01-06', fin: '2027-01-15', dependencies: ['a'] },
+    ] });
+    capture.triangles.length = 0; capture.textes.length = 0;
+    await exporter(conflit);
+    expect(capture.triangles).toHaveLength(1);
+    expect(capture.textes).toContain('Dépendance en conflit');
+    expect(capture.textes.join('\n')).toContain('dates incohérentes');
+  });
+
+  it('ne trace rien sans lien, ni en synthèse, ni entre deux pages (le lien reste listé)', async () => {
+    capture.triangles.length = 0;
+    await exporter(sanitizePlanning({ taches: taches(3) }));
+    expect(capture.triangles).toHaveLength(0);
+    const lies = sanitizePlanning({ taches: taches(3).map((t, i) => i ? { ...t, dependencies: ['t0'] } : t) });
+    await exporter(lies, { synthese: true });
+    expect(capture.triangles).toHaveLength(0);
+    const loin = taches(60).map((t, i) => i === 59 ? { ...t, dependencies: ['t0'] } : t);
+    capture.textes.length = 0;
+    await exporter(sanitizePlanning({ taches: loin }));
+    expect(capture.triangles).toHaveLength(0);
+    expect(capture.textes.join('\n')).toContain('Tâche 1 -> Tâche 60');
+  });
+
+  it('résume chaque lot sur une ligne en synthèse et le dit dans le résumé et le nom du fichier', async () => {
+    capture.textes.length = 0;
+    const pdf = await exporter(sanitizePlanning({ taches: taches(5) }), { synthese: true });
+    const texte = capture.textes.join('\n');
+    expect(texte).toContain('Lot 01  GO');
+    expect(texte).toContain('5 tâches');
+    expect(texte).toContain('Synthèse : une barre par lot');
+    expect(texte).not.toContain('Tâche 3');
+    expect(pdf.filename).toContain('_synthese');
+    // Un export limité à un lot reste détaillé : c'est le planning que l'on remet à l'entreprise.
+    capture.textes.length = 0;
+    const lotSeul = await exporter(sanitizePlanning({ taches: taches(5) }), { synthese: true, lotId: 'lot' });
+    expect(capture.textes.join('\n')).toContain('Tâche 3');
+    expect(lotSeul.filename).not.toContain('_synthese');
+  });
+
+  it('marque un retard en rouge (texte et barre) et le dit dans la légende', async () => {
+    const enRetard = sanitizePlanning({ taches: [{ id: 'a', lotId: 'lot', libelle: 'Gros œuvre', debut: '2020-01-06', fin: '2020-01-10', avancement: 20 }] });
+    capture.textes.length = 0; capture.couleurs.length = 0;
+    await exporter(enRetard);
+    expect(capture.textes).toContain('[Retard] ');
+    expect(capture.textes).toContain('Gros œuvre');
+    expect(capture.textes).toContain('Tâche en retard');
+    expect(capture.couleurs).toContainEqual([185, 28, 28]);
+    capture.textes.length = 0; capture.couleurs.length = 0;
+    await exporter(sanitizePlanning({ taches: [{ id: 'a', lotId: 'lot', libelle: 'Gros œuvre', debut: '2020-01-06', fin: '2020-01-10', avancement: 100 }] }));
+    expect(capture.textes).not.toContain('[Retard] ');
+    expect(capture.couleurs).not.toContainEqual([185, 28, 28]);
+  });
+
+  it('imprime l’indice de diffusion nettoyé dans le résumé et le nom du fichier', async () => {
+    capture.textes.length = 0;
+    const pdf = await exporter(sanitizePlanning({ taches: taches(1) }), { indice: ' B / 2 é ' });
+    expect(capture.textes.join('\n')).toContain('Indice B2e');
+    expect(pdf.filename).toContain('_indB2e');
+    expect(indiceDiffusion('x'.repeat(40))).toHaveLength(12);
+    capture.textes.length = 0;
+    const sans = await exporter(sanitizePlanning({ taches: taches(1) }), { indice: '   ' });
+    expect(capture.textes.join('\n')).not.toContain('Indice');
+    expect(sans.filename).not.toContain('_ind');
   });
 });

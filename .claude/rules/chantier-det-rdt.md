@@ -246,7 +246,9 @@ vide (`available: false`) et refuse l'écriture en 503.
 - **Délais entre tâches** : `delais` (prédécesseur vers jours, 1 à 365) sur le successeur, saisi dans la fiche, pris en compte par le placement, la cascade, l'alerte d'incohérence, le PDF et les décalages de liens des exports XML.
 - **Jours ouvrés** : `calendrier.joursOuvres` (partagé, désactivé par défaut) ; lundi à vendredi hors fériés de la région et hors périodes saisies ; ne déplace aucune date enregistrée ; fonctions pures à prédicat `EstOuvre` (`planningChantier.ts`, `creerEstOuvre` dans `planningChantierCalendrier.ts`).
 - **Barre de réglages compacte** : `PlanningCalendrierOptions` et `PlanningCalendrierPeriodes` (anciennement un seul composant), panneau en quatre colonnes. Détail et mesures dans `docs/planning-chantier.md`.
-- **Pas encore fait** : liaison avec les jalons de mission, aperçu visuel des barres décalées, décalage vers l'avant.
+- **Aperçu du décalage** : pendant le glisser, un fantôme en pointillés avec « +N j » montre où iraient les successeurs ; rien n'est écrit avant le relâché.
+- **PDF** : flèches de dépendance sur une même page (pointillés si conflit), synthèse par lot, « [Retard] » et soulignement en rouge, indice de diffusion (`docs/planning-chantier.md`).
+- **Pas encore fait** : liaison avec les jalons de mission, décalage vers l'avant, nombre de semaines par page du PDF.
 
 ### Documents joints à l'export PDF du compte-rendu
 
