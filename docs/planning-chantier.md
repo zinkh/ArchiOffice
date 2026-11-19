@@ -12,7 +12,7 @@ S1 et M1 commencent au premier jour du planning complet, y compris si cette tâc
 
 La lecture du planning récupère la table des couleurs des réserves AOR de cette affaire, calculée par `reserveCouleurs.ts`. La première entreprise responsable prime, sinon l’intitulé du lot ; normalisation identique à l’AOR. Pour plusieurs titulaires rapprochés d’un lot, le premier nom du résumé ` / ` sert de responsable de couleur. Les responsables absents de l’AOR utilisent la même palette, calculée sur tous les lots du planning. Les tâches générales sont grises. L’AOR conserve son attribution existante : ajouter une entreprise aux réserves peut modifier les couleurs par ordre alphabétique, comme auparavant. Les réserves GPA ont leur propre population et peuvent donc avoir une table différente.
 
-Les prédécesseurs sont sélectionnés dans la fiche d’une tâche (tous lots et jalons). Ils sont stockés dans `dependencies?: string[]` du JSON existant, comme pour le modèle des tâches internes. Le seul type est fin à début, sans décalage : la fin étant inclusive, le successeur commence au plus tôt le lendemain. À l’ajout d’un prédécesseur, la tâche est placée au lendemain de la fin la plus tardive de tous ses prédécesseurs, en conservant sa durée. Les dates restent ensuite librement modifiables ; retirer un lien ou modifier un prédécesseur ne déclenche aucun recalcul en cascade. Une alerte explicite signale les dates incohérentes sans imposer de correction. Le serveur refuse les cycles et les liens vers soi-même avant écriture. L’assainissement partagé retire les références disparues après suppression ou remplacement IA. Les anciens plannings sans ce champ restent valides.
+Les prédécesseurs sont sélectionnés dans la fiche d’une tâche (tous lots et jalons). Ils sont stockés dans `dependencies?: string[]` du JSON existant, comme pour le modèle des tâches internes. Le seul type est fin à début, sans décalage : la fin étant inclusive, le successeur commence au plus tôt le lendemain. À l’ajout d’un prédécesseur, la tâche est placée au lendemain de la fin la plus tardive de tous ses prédécesseurs, en conservant sa durée. Les dates restent ensuite librement modifiables ; retirer un lien ou modifier un prédécesseur ne déclenche aucun recalcul en cascade, sauf si le réglage « Décaler les successeurs » est activé (voir plus bas ; il est désactivé par défaut). Une alerte explicite signale les dates incohérentes sans imposer de correction. Le serveur refuse les cycles et les liens vers soi-même avant écriture. L’assainissement partagé retire les références disparues après suppression ou remplacement IA. Les anciens plannings sans ce champ restent valides.
 
 Les liaisons visibles sont tracées sur le diagramme (pointillés en cas de conflit). La liste textuelle de toutes les liaisons reste accessible ; le résumé compte celles dont une tâche est masquée ou repliée. L’avancement et l’état sont également écrits en texte.
 
@@ -23,6 +23,23 @@ Les liaisons visibles sont tracées sur le diagramme (pointillés en cas de conf
 - Les exporteurs communs acceptent des métadonnées hiérarchiques et une option de calendrier de sept jours. Cette option est activée pour le chantier, dont les durées sont calendaires ; les exports des tâches internes gardent leurs valeurs par défaut. Le XML MS Project contient un calendrier explicite et des tâches manuelles pour conserver les dates. Le calendrier GanttProject suit la structure de l’exemple officiel `bardsoftware/ganttproject/ganttproject-builder/HouseBuildingSample.gan`.
 - Les tests relisent les deux fichiers par `parsePlanningXml`, vérifient dates, avancements, jalons, dépendances et hiérarchie. L’import générique existant importe les groupes comme des tâches ordinaires ; il n’offre pas encore de reconstruction des lots dans le planning chantier. Il n’existe pas d’import chantier dans cette livraison.
 - MS Project et GanttProject ne sont pas installés dans l’environnement de validation : l’ouverture et les éventuelles décisions de recalcul propres à ces applications restent à vérifier. Les couleurs sont exportées dans GanttProject ; le format MS Project employé ne porte pas de couleur des barres. Les hypothèses IA ne sont pas des tâches et ne sont pas exportées en XML.
+
+## Décalage automatique des successeurs
+
+Réglage « Décaler les successeurs » sous « Affichage et exports », **désactivé par défaut** : sans lui, rien ne change par rapport à avant (aucun recalcul en cascade, simple alerte de dates incohérentes). Il est local à l'appareil, par cabinet, personne et affaire, comme les autres préférences ; il n'ajoute aucun champ au planning partagé et ne demande aucune migration.
+
+Quand il est actif, un changement de dates déclenche `decalerSuccesseurs` (`src/lib/planningChantier.ts`, pure et testée) :
+
+- il s'applique à un déplacement ou une poignée sur le diagramme, aux flèches du clavier, à l'enregistrement de la fiche d'une tâche dont les dates ont changé, et à la création d'un lien (la tâche cible est placée après son prédécesseur, puis ses propres successeurs suivent) ;
+- seuls les successeurs directs et indirects de la tâche modifiée sont examinés : un conflit existant ailleurs n'est jamais touché ;
+- un successeur est **reculé** uniquement si son début précède le lendemain de la fin la plus tardive de ses prédécesseurs (fin inclusive), et il garde sa durée ; un jalon reste sur un jour ;
+- un successeur n'est **jamais avancé** : rapprocher un prédécesseur ne ramène pas ses successeurs, qui gardent leur marge ;
+- une tâche **terminée** (100 %) n'est jamais déplacée : elle est signalée (« tâche(s) terminée(s) non déplacée(s) ») et l'alerte de dates incohérentes reste ;
+- les tâches décalées passent en `manuel`, comme après toute modification de dates, et sont enregistrées dans la même écriture que la tâche modifiée ;
+- pendant un geste, le message d'aperçu annonce le nombre de successeurs qui seront décalés ; seul le relâché enregistre, Échap annule tout ;
+- les jours fériés et les congés restent des repères : le décalage compte des jours calendaires (le calcul en jours ouvrés est un chantier à part).
+
+Pas encore fait : annuler le dernier décalage, aperçu visuel des barres décalées pendant le geste, décalage vers l'avant (tirer les successeurs) et délai entre tâches.
 
 ## Export PDF : format, plage, axe et légende
 

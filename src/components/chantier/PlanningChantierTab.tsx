@@ -21,7 +21,7 @@ import type { Project, ProjectLot } from '../../types';
 import { telechargerPdf } from '../../lib/observationsExport';
 import { exportPlanningToPDF, type FormatPdfPlanning } from '../../lib/planningChantierPdf';
 import {
-  placerApresPredecesseurs, datesParGeste, dateDepuisPositionPlanning, dimensionsPlanning, verifierLienPlanning, joursEntre, type GesteDatesPlanning,
+  placerApresPredecesseurs, decalerSuccesseurs, datesParGeste, dateDepuisPositionPlanning, dimensionsPlanning, verifierLienPlanning, joursEntre, type GesteDatesPlanning,
   CALENDRIER_PLANNING, AFFICHAGE_PLANNING, sanitizeAffichage, periodesPlanning, positionPlanning, incoherencesDependances, type AffichagePlanning,
   PLANNING_VIDE, aujourdhuiIso, appliquerGeneration, bornesPlanning, etatTache, lundiDe, planningParLot,
   sanitizePlanning, ajouterJours, type EtatTache, type PlanningChantier, type PlanningGenere, type TachePlanning,
@@ -178,12 +178,26 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     return { id: crypto.randomUUID(), lotId, libelle: '', debut, fin: ajouterJours(debut, 4), avancement: 0, source: 'manuel' };
   };
 
+  /** Décale les successeurs si le réglage est actif ; sinon rend les tâches telles quelles. */
+  const avecCascade = (taches: TachePlanning[], modifiees: string[]) => {
+    if (!affichage.cascade) return { taches, decalees: 0, terminees: 0 };
+    const r = decalerSuccesseurs(taches, modifiees);
+    return { taches: r.taches, decalees: r.decalees.length, terminees: r.terminees.length };
+  };
+  const messageCascade = (c: { decalees: number; terminees: number }) =>
+    [c.decalees ? tr('planning_cascade_done', { n: c.decalees }) : '', c.terminees ? tr('planning_cascade_blocked', { n: c.terminees }) : ''].filter(Boolean).join(' ');
+
   const enregistrerTache = (tache: TachePlanning) => {
-    const existe = planning.taches.some(t => t.id === tache.id);
+    const avant = planning.taches.find(t => t.id === tache.id);
     // Une tâche d'origine IA que l'architecte modifie devient la sienne : elle survit à une nouvelle génération.
     const finale: TachePlanning = { ...tache, source: 'manuel' };
-    modifier(sanitizePlanning({ ...planning, taches: existe ? planning.taches.map(t => (t.id === tache.id ? finale : t)) : [...planning.taches, finale] }));
+    const taches = avant ? planning.taches.map(t => (t.id === tache.id ? finale : t)) : [...planning.taches, finale];
+    const datesChangees = !!avant && (avant.debut !== finale.debut || avant.fin !== finale.fin);
+    const cascade = datesChangees ? avecCascade(taches, [finale.id]) : { taches, decalees: 0, terminees: 0 };
+    modifier(sanitizePlanning({ ...planning, taches: cascade.taches }));
     setTacheOuverte(null);
+    const message = messageCascade(cascade);
+    if (message) showToast(message);
   };
 
   const supprimerTache = (id: string) => {
@@ -219,8 +233,9 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const enregistrerDates = (tache: TachePlanning) => {
     const originale = dernier.current.taches.find(t => t.id === tache.id);
     if (!originale || (originale.debut === tache.debut && originale.fin === tache.fin)) return;
-    modifier(sanitizePlanning({ ...dernier.current, taches: dernier.current.taches.map(t => t.id === tache.id ? { ...t, debut: tache.debut, fin: tache.fin, source: 'manuel' } : t) }));
-    setMessageGeste(tr('planning_dates_saved', { name: tache.libelle, start: tache.debut, end: tache.fin }));
+    const cascade = avecCascade(dernier.current.taches.map(t => t.id === tache.id ? { ...t, debut: tache.debut, fin: tache.fin, source: 'manuel' } : t), [tache.id]);
+    modifier(sanitizePlanning({ ...dernier.current, taches: cascade.taches }));
+    setMessageGeste([tr('planning_dates_saved', { name: tache.libelle, start: tache.debut, end: tache.fin }), messageCascade(cascade)].filter(Boolean).join(' '));
   };
   const commencerDates = (e: ReactPointerEvent<HTMLElement>, tache: TachePlanning, geste: GesteDatesPlanning) => {
     if (!disponible || lienSource) return;
@@ -236,7 +251,9 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
       const date = dateDepuisPositionPlanning(originePosition + delta / largeurColonne, axe, affichage.echelle);
       candidate = datesParGeste(tache, geste, geste === 'fin' ? ajouterJours(date, -1) : date);
       setApercu(prev => prev?.debut === candidate.debut && prev?.fin === candidate.fin ? prev : candidate);
-      setMessageGeste(tr('planning_dates_preview', { start: candidate.debut, end: candidate.fin }));
+      // Le nombre de successeurs qui seraient décalés est annoncé avant le relâché.
+      const n = affichage.cascade ? decalerSuccesseurs(dernier.current.taches.map(t => t.id === tache.id ? candidate : t), [tache.id]).decalees.length : 0;
+      setMessageGeste(tr(n ? 'planning_dates_preview_cascade' : 'planning_dates_preview', { start: candidate.debut, end: candidate.fin, n }));
     };
     commencerGeste(e, {
       onLift: (start, current) => { depart = start.x; actualiser(current.x); },
@@ -253,7 +270,12 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     setMessageGeste(tr(`planning_link_${resultat}`));
     setLienSource(null); setLienGeste(null);
     if (resultat !== 'ajoute') return;
-    modifier(sanitizePlanning({ ...dernier.current, taches: dernier.current.taches.map(t => t.id === cible ? placerApresPredecesseurs({ ...t, source: 'manuel', dependencies: [...(t.dependencies ?? []), source] }, dernier.current.taches) : t) }));
+    const placees = dernier.current.taches.map(t => t.id === cible ? placerApresPredecesseurs({ ...t, source: 'manuel', dependencies: [...(t.dependencies ?? []), source] }, dernier.current.taches) : t);
+    // La cible a pu être déplacée par le placement : ses propres successeurs suivent si le réglage est actif.
+    const cascade = avecCascade(placees, [cible]);
+    modifier(sanitizePlanning({ ...dernier.current, taches: cascade.taches }));
+    const message = messageCascade(cascade);
+    if (message) setMessageGeste(`${tr('planning_link_ajoute')} ${message}`);
   };
   const cibleAuPoint = (x: number, y: number) => {
     const cible = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-planning-task-id]');
@@ -374,6 +396,8 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
           <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={affichage.generales} onChange={e => regler({ generales: e.target.checked })} />{tr('planning_general')}</label>
           <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={affichage.avancement} onChange={event => regler({ avancement: event.target.checked })} />{tr('planning_show_progress')}</label>
           <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={affichage.ajusterLargeur} onChange={event => regler({ ajusterLargeur: event.target.checked })} />{tr('planning_fit_width')}</label>
+          <label className="flex items-center gap-2 min-h-11" title={tr('planning_cascade_help')}><input type="checkbox" checked={affichage.cascade} aria-describedby="planning-cascade-help" onChange={event => regler({ cascade: event.target.checked })} />{tr('planning_cascade')}</label>
+          <span id="planning-cascade-help" className="sr-only">{tr('planning_cascade_help')}</span>
           <label className="flex flex-wrap items-center gap-2">{tr('planning_labels_width')}
             <input type="range" min={140} max={560} step={1} value={affichage.largeurLibelles} onChange={event => regler({ largeurLibelles: Number(event.target.value) })} /><output>{affichage.largeurLibelles} px</output>
           </label>

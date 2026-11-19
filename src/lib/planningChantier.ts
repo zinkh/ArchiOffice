@@ -341,8 +341,10 @@ export interface AffichagePlanning {
   ajusterLargeur: boolean;
   joursFeries: boolean;
   conges: boolean;
+  /** Réglage de saisie, local à l'appareil : décale les successeurs d'une tâche dont les dates changent. */
+  cascade: boolean;
 }
-export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [], avancement: true, largeurLibelles: 272, largeurPeriode: 84, ajusterLargeur: false, joursFeries: true, conges: true };
+export const AFFICHAGE_PLANNING: AffichagePlanning = { echelle: 'semaines', relatif: false, numerosSemaines: true, generales: true, replies: [], avancement: true, largeurLibelles: 272, largeurPeriode: 84, ajusterLargeur: false, joursFeries: true, conges: true, cascade: false };
 export function bornerLargeur(v: unknown, min: number, max: number, repli: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : repli;
 }
@@ -351,7 +353,7 @@ export function sanitizeAffichage(v: unknown): AffichagePlanning {
   return { echelle: o.echelle === 'mois' ? 'mois' : 'semaines', relatif: o.relatif === true,
     numerosSemaines: o.numerosSemaines !== false, generales: o.generales !== false,
     joursFeries: o.joursFeries !== false, conges: o.conges !== false,
-    avancement: o.avancement !== false, ajusterLargeur: o.ajusterLargeur === true,
+    avancement: o.avancement !== false, ajusterLargeur: o.ajusterLargeur === true, cascade: o.cascade === true,
     largeurLibelles: bornerLargeur(o.largeurLibelles, 140, 560, AFFICHAGE_PLANNING.largeurLibelles),
     largeurPeriode: bornerLargeur(o.largeurPeriode, 28, 240, AFFICHAGE_PLANNING.largeurPeriode),
     replies: Array.isArray(o.replies) ? o.replies.filter((s): s is string => typeof s === 'string').slice(0, MAX_TACHES) : [] };
@@ -469,6 +471,58 @@ export function sanitizeCalendrierPlanning(brut: unknown): CalendrierPlanning {
     periodes.push({ id, libelle, debut: p.debut, fin: p.fin, type: p.type === 'ferie' ? 'ferie' : 'conge' });
   }
   return { joursFeries: o.joursFeries === 'aucun' || o.joursFeries === 'alsace_moselle' ? o.joursFeries : 'france', periodes };
+}
+
+export interface DecalageSuccesseurs {
+  taches: TachePlanning[];
+  /** Tâches décalées, avec leur décalage en jours (positif : plus tard). */
+  decalees: { id: string; jours: number }[];
+  /** Tâches terminées (100 %) en conflit : jamais déplacées, l'alerte de dates incohérentes reste. */
+  terminees: string[];
+}
+
+/**
+ * Décalage « poussé » des successeurs, fin à début, après un changement de dates.
+ * - Seuls les successeurs (directs ou indirects) des tâches `modifiees` sont examinés.
+ * - Un successeur n'est jamais avancé : il est reculé seulement si son début précède le lendemain
+ *   de la fin la plus tardive de ses prédécesseurs, et il garde sa durée (un jour pour un jalon).
+ * - Une tâche terminée (100 %) n'est jamais déplacée.
+ * - Les tâches déplacées passent en `manuel`, comme après toute modification de dates.
+ * Fonction pure : le planning reçu n'est pas modifié. Les cycles sont refusés ailleurs, une borne
+ * de passes garantit malgré tout l'arrêt.
+ */
+export function decalerSuccesseurs(taches: TachePlanning[], modifiees: string[]): DecalageSuccesseurs {
+  const parId = new Map(taches.map(t => [t.id, t]));
+  const successeurs = new Map<string, string[]>();
+  for (const t of taches) for (const p of t.dependencies ?? []) successeurs.set(p, [...(successeurs.get(p) ?? []), t.id]);
+  // Tâches en aval des modifiées.
+  const aval = new Set<string>();
+  const pile = [...modifiees];
+  while (pile.length) for (const s of successeurs.get(pile.pop()!) ?? []) if (!aval.has(s)) { aval.add(s); pile.push(s); }
+  const courantes = new Map(taches.map(t => [t.id, t]));
+  const terminees = new Set<string>();
+  for (let passe = 0; passe <= taches.length; passe++) {
+    let change = false;
+    for (const t of taches) {
+      if (!aval.has(t.id) || modifiees.includes(t.id)) continue;
+      const actuelle = courantes.get(t.id)!;
+      if (!estDateIso(actuelle.debut) || !estDateIso(actuelle.fin)) continue;
+      const finsPrecedents = (actuelle.dependencies ?? []).map(id => courantes.get(id)?.fin).filter((f): f is string => !!f && estDateIso(f));
+      if (!finsPrecedents.length) continue;
+      const debutMin = ajouterJours(finsPrecedents.reduce((m, f) => (f > m ? f : m)), 1);
+      if (actuelle.debut >= debutMin) continue;
+      if (actuelle.avancement >= 100) { terminees.add(t.id); continue; }
+      const jours = joursEntre(actuelle.debut, debutMin);
+      courantes.set(t.id, { ...actuelle, debut: debutMin, fin: ajouterJours(actuelle.fin, jours), source: 'manuel' });
+      change = true;
+    }
+    if (!change) break;
+  }
+  const decalees = taches.flatMap(t => {
+    const nouvelle = courantes.get(t.id)!;
+    return nouvelle.debut !== t.debut ? [{ id: t.id, jours: joursEntre(t.debut, nouvelle.debut) }] : [];
+  });
+  return { taches: taches.map(t => courantes.get(t.id) ?? parId.get(t.id)!), decalees, terminees: [...terminees] };
 }
 
 /** Appelé uniquement à l'ajout d'un prédécesseur : aucun recalcul continu ni cascade.

@@ -149,6 +149,39 @@ test('largeurs, ajustement et avancement persistants, édition clavier et liaiso
   await page.screenshot({ path: `/tmp/chantier-gestes-${test.info().project.name}.png`, fullPage: true });
 });
 
+test('décalage des successeurs : désactivé par défaut, puis activé et mémorisé', async ({ page }) => {
+  test.setTimeout(90_000);
+  let saved = { version: 1, taches, hypotheses: [], genereLe: null };
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  const bar = page.getByRole('button', { name: 'Déplacer « Fondations et dallage »', exact: true });
+  await expect(bar).toBeVisible({ timeout: 30_000 });
+  const tache = (id: string) => saved.taches.find(t => t.id === id);
+
+  // Par défaut : seules les dates de la tâche déplacée changent (Maj = 7 jours).
+  await bar.focus(); await page.keyboard.press('Shift+ArrowRight');
+  await expect.poll(() => tache('fondations')?.debut).toBe('2027-01-06');
+  expect(tache('charpente')).toMatchObject({ debut: '2027-01-07', fin: '2027-01-15' });
+
+  // Activé : les successeurs sont reculés en cascade, durée conservée, jalon sur un jour.
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await page.getByLabel('Décaler les successeurs', { exact: true }).check();
+  await bar.focus(); await page.keyboard.press('Shift+ArrowRight');
+  await expect.poll(() => tache('fondations')?.debut).toBe('2027-01-13');
+  await expect.poll(() => tache('charpente')).toMatchObject({ debut: '2027-01-23', fin: '2027-01-31' });
+  expect(tache('reception')).toMatchObject({ debut: '2027-02-01', fin: '2027-02-01' });
+  expect(tache('installation')).toMatchObject({ debut: '2026-12-23', fin: '2026-12-29' });
+  await expect(page.getByRole('status').filter({ hasText: '2 successeur(s) décalé(s).' })).toBeVisible();
+
+  // Le réglage est mémorisé par appareil.
+  await page.reload();
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await expect(page.getByLabel('Décaler les successeurs', { exact: true })).toBeChecked();
+});
+
 test('calendrier configurable, repères persistants et poignées discrètes', async ({ page, isMobile }) => {
   test.setTimeout(120_000);
   let saved: any = { version: 1, taches, hypotheses: [], genereLe: null };
