@@ -117,7 +117,8 @@ export function importedTasksToCreatePayloads(
 
 
 /** Métadonnées facultatives : les exports des tâches internes gardent leur comportement. */
-export type PlanningXmlTask = Task & { xmlParentId?: string; xmlMilestone?: boolean; xmlColor?: string };
+/** `xmlLags` : décalage de chaque lien, en jours, par identifiant de prédécesseur (absent : 0). */
+export type PlanningXmlTask = Task & { xmlParentId?: string; xmlMilestone?: boolean; xmlColor?: string; xmlLags?: Record<string, number> };
 export function xmlOutline(tasks: PlanningXmlTask[], task: PlanningXmlTask): string {
   const siblings = tasks.filter(t => t.xmlParentId === task.xmlParentId);
   const rank = String(siblings.findIndex(t => t.id === task.id) + 1);

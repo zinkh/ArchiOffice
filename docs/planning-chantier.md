@@ -37,9 +37,44 @@ Quand il est actif, un changement de dates déclenche `decalerSuccesseurs` (`src
 - une tâche **terminée** (100 %) n'est jamais déplacée : elle est signalée (« tâche(s) terminée(s) non déplacée(s) ») et l'alerte de dates incohérentes reste ;
 - les tâches décalées passent en `manuel`, comme après toute modification de dates, et sont enregistrées dans la même écriture que la tâche modifiée ;
 - pendant un geste, le message d'aperçu annonce le nombre de successeurs qui seront décalés ; seul le relâché enregistre, Échap annule tout ;
-- les jours fériés et les congés restent des repères : le décalage compte des jours calendaires (le calcul en jours ouvrés est un chantier à part).
+- le décalage compte des jours calendaires, ou des jours ouvrés quand le calcul en jours ouvrés est actif (voir plus bas) ; les délais des liens sont respectés ;
+- le message qui annonce le décalage rappelle que Ctrl+Z l'annule (voir « Annuler et rétablir »).
 
-Pas encore fait : annuler le dernier décalage, aperçu visuel des barres décalées pendant le geste, décalage vers l'avant (tirer les successeurs) et délai entre tâches.
+Pas encore fait : aperçu visuel des barres décalées pendant le geste et décalage vers l'avant (tirer les successeurs).
+
+## Annuler et rétablir
+
+Deux boutons à côté de « Tâche » (flèches), et Ctrl+Z (Cmd+Z) pour annuler, Ctrl+Maj+Z ou Ctrl+Y pour rétablir. L'historique réutilise `src/lib/croquis/history.ts` (générique, pur) : **un pas par action de l'utilisateur**, donc un déplacement qui a décalé trois successeurs s'annule d'un seul coup. Sont annulables : déplacements et redimensionnements, fiche de tâche (création, modification, suppression), liens, génération IA, changements du calendrier partagé (congés, région, jours ouvrés). 50 pas au plus.
+
+- L'état restauré est enregistré comme n'importe quelle modification (enregistrement automatique de 1,2 s) : annuler est donc partagé avec les autres utilisateurs de l'affaire, comme l'action d'origine.
+- L'historique est local à l'écran ouvert et repart de zéro à chaque lecture du planning ; il n'est pas conservé après un rechargement et on n'annule jamais au-delà de ce qui a été lu. Un planning relu après la modification d'un autre utilisateur n'est pas fusionné : annuler remet l'état d'avant votre action.
+- Une nouvelle action après une annulation efface ce qui pouvait être rétabli.
+- Le raccourci est ignoré dans un champ de saisie (l'annulation du champ reste la sienne) et tant qu'une fenêtre (fiche de tâche, génération IA) est ouverte.
+
+## Délais entre les tâches
+
+Chaque lien fin à début peut porter un **délai** (séchage, approvisionnement...) : `delais` sur la tâche successeur, `{ identifiant du prédécesseur: jours }`, entier de 1 à 365, dans le JSON existant (aucune migration). Il se saisit dans la fiche de la tâche, à côté de chaque prédécesseur coché ; retirer le prédécesseur retire son délai, et `sanitizePlanning` (client et serveur) écarte tout délai sans lien, nul, négatif ou illisible.
+
+- La tâche peut commencer au plus tôt `délai` jours pleins après la fin de son prédécesseur (délai 0 : le lendemain). Avec plusieurs prédécesseurs, le plus contraignant l'emporte.
+- Le critère d'incohérence (alerte « dates incohérentes », liste de dépendances du PDF, trait pointillé) est le même partout : la tâche chevauche son prédécesseur, ou laisse moins de `délai` jours entre les deux.
+- Le placement à l'ajout d'un prédécesseur, la création d'un lien par geste et le décalage des successeurs appliquent le délai. Modifier un délai dans la fiche ne déplace la tâche que si l'écart ne suffit plus (jamais en arrière).
+- PDF : la liste des dépendances indique le délai et son unité. Exports XML : le délai devient le décalage du lien (`LinkLag` pour Microsoft Project, en dixièmes de minute sur une journée de 8 h ; `difference` pour GanttProject). Comme les dates exportées sont fixes et que le calendrier exporté a sept jours, en calcul en jours ouvrés le décalage écrit est l'écart calendaire réel entre les deux tâches.
+
+## Calcul en jours ouvrés
+
+Case « Calcul en jours ouvrés » dans les options du calendrier (`calendrier.joursOuvres`, dans le champ `calendrier` déjà conservé par le serveur) : **partagée avec l'affaire**, désactivée par défaut, sans migration. Un jour ouvré est un jour du lundi au vendredi, hors jours fériés de la région choisie et hors toute période saisie (congés, fermetures, jours fériés locaux), quel que soit l'affichage de ces repères (masquer des bandes ne change jamais un calcul).
+
+- Activer la case ne déplace **aucune date** enregistrée. Elle change la façon de calculer les placements, les délais, les décalages de successeurs et les durées affichées dans la fiche (« Durée : 7 jour(s) ouvré(s), soit 9 jour(s) calendaires »).
+- Une tâche déplacée garde sa **durée en jours ouvrés** ; elle commence toujours un jour ouvré ; un jalon reste sur un jour. Les gestes sur le diagramme restent en jours calendaires : la date relâchée est celle choisie.
+- L'alerte d'incohérence est indulgente : une tâche qui démarre un samedi juste après un prédécesseur fini le vendredi n'est pas signalée (il n'y a aucun jour ouvré entre les deux).
+- Les exports XML gardent leur calendrier de sept jours et des dates fixes, voir ci-dessus pour les décalages.
+- Fonctions pures (`planningChantier.ts` : `avancerOuvres`, `joursOuvresEntre`, `dureeOuvree`, `deplacerTacheAu`, `debutMinimalLien`) paramétrées par un prédicat `EstOuvre` ; `creerEstOuvre` (`planningChantierCalendrier.ts`) construit le prédicat du chantier. Sans la case, le prédicat est « tous les jours » et le comportement historique est strictement conservé.
+
+## Barre « Affichage et exports »
+
+Réorganisée pour prendre moins de place : l'en-tête tient sur une ligne (titre, annuler/rétablir, Tâche, Exporter PDF, IA), la ligne de réglages fermée rappelle l'essentiel (échelle, dates relatives, jours ouvrés, décalage des successeurs), et le panneau ouvert est en quatre colonnes (Affichage, Dimensions, Calendrier, Export) sur grand écran, deux sur tablette, une sur téléphone, avec les cases côte à côte quand la largeur le permet. Les périodes de congés restent dans le panneau (pleine largeur), l'aide et les gestes sont repliés, et les deux lignes d'information (liens, repères du calendrier) partagent la même ligne. Les contrôles sont compacts au pointeur fin et gardent 44 px au doigt. Mesure sur le gabarit de test (Chromium, même planning de quatre tâches) : hauteur au-dessus du diagramme de 307 à 181 px réglages fermés et de 872 à 602 px ouverts sur un écran de bureau de 1280 px ; 430 à 322 px fermés et 1811 à 1635 px ouverts sur un Pixel 7.
+
+## Export PDF : format, plage, axe et légende
 
 ## Export PDF : format, plage, axe et légende
 

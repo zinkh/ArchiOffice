@@ -144,7 +144,8 @@ export function exportMsProjectXml(project: Project, tasks: PlanningXmlTask[], t
                   PredecessorUID: taskUid.get(dep),
                   Type: '1',
                   CrossProject: '0',
-                  LinkLag: '0',
+                  // Dixièmes de minute, journée de 8 h comme les durées exportées plus haut.
+                  LinkLag: String(Math.round((task.xmlLags?.[dep] ?? 0) * 8 * 60 * 10)),
                   LagFormat: '7',
                 })),
             } : {}),

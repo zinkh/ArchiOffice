@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { ModalShell } from '../ui/ModalShell';
-import { placerApresPredecesseurs, cycleDependances, incoherencesDependances, dureeJours, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
+import { placerApresPredecesseurs, cycleDependances, incoherencesDependances, dureeJours, dureeOuvree, MAX_DELAI, TOUS_LES_JOURS, type EstOuvre, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
 
 interface Props {
   /** Tâche existante, ou brouillon d'une nouvelle (identifiant déjà tiré). */
@@ -11,6 +11,9 @@ interface Props {
   nouvelle: boolean;
   lots: LotPlanifiable[];
   taches: TachePlanning[];
+  /** Jours travaillés du chantier ; tous les jours tant que le calcul en jours ouvrés n'est pas demandé. */
+  ouvre?: EstOuvre;
+  joursOuvres?: boolean;
   onSave: (tache: TachePlanning) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -19,7 +22,7 @@ interface Props {
 const champ = 'w-full rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] px-3 py-2 text-sm pointer-coarse:min-h-11';
 const etiquette = 'block text-xs font-semibold text-[var(--tblr-muted)] mb-1';
 
-export function PlanningTacheDialog({ tache, nouvelle, lots, taches, onSave, onDelete, onClose }: Props) {
+export function PlanningTacheDialog({ tache, nouvelle, lots, taches, ouvre = TOUS_LES_JOURS, joursOuvres = false, onSave, onDelete, onClose }: Props) {
   const { t: tr } = useTranslation();
   const [form, setForm] = useState<TachePlanning>(tache);
   const set = <K extends keyof TachePlanning>(cle: K, valeur: TachePlanning[K]) => setForm(prev => ({ ...prev, [cle]: valeur }));
@@ -28,7 +31,16 @@ export function PlanningTacheDialog({ tache, nouvelle, lots, taches, onSave, onD
   const datesValides = !!form.debut && !!form.fin && form.fin >= form.debut;
   const toutes = [...taches.filter(t => t.id !== form.id), form];
   const cycle = cycleDependances(toutes);
-  const conflits = incoherencesDependances(toutes).filter(c => c.tache.id === form.id || c.precedent.id === form.id);
+  const conflits = incoherencesDependances(toutes, ouvre).filter(c => c.tache.id === form.id || c.precedent.id === form.id);
+  /** Un délai qui ne tient plus pousse la tâche après son prédécesseur (jamais l'inverse). */
+  const changerDelai = (id: string, valeur: number) => setForm(prev => {
+    const n = Math.min(MAX_DELAI, Math.max(0, Math.round(valeur) || 0));
+    const delais = { ...(prev.delais ?? {}) };
+    if (n) delais[id] = n; else delete delais[id];
+    const suivante: TachePlanning = { ...prev, delais: Object.keys(delais).length ? delais : undefined };
+    const enConflit = incoherencesDependances([...taches.filter(t => t.id !== prev.id), suivante], ouvre).some(c => c.tache.id === prev.id);
+    return enConflit ? placerApresPredecesseurs(suivante, taches, ouvre) : suivante;
+  });
   const erreur = cycle ? tr('planning_cycle') : !libelle ? 'Indiquez l’intitulé de la tâche.' : !form.debut ? 'Indiquez la date de début.' : !datesValides && !form.jalon ? 'La fin doit suivre le début.' : null;
 
   const enregistrer = () => {
@@ -92,7 +104,9 @@ export function PlanningTacheDialog({ tache, nouvelle, lots, taches, onSave, onD
             )}
           </div>
           {!form.jalon && datesValides && (
-            <p className="text-xs text-[var(--tblr-muted)]">Durée : {dureeJours(form)} jour{dureeJours(form) > 1 ? 's' : ''} calendaires.</p>
+            <p className="text-xs text-[var(--tblr-muted)]">{joursOuvres
+              ? tr('planning_duration_working', { n: dureeOuvree(form, ouvre), cal: dureeJours(form) })
+              : `Durée : ${dureeJours(form)} jour${dureeJours(form) > 1 ? 's' : ''} calendaires.`}</p>
           )}
           <div>
             <label className={etiquette} htmlFor="planning-avancement">Avancement : {form.avancement} %</label>
@@ -107,16 +121,26 @@ export function PlanningTacheDialog({ tache, nouvelle, lots, taches, onSave, onD
                 const coche = (form.dependencies ?? []).includes(t.id);
                 const interdit = !coche && cycleDependances(toutes.map(x => x.id === form.id ? { ...x, dependencies: [...(form.dependencies ?? []), t.id] } : x));
                 const lot = lots.find(l => l.id === t.lotId);
-                return <label key={t.id} className="flex items-start gap-2 p-2 min-h-11 text-sm">
-                  <input type="checkbox" checked={coche} disabled={interdit} onChange={e => {
-                    const checked = e.target.checked;
-                    setForm(prev => {
-                      const suivante = { ...prev, dependencies: checked ? [...(prev.dependencies ?? []), t.id] : (prev.dependencies ?? []).filter(id => id !== t.id) };
-                      return checked ? placerApresPredecesseurs(suivante, taches) : suivante;
-                    });
-                  }} />
-                  <span>{t.libelle} · {lot ? `Lot ${lot.lot_number}` : tr('planning_general_short')}{t.jalon ? ` · ${tr('planning_milestone')}` : ''}{interdit ? ` · ${tr('planning_cycle_forbidden')}` : ''}</span>
-                </label>;
+                return <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-2 min-h-11 text-sm">
+                  <label className="flex items-start gap-2 flex-1 min-w-[12rem]">
+                    <input type="checkbox" checked={coche} disabled={interdit} onChange={e => {
+                      const checked = e.target.checked;
+                      setForm(prev => {
+                        // Retirer un lien retire aussi son délai.
+                        const delais = Object.fromEntries(Object.entries(prev.delais ?? {}).filter(([id]) => checked || id !== t.id));
+                        const suivante = { ...prev, dependencies: checked ? [...(prev.dependencies ?? []), t.id] : (prev.dependencies ?? []).filter(id => id !== t.id), delais: Object.keys(delais).length ? delais : undefined };
+                        return checked ? placerApresPredecesseurs(suivante, taches, ouvre) : suivante;
+                      });
+                    }} />
+                    <span>{t.libelle} · {lot ? `Lot ${lot.lot_number}` : tr('planning_general_short')}{t.jalon ? ` · ${tr('planning_milestone')}` : ''}{interdit ? ` · ${tr('planning_cycle_forbidden')}` : ''}</span>
+                  </label>
+                  {coche && <label className="inline-flex items-center gap-1 text-xs text-[var(--tblr-muted)]">{tr('planning_delay')}
+                    <input type="number" inputMode="numeric" min={0} max={MAX_DELAI} step={1} aria-label={tr('planning_delay_after', { name: t.libelle })}
+                      className="w-16 rounded border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] px-2 py-1 text-sm pointer-coarse:min-h-11"
+                      value={form.delais?.[t.id] ?? 0} onChange={e => changerDelai(t.id, Number(e.target.value))} />
+                    <span>{tr(joursOuvres ? 'planning_delay_unit_working' : 'planning_delay_unit')}</span>
+                  </label>}
+                </div>;
               })}
             </div>
           </fieldset>

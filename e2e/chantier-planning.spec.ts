@@ -182,6 +182,97 @@ test('décalage des successeurs : désactivé par défaut, puis activé et mémo
   await expect(page.getByLabel('Décaler les successeurs', { exact: true })).toBeChecked();
 });
 
+test('annuler et rétablir un décalage en cascade, au bouton et au clavier', async ({ page }) => {
+  test.setTimeout(90_000);
+  let saved = { version: 1, taches, hypotheses: [], genereLe: null };
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  const bar = page.getByRole('button', { name: 'Déplacer « Fondations et dallage »', exact: true });
+  await expect(bar).toBeVisible({ timeout: 30_000 });
+  const tache = (id: string) => saved.taches.find(t => t.id === id);
+  const annuler = page.getByRole('button', { name: 'Annuler', exact: true });
+  const retablir = page.getByRole('button', { name: 'Rétablir', exact: true });
+  await expect(annuler).toBeDisabled();
+  await expect(retablir).toBeDisabled();
+
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await page.getByLabel('Décaler les successeurs', { exact: true }).check();
+  await bar.focus(); await page.keyboard.press('Shift+ArrowRight');
+  await expect.poll(() => tache('charpente')?.debut).toBe('2027-01-16');
+  expect(tache('reception')).toMatchObject({ debut: '2027-01-25', fin: '2027-01-25' });
+  await expect(page.getByRole('status').filter({ hasText: 'Ctrl+Z annule le décalage.' })).toBeVisible();
+
+  // Un seul pas annule la tâche déplacée ET ses successeurs.
+  await expect(annuler).toBeEnabled();
+  await annuler.click();
+  await expect.poll(() => tache('fondations')?.debut).toBe('2026-12-30');
+  expect(tache('charpente')).toMatchObject({ debut: '2027-01-07', fin: '2027-01-15' });
+  expect(tache('reception')).toMatchObject({ debut: '2027-01-18', fin: '2027-01-18' });
+  await expect(annuler).toBeDisabled();
+  await expect(retablir).toBeEnabled();
+  await retablir.click();
+  await expect.poll(() => tache('charpente')?.debut).toBe('2027-01-16');
+  expect(tache('reception')?.debut).toBe('2027-01-25');
+
+  // Au clavier : Ctrl+Z annule, Ctrl+Maj+Z rétablit.
+  await bar.focus(); await page.keyboard.press('Control+z');
+  await expect.poll(() => tache('charpente')?.debut).toBe('2027-01-07');
+  await page.keyboard.press('Control+Shift+z');
+  await expect.poll(() => tache('charpente')?.debut).toBe('2027-01-16');
+
+  // Une nouvelle modification efface ce qui pouvait être rétabli.
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => tache('fondations')?.debut).toBe('2026-12-30');
+  await bar.focus(); await page.keyboard.press('ArrowRight');
+  await expect.poll(() => tache('fondations')?.debut).toBe('2026-12-31');
+  await expect(retablir).toBeDisabled();
+
+  // Dans un champ de saisie, Ctrl+Z reste celui du champ : le planning ne bouge pas.
+  const avant = JSON.stringify(saved.taches);
+  await page.getByLabel('Nom de la période', { exact: true }).focus();
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(300);
+  expect(JSON.stringify(saved.taches)).toBe(avant);
+});
+
+test('délai entre tâches, puis calcul en jours ouvrés', async ({ page }) => {
+  test.setTimeout(90_000);
+  let saved: any = { version: 1, taches, hypotheses: [], genereLe: null };
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  const tache = (id: string) => saved.taches.find((t: any) => t.id === id);
+  await page.getByRole('button', { name: /Pose de la charpente, .*du/ }).click({ timeout: 30_000 });
+
+  // Calendaire : fondations finit le vendredi 8 ; trois jours de délai donnent un début le mardi 12.
+  const delai = page.getByLabel('Délai après « Fondations et dallage »', { exact: true });
+  await expect(delai).toHaveValue('0');
+  await delai.fill('3');
+  await expect(page.getByLabel('Début', { exact: true })).toHaveValue('2027-01-12');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect.poll(() => tache('charpente')?.delais).toEqual({ fondations: 3 });
+  expect(tache('charpente')).toMatchObject({ debut: '2027-01-12', fin: '2027-01-20' });
+
+  // Jours ouvrés : les week-ends ne comptent plus, ni dans le délai ni dans la durée.
+  await page.getByText('Affichage et exports', { exact: true }).click();
+  await page.getByLabel('Calcul en jours ouvrés', { exact: true }).check();
+  await expect.poll(() => saved.calendrier?.joursOuvres).toBe(true);
+  expect(tache('charpente')).toMatchObject({ debut: '2027-01-12', fin: '2027-01-20' }); // l'activation ne bouge aucune date
+  await page.getByRole('button', { name: /Pose de la charpente, .*du/ }).click();
+  await expect(page.getByText('jours ouvrés', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Durée : 7 jour\(s\) ouvré\(s\)/)).toBeVisible();
+  await page.getByLabel('Délai après « Fondations et dallage »', { exact: true }).fill('2');
+  await expect(page.getByLabel('Début', { exact: true })).toHaveValue('2027-01-13');
+  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
+  await expect.poll(() => tache('charpente')?.debut).toBe('2027-01-13');
+  expect(tache('charpente')).toMatchObject({ fin: '2027-01-21', delais: { fondations: 2 } });
+});
+
 test('calendrier configurable, repères persistants et poignées discrètes', async ({ page, isMobile }) => {
   test.setTimeout(120_000);
   let saved: any = { version: 1, taches, hypotheses: [], genereLe: null };

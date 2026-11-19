@@ -1,13 +1,13 @@
 // Export PDF du planning de chantier (Gantt par lot), à la charte du cabinet :
 // en-tête avec logo sur la première page, nuances de gris, pied et « P1|2 ».
 // Complet, ou limité à un lot pour remettre à chaque entreprise SON planning.
-import { reperesCalendrierPlanning } from './planningChantierCalendrier';
+import { estOuvreDuPlanning, reperesCalendrierPlanning } from './planningChantierCalendrier';
 import { hexVersRgb, RESERVE_COULEUR_NEUTRE } from './reserveCouleurs';
 import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import {
   CALENDRIER_PLANNING, AFFICHAGE_PLANNING, periodesPlanning, positionPlanning, ajouterJours, etatTache, type AffichagePlanning,
-  aujourdhuiIso, bornesPlanning, planningParLot,
+  aujourdhuiIso, bornesPlanning, planningParLot, incoherencesDependances,
   type LotPlanifiable, type PlanningChantier, type PeriodePlanning,
 } from './planningChantier';
 
@@ -118,6 +118,7 @@ export async function exportPlanningToPDF(
     lot?.contact_name ? `Entreprise : ${lot.contact_name}` : null,
     `Tous les lots dépliés ; tâches générales ${affichage.generales ? 'incluses' : 'masquées'}.`,
     affichage.relatif ? `Origine S1 / M1 : ${bornesPlanning(planning)?.debut ?? ''}` : 'Dates calendaires',
+    planning.calendrier?.joursOuvres ? 'Délais et décalages calculés en jours ouvrés' : null,
     `Édité le ${new Date().toLocaleDateString('fr-FR')}`,
   ].filter(Boolean).join('   ·   ');
   const resumeLignes = doc.splitTextToSize(resume, pageW - MARGIN * 2) as string[];
@@ -289,11 +290,16 @@ export async function exportPlanningToPDF(
   const presentes = new Set(lignes.flatMap(l => l.taches.map(t => t.id)));
   const liaisons = planning.taches.flatMap(t => (t.dependencies ?? []).map(id => ({ t, p: planning.taches.find(p => p.id === id) }))).filter(l => l.p && presentes.has(l.t.id));
   if (liaisons.length) {
+    // Même critère que l'écran : écart insuffisant, délai du lien et jours ouvrés compris.
+    const ouvre = estOuvreDuPlanning(planning.calendrier);
+    const incoherentes = new Set(incoherencesDependances(planning.taches, ouvre).map(c => `${c.precedent.id}:${c.tache.id}`));
+    const unite = planning.calendrier?.joursOuvres ? 'ouvré' : 'calendaire';
     y += 5; place(8); taille(8); doc.setTextColor(17, 24, 39);
     doc.text('Dépendances (fin à début, dates modifiables)', MARGIN, y);
     for (const { t, p } of liaisons) {
+      const delai = t.delais?.[p!.id] ?? 0;
       y += 4; place(4); taille(7);
-      doc.text(coupe(`${p!.libelle} -> ${t.libelle}${!presentes.has(p!.id) ? ' (prédécesseur hors périmètre)' : ''}${t.debut <= p!.fin ? ' : dates incohérentes' : ''}`, pageW - MARGIN * 2), MARGIN, y);
+      doc.text(coupe(`${p!.libelle} -> ${t.libelle}${delai ? ` (délai ${delai} jour${delai > 1 ? 's' : ''} ${unite}${delai > 1 ? 's' : ''})` : ''}${!presentes.has(p!.id) ? ' (prédécesseur hors périmètre)' : ''}${incoherentes.has(`${p!.id}:${t.id}`) ? ' : dates incohérentes' : ''}`, pageW - MARGIN * 2), MARGIN, y);
     }
   }
 

@@ -1,6 +1,6 @@
 // Calendrier VISUEL des interventions d'entreprises. Aucun lien avec les congés RH.
 // Référence des dates : https://calendrier.api.gouv.fr/jours-feries/
-import { ajouterJours, estDateIso, type CalendrierPlanning, type ZoneFeriesPlanning } from './planningChantier';
+import { ajouterJours, estDateIso, LUNDI_AU_VENDREDI, TOUS_LES_JOURS, type CalendrierPlanning, type EstOuvre, type ZoneFeriesPlanning } from './planningChantier';
 
 export interface RepereCalendrierPlanning {
   id: string;
@@ -44,6 +44,26 @@ export function joursFeriesPlanning(annee: number, zone: ZoneFeriesPlanning): Re
   return dates.map<RepereCalendrierPlanning>(([date, cle, libelle]) => ({ id: `ferie-${cle}-${annee}`, debut: date, fin: date, type: 'ferie', cle, libelle }))
     .sort((a, b) => a.debut.localeCompare(b.debut));
 }
+
+/**
+ * Jour travaillé du chantier : du lundi au vendredi, hors jours fériés de la zone et hors périodes saisies
+ * (congés, fermetures, jours fériés locaux). Indépendant des cases « Afficher » : masquer des bandes à
+ * l'écran ne change jamais un calcul de dates.
+ */
+export function creerEstOuvre(calendrier: CalendrierPlanning): EstOuvre {
+  const feries = new Map<number, Set<string>>();
+  return iso => {
+    if (!LUNDI_AU_VENDREDI(iso)) return false;
+    const annee = Number(iso.slice(0, 4));
+    let jours = feries.get(annee);
+    if (!jours) { jours = new Set(joursFeriesPlanning(annee, calendrier.joursFeries).map(f => f.debut)); feries.set(annee, jours); }
+    return !jours.has(iso) && !calendrier.periodes.some(p => iso >= p.debut && iso <= p.fin);
+  };
+}
+
+/** Prédicat du planning : jours ouvrés si le calendrier le demande, sinon tous les jours (comportement historique). */
+export const estOuvreDuPlanning = (calendrier?: CalendrierPlanning): EstOuvre =>
+  calendrier?.joursOuvres ? creerEstOuvre(calendrier) : TOUS_LES_JOURS;
 
 /** Repères qui intersectent l'axe affiché, sans modifier ni étendre les tâches. */
 export function reperesCalendrierPlanning(calendrier: CalendrierPlanning, debut: string, fin: string, affichage: { joursFeries: boolean; conges: boolean }): RepereCalendrierPlanning[] {

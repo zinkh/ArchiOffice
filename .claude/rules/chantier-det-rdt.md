@@ -242,7 +242,11 @@ vide (`available: false`) et refuse l'écriture en 503.
 - **PDF** (`planningChantierPdf.ts`, charte du cabinet, « P1|2 ») : complet, ou un lot seul à remettre à son entreprise ; A4 ou A3, plage de dates facultative (numérotation S1 / M1 conservée), bandeau mois ou année, étiquette « Aujourd'hui », rappel « (suite) » du lot et légende qui suit le contenu (voir `docs/planning-chantier.md`).
 - **Affichage, couleurs AOR, dépendances fin à début, exports XML et PDF** : voir `docs/planning-chantier.md`. Les dépendances sont conservées dans le JSON existant, sans migration supplémentaire ; le serveur refuse les cycles. Les préférences sont locales par cabinet, compte et affaire.
 - **Décalage des successeurs** (réglage local « Décaler les successeurs », désactivé par défaut, `decalerSuccesseurs` dans `src/lib/planningChantier.ts`, testé) : un changement de dates recule les successeurs en conflit, jamais l'inverse, sans toucher une tâche terminée ; détail dans `docs/planning-chantier.md`.
-- **Pas encore fait** : liaison avec les jalons de mission, jours ouvrés, annulation d'un décalage.
+- **Annuler / rétablir** : boutons et Ctrl+Z / Ctrl+Maj+Z, un pas par action (un décalage de plusieurs tâches s'annule d'un coup), historique `src/lib/croquis/history.ts` réutilisé, local à l'écran, 50 pas ; l'état restauré est enregistré comme une modification.
+- **Délais entre tâches** : `delais` (prédécesseur vers jours, 1 à 365) sur le successeur, saisi dans la fiche, pris en compte par le placement, la cascade, l'alerte d'incohérence, le PDF et les décalages de liens des exports XML.
+- **Jours ouvrés** : `calendrier.joursOuvres` (partagé, désactivé par défaut) ; lundi à vendredi hors fériés de la région et hors périodes saisies ; ne déplace aucune date enregistrée ; fonctions pures à prédicat `EstOuvre` (`planningChantier.ts`, `creerEstOuvre` dans `planningChantierCalendrier.ts`).
+- **Barre de réglages compacte** : `PlanningCalendrierOptions` et `PlanningCalendrierPeriodes` (anciennement un seul composant), panneau en quatre colonnes. Détail et mesures dans `docs/planning-chantier.md`.
+- **Pas encore fait** : liaison avec les jalons de mission, aperçu visuel des barres décalées, décalage vers l'avant.
 
 ### Documents joints à l'export PDF du compte-rendu
 

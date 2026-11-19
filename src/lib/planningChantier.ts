@@ -27,6 +27,12 @@ export interface TachePlanning {
   jalon?: boolean;
   /** Identifiants des prédécesseurs, relation fin à début (jours inclusifs). */
   dependencies?: string[];
+  /**
+   * Délai en jours après la fin d'un prédécesseur (séchage, délai d'approvisionnement...), par identifiant
+   * de prédécesseur ; absent ou 0 : la tâche peut commencer le lendemain. Jours calendaires, ou jours
+   * ouvrés quand le calendrier du chantier est en jours ouvrés.
+   */
+  delais?: Record<string, number>;
 }
 
 export interface PlanningChantier {
@@ -42,6 +48,7 @@ export interface PlanningChantier {
 export const PLANNING_VIDE: PlanningChantier = { version: 1, taches: [], hypotheses: [], genereLe: null };
 
 export const MAX_TACHES = 400;
+export const MAX_DELAI = 365;
 const MAX_LIBELLE = 160;
 const MAX_HYPOTHESES = 12;
 const MAX_HYPOTHESE = 300;
@@ -83,6 +90,7 @@ export function sanitizePlanning(brut: unknown): PlanningChantier {
   const vus = new Set<string>();
   const taches: TachePlanning[] = [];
   const liens = new Map<string, string[]>();
+  const delaisBruts = new Map<string, Record<string, unknown>>();
   for (const entree of (Array.isArray(source.taches) ? source.taches : []).slice(0, MAX_TACHES)) {
     if (!entree || typeof entree !== 'object') continue;
     const t = entree as Record<string, unknown>;
@@ -97,6 +105,7 @@ export function sanitizePlanning(brut: unknown): PlanningChantier {
     while (vus.has(id)) id += '-';
     vus.add(id);
     liens.set(id, Array.isArray(t.dependencies) ? [...new Set(t.dependencies.filter((d): d is string => typeof d === 'string'))].slice(0, MAX_TACHES) : []);
+    if (t.delais && typeof t.delais === 'object' && !Array.isArray(t.delais)) delaisBruts.set(id, t.delais as Record<string, unknown>);
     const avancement = Number(t.avancement);
     taches.push({
       id,
@@ -122,6 +131,13 @@ export function sanitizePlanning(brut: unknown): PlanningChantier {
     const valides = deps.filter(id => !atteint(id, t.id));
     if (valides.length) t.dependencies = valides;
     graphe.set(t.id, valides);
+    // Un délai n'existe que pour un lien conservé : entier de 1 à MAX_DELAI jours, le reste est écarté.
+    const delais: Record<string, number> = {};
+    for (const id of valides) {
+      const n = Math.round(Number(delaisBruts.get(t.id)?.[id]));
+      if (Number.isFinite(n) && n > 0) delais[id] = Math.min(MAX_DELAI, n);
+    }
+    if (Object.keys(delais).length) t.delais = delais;
   }
   return {
     version: 1,
@@ -320,12 +336,12 @@ export function cycleDependances(taches: Pick<TachePlanning, 'id' | 'dependencie
   return taches.some(t => visite(t.id));
 }
 
-export function incoherencesDependances(taches: TachePlanning[]): { tache: TachePlanning; precedent: TachePlanning }[] {
+export function incoherencesDependances(taches: TachePlanning[], ouvre: EstOuvre = TOUS_LES_JOURS): { tache: TachePlanning; precedent: TachePlanning }[] {
   const parId = new Map(taches.map(t => [t.id, t]));
   return taches.flatMap(tache => (tache.dependencies ?? []).flatMap(id => {
     const precedent = parId.get(id);
-    // La fin est inclusive, y compris pour les jalons datés sans heure.
-    return precedent && tache.debut <= precedent.fin ? [{ tache, precedent }] : [];
+    // La fin est inclusive, y compris pour les jalons datés sans heure ; le délai du lien s'ajoute au lendemain.
+    return precedent && ecartInsuffisant(precedent.fin, tache.debut, delaiDuLien(tache, id), ouvre) ? [{ tache, precedent }] : [];
   }));
 }
 
@@ -453,6 +469,12 @@ export interface PeriodeCalendrierPlanning {
 export interface CalendrierPlanning {
   joursFeries: ZoneFeriesPlanning;
   periodes: PeriodeCalendrierPlanning[];
+  /**
+   * Calcul en jours ouvrés : du lundi au vendredi, hors jours fériés de la zone et hors périodes de congés
+   * ou de fermeture. Sert au placement, au décalage des successeurs et aux délais ; les dates enregistrées
+   * restent des dates réelles et les exports XML gardent leur calendrier de sept jours.
+   */
+  joursOuvres?: boolean;
 }
 export const CALENDRIER_PLANNING: CalendrierPlanning = { joursFeries: 'france', periodes: [] };
 export const MAX_PERIODES_CALENDRIER = 100;
@@ -470,7 +492,57 @@ export function sanitizeCalendrierPlanning(brut: unknown): CalendrierPlanning {
     ids.add(id);
     periodes.push({ id, libelle, debut: p.debut, fin: p.fin, type: p.type === 'ferie' ? 'ferie' : 'conge' });
   }
-  return { joursFeries: o.joursFeries === 'aucun' || o.joursFeries === 'alsace_moselle' ? o.joursFeries : 'france', periodes };
+  return {
+    joursFeries: o.joursFeries === 'aucun' || o.joursFeries === 'alsace_moselle' ? o.joursFeries : 'france', periodes,
+    ...(o.joursOuvres === true ? { joursOuvres: true } : {}),
+  };
+}
+
+// ── Jours ouvrés, liens et délais ────────────────────────────────────────────
+
+/** Vrai si le jour est travaillé. Le calendrier du chantier en fournit une version (voir planningChantierCalendrier). */
+export type EstOuvre = (iso: string) => boolean;
+export const TOUS_LES_JOURS: EstOuvre = () => true;
+export const LUNDI_AU_VENDREDI: EstOuvre = iso => { const j = new Date(`${iso}T00:00:00Z`).getUTCDay(); return j !== 0 && j !== 6; };
+/** Garde-fou : un calendrier sans aucun jour travaillé ne doit jamais faire boucler. */
+const BORNE_JOURS = 4000;
+
+/** Premier jour travaillé à partir de `iso` inclus. */
+export function premierJourOuvre(iso: string, ouvre: EstOuvre = TOUS_LES_JOURS): string {
+  let jour = iso;
+  for (let i = 0; i < BORNE_JOURS && !ouvre(jour); i++) jour = ajouterJours(jour, 1);
+  return jour;
+}
+/** `n` jours travaillés après `iso` (n entier, 0 rend `iso`). */
+export function avancerOuvres(iso: string, n: number, ouvre: EstOuvre = TOUS_LES_JOURS): string {
+  let jour = iso;
+  for (let i = 0; i < n; i++) jour = premierJourOuvre(ajouterJours(jour, 1), ouvre);
+  return jour;
+}
+/** Jours travaillés dans [debut, fin], bornes incluses (0 si la fin précède le début). */
+export function joursOuvresEntre(debut: string, fin: string, ouvre: EstOuvre = TOUS_LES_JOURS): number {
+  let n = 0;
+  for (let jour = debut, i = 0; jour <= fin && i < BORNE_JOURS; jour = ajouterJours(jour, 1), i++) if (ouvre(jour)) n++;
+  return n;
+}
+/** Durée en jours travaillés (au moins 1 : une tâche posée sur un week-end compte un jour). */
+export const dureeOuvree = (t: Pick<TachePlanning, 'debut' | 'fin'>, ouvre: EstOuvre = TOUS_LES_JOURS) => Math.max(1, joursOuvresEntre(t.debut, t.fin, ouvre));
+
+const delaiDuLien = (tache: Pick<TachePlanning, 'delais'>, precedent: string) => tache.delais?.[precedent] ?? 0;
+/** Premier début permis par un prédécesseur : `delai` jours (travaillés) pleins après sa fin. */
+export const debutMinimalLien = (finPrecedent: string, delai: number, ouvre: EstOuvre = TOUS_LES_JOURS) => avancerOuvres(finPrecedent, 1 + Math.max(0, delai), ouvre);
+/** Écart insuffisant : la tâche chevauche son prédécesseur ou laisse moins de `delai` jours entre les deux. */
+function ecartInsuffisant(finPrecedent: string, debut: string, delai: number, ouvre: EstOuvre): boolean {
+  return debut <= finPrecedent || joursOuvresEntre(ajouterJours(finPrecedent, 1), ajouterJours(debut, -1), ouvre) < delai;
+}
+
+/** Déplace une tâche à un nouveau début en gardant sa durée (en jours travaillés si `ouvre` l'est). */
+export function deplacerTacheAu(tache: TachePlanning, debut: string, ouvre: EstOuvre = TOUS_LES_JOURS): TachePlanning {
+  if (!estDateIso(debut)) return tache;
+  if (tache.jalon) return { ...tache, debut, fin: debut };
+  const fin = avancerOuvres(debut, dureeOuvree(tache, ouvre) - 1, ouvre);
+  // Hors des dates représentables (an 9999) : la tâche reste telle quelle.
+  return estDateIso(fin) ? { ...tache, debut, fin } : tache;
 }
 
 export interface DecalageSuccesseurs {
@@ -491,7 +563,7 @@ export interface DecalageSuccesseurs {
  * Fonction pure : le planning reçu n'est pas modifié. Les cycles sont refusés ailleurs, une borne
  * de passes garantit malgré tout l'arrêt.
  */
-export function decalerSuccesseurs(taches: TachePlanning[], modifiees: string[]): DecalageSuccesseurs {
+export function decalerSuccesseurs(taches: TachePlanning[], modifiees: string[], ouvre: EstOuvre = TOUS_LES_JOURS): DecalageSuccesseurs {
   const parId = new Map(taches.map(t => [t.id, t]));
   const successeurs = new Map<string, string[]>();
   for (const t of taches) for (const p of t.dependencies ?? []) successeurs.set(p, [...(successeurs.get(p) ?? []), t.id]);
@@ -507,13 +579,12 @@ export function decalerSuccesseurs(taches: TachePlanning[], modifiees: string[])
       if (!aval.has(t.id) || modifiees.includes(t.id)) continue;
       const actuelle = courantes.get(t.id)!;
       if (!estDateIso(actuelle.debut) || !estDateIso(actuelle.fin)) continue;
-      const finsPrecedents = (actuelle.dependencies ?? []).map(id => courantes.get(id)?.fin).filter((f): f is string => !!f && estDateIso(f));
-      if (!finsPrecedents.length) continue;
-      const debutMin = ajouterJours(finsPrecedents.reduce((m, f) => (f > m ? f : m)), 1);
-      if (actuelle.debut >= debutMin) continue;
+      const liens = (actuelle.dependencies ?? []).flatMap(id => { const fin = courantes.get(id)?.fin; return fin && estDateIso(fin) ? [{ fin, delai: delaiDuLien(actuelle, id) }] : []; });
+      // Même critère que l'alerte de dates incohérentes : on ne pousse que ce qui est en conflit.
+      if (!liens.some(l => ecartInsuffisant(l.fin, actuelle.debut, l.delai, ouvre))) continue;
       if (actuelle.avancement >= 100) { terminees.add(t.id); continue; }
-      const jours = joursEntre(actuelle.debut, debutMin);
-      courantes.set(t.id, { ...actuelle, debut: debutMin, fin: ajouterJours(actuelle.fin, jours), source: 'manuel' });
+      const debutMin = liens.map(l => debutMinimalLien(l.fin, l.delai, ouvre)).reduce((m, d) => (d > m ? d : m));
+      courantes.set(t.id, { ...deplacerTacheAu(actuelle, debutMin, ouvre), source: 'manuel' });
       change = true;
     }
     if (!change) break;
@@ -528,10 +599,10 @@ export function decalerSuccesseurs(taches: TachePlanning[], modifiees: string[])
 /** Appelé uniquement à l'ajout d'un prédécesseur : aucun recalcul continu ni cascade.
  * Toutes les fins sont inclusives ; conserver la durée (un jour pour un jalon).
  */
-export function placerApresPredecesseurs(tache: TachePlanning, taches: TachePlanning[]): TachePlanning {
+export function placerApresPredecesseurs(tache: TachePlanning, taches: TachePlanning[], ouvre: EstOuvre = TOUS_LES_JOURS): TachePlanning {
   const precedents = taches.filter(t => t.id !== tache.id && tache.dependencies?.includes(t.id));
   if (!precedents.length || !estDateIso(tache.debut) || !estDateIso(tache.fin) || tache.fin < tache.debut) return tache;
-  const derniereFin = precedents.reduce((fin, t) => t.fin > fin ? t.fin : fin, precedents[0].fin);
-  const debut = ajouterJours(derniereFin, 1);
-  return datesParGeste(tache.jalon ? { ...tache, fin: tache.debut } : tache, 'deplacer', debut);
+  // Le prédécesseur le plus contraignant (fin + délai du lien) donne le début.
+  const debut = precedents.map(p => debutMinimalLien(p.fin, delaiDuLien(tache, p.id), ouvre)).reduce((m, d) => (d > m ? d : m));
+  return deplacerTacheAu(tache, debut, ouvre);
 }
