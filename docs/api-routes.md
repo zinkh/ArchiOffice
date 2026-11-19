@@ -4,11 +4,11 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-859 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+862 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
-| GET | `*` | [server.ts:1467](../server.ts#L1467) |
+| GET | `*` | [server.ts:1469](../server.ts#L1469) |
 | GET | `/.well-known/oauth-authorization-server` | [packages/archioffice-agents/src/server/mcp/oauthRoutes.ts:46](../packages/archioffice-agents/src/server/mcp/oauthRoutes.ts#L46) |
 | GET | `/.well-known/oauth-protected-resource` | [packages/archioffice-agents/src/server/mcp/oauthRoutes.ts:59](../packages/archioffice-agents/src/server/mcp/oauthRoutes.ts#L59) |
 | POST | `/admin/users` | [server/offlineGateway.ts:113](../server/offlineGateway.ts#L113) |
@@ -224,6 +224,9 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | DELETE | `/api/ftm/:id` | [server/routes/travauxModificatifs.ts:240](../server/routes/travauxModificatifs.ts#L240) |
 | PUT | `/api/ftm/:id` | [server/routes/travauxModificatifs.ts:152](../server/routes/travauxModificatifs.ts#L152) |
 | POST | `/api/ftm/:id/ordre-service` | [server/routes/travauxModificatifs.ts:201](../server/routes/travauxModificatifs.ts#L201) |
+| GET | `/api/geo/geocode` | [server/routes/geoTravel.ts:71](../server/routes/geoTravel.ts#L71) |
+| GET | `/api/geo/isochrones` | [server/routes/geoTravel.ts:119](../server/routes/geoTravel.ts#L119) |
+| GET | `/api/geo/route` | [server/routes/geoTravel.ts:94](../server/routes/geoTravel.ts#L94) |
 | GET | `/api/georisques` | [server/routes/geoProxy.ts:975](../server/routes/geoProxy.ts#L975) |
 | GET | `/api/gmail/auth` | [server/routes/gmailSync.ts:85](../server/routes/gmailSync.ts#L85) |
 | GET | `/api/gmail/callback` | [server/routes/gmailSync.ts:109](../server/routes/gmailSync.ts#L109) |
@@ -248,7 +251,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/gpa-reserves` | [server/routes/gpaReserves.ts:36](../server/routes/gpaReserves.ts#L36) |
 | DELETE | `/api/gpa-reserves/:id` | [server/routes/gpaReserves.ts:71](../server/routes/gpaReserves.ts#L71) |
 | PUT | `/api/gpa-reserves/:id` | [server/routes/gpaReserves.ts:84](../server/routes/gpaReserves.ts#L84) |
-| GET | `/api/health` | [server.ts:1040](../server.ts#L1040) |
+| GET | `/api/health` | [server.ts:1041](../server.ts#L1041) |
 | GET | `/api/historical-monuments` | [server/routes/geoProxy.ts:739](../server/routes/geoProxy.ts#L739) |
 | GET | `/api/hourly-costs` | [server/routes/timeTracking.ts:191](../server/routes/timeTracking.ts#L191) |
 | PUT | `/api/hourly-costs/:userId` | [server/routes/timeTracking.ts:199](../server/routes/timeTracking.ts#L199) |
@@ -769,26 +772,26 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/tender-references` | [server/routes/tenderReferences.ts:52](../server/routes/tenderReferences.ts#L52) |
 | DELETE | `/api/tender-references/:id` | [server/routes/tenderReferences.ts:88](../server/routes/tenderReferences.ts#L88) |
 | PUT | `/api/tender-references/:id` | [server/routes/tenderReferences.ts:77](../server/routes/tenderReferences.ts#L77) |
-| GET | `/api/tender-rss-matches` | [server/routes/tenderRss.ts:190](../server/routes/tenderRss.ts#L190) |
-| PUT | `/api/tender-rss-matches/:id` | [server/routes/tenderRss.ts:205](../server/routes/tenderRss.ts#L205) |
-| POST | `/api/tender-rss-matches/:id/convert` | [server/routes/tenderRss.ts:229](../server/routes/tenderRss.ts#L229) |
+| GET | `/api/tender-rss-matches` | [server/routes/tenderRss.ts:191](../server/routes/tenderRss.ts#L191) |
+| PUT | `/api/tender-rss-matches/:id` | [server/routes/tenderRss.ts:206](../server/routes/tenderRss.ts#L206) |
+| POST | `/api/tender-rss-matches/:id/convert` | [server/routes/tenderRss.ts:230](../server/routes/tenderRss.ts#L230) |
 | POST | `/api/tender-rss-matches/ai-scan` | [server/routes/tenderRssAi.ts:78](../server/routes/tenderRssAi.ts#L78) |
-| POST | `/api/tender-rss-matches/bulk-delete` | [server/routes/tenderRss.ts:216](../server/routes/tenderRss.ts#L216) |
-| GET | `/api/tender-rss-sources` | [server/routes/tenderRss.ts:114](../server/routes/tenderRss.ts#L114) |
-| POST | `/api/tender-rss-sources` | [server/routes/tenderRss.ts:123](../server/routes/tenderRss.ts#L123) |
-| DELETE | `/api/tender-rss-sources/:id` | [server/routes/tenderRss.ts:168](../server/routes/tenderRss.ts#L168) |
-| PUT | `/api/tender-rss-sources/:id` | [server/routes/tenderRss.ts:142](../server/routes/tenderRss.ts#L142) |
-| POST | `/api/tender-rss-sources/poll-now` | [server/routes/tenderRss.ts:182](../server/routes/tenderRss.ts#L182) |
-| GET | `/api/tenders` | [server/routes/tenders.ts:54](../server/routes/tenders.ts#L54) |
-| POST | `/api/tenders` | [server/routes/tenders.ts:75](../server/routes/tenders.ts#L75) |
-| DELETE | `/api/tenders/:id` | [server/routes/tenders.ts:111](../server/routes/tenders.ts#L111) |
-| GET | `/api/tenders/:id` | [server/routes/tenders.ts:63](../server/routes/tenders.ts#L63) |
-| PUT | `/api/tenders/:id` | [server/routes/tenders.ts:129](../server/routes/tenders.ts#L129) |
-| POST | `/api/tenders/:id/analyze-dce` | [server/routes/tenderAi.ts:90](../server/routes/tenderAi.ts#L90) |
-| GET | `/api/tenders/:id/candidatures-similaires` | [server/routes/tenders.ts:178](../server/routes/tenders.ts#L178) |
-| POST | `/api/tenders/:id/estimate-enveloppe` | [server/routes/tenderAi.ts:178](../server/routes/tenderAi.ts#L178) |
-| POST | `/api/tenders/:id/methodology/:noteId/draft-ai` | [server/routes/tenderAi.ts:247](../server/routes/tenderAi.ts#L247) |
-| POST | `/api/tenders/:id/methodology/prefill-sections` | [server/routes/tenderAi.ts:333](../server/routes/tenderAi.ts#L333) |
+| POST | `/api/tender-rss-matches/bulk-delete` | [server/routes/tenderRss.ts:217](../server/routes/tenderRss.ts#L217) |
+| GET | `/api/tender-rss-sources` | [server/routes/tenderRss.ts:115](../server/routes/tenderRss.ts#L115) |
+| POST | `/api/tender-rss-sources` | [server/routes/tenderRss.ts:124](../server/routes/tenderRss.ts#L124) |
+| DELETE | `/api/tender-rss-sources/:id` | [server/routes/tenderRss.ts:169](../server/routes/tenderRss.ts#L169) |
+| PUT | `/api/tender-rss-sources/:id` | [server/routes/tenderRss.ts:143](../server/routes/tenderRss.ts#L143) |
+| POST | `/api/tender-rss-sources/poll-now` | [server/routes/tenderRss.ts:183](../server/routes/tenderRss.ts#L183) |
+| GET | `/api/tenders` | [server/routes/tenders.ts:60](../server/routes/tenders.ts#L60) |
+| POST | `/api/tenders` | [server/routes/tenders.ts:81](../server/routes/tenders.ts#L81) |
+| DELETE | `/api/tenders/:id` | [server/routes/tenders.ts:117](../server/routes/tenders.ts#L117) |
+| GET | `/api/tenders/:id` | [server/routes/tenders.ts:69](../server/routes/tenders.ts#L69) |
+| PUT | `/api/tenders/:id` | [server/routes/tenders.ts:135](../server/routes/tenders.ts#L135) |
+| POST | `/api/tenders/:id/analyze-dce` | [server/routes/tenderAi.ts:91](../server/routes/tenderAi.ts#L91) |
+| GET | `/api/tenders/:id/candidatures-similaires` | [server/routes/tenders.ts:184](../server/routes/tenders.ts#L184) |
+| POST | `/api/tenders/:id/estimate-enveloppe` | [server/routes/tenderAi.ts:179](../server/routes/tenderAi.ts#L179) |
+| POST | `/api/tenders/:id/methodology/:noteId/draft-ai` | [server/routes/tenderAi.ts:248](../server/routes/tenderAi.ts#L248) |
+| POST | `/api/tenders/:id/methodology/prefill-sections` | [server/routes/tenderAi.ts:334](../server/routes/tenderAi.ts#L334) |
 | POST | `/api/test-smtp` | [server/routes/settings.ts:281](../server/routes/settings.ts#L281) |
 | GET | `/api/time_entries` | [server/routes/timeTracking.ts:109](../server/routes/timeTracking.ts#L109) |
 | POST | `/api/time_entries` | [server/routes/timeTracking.ts:125](../server/routes/timeTracking.ts#L125) |
@@ -850,7 +853,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/local-login` | [server/localAuthRoutes.ts:58](../server/localAuthRoutes.ts#L58) |
 | POST | `/local-setup` | [server/localAuthRoutes.ts:24](../server/localAuthRoutes.ts#L24) |
 | GET | `/local-status` | [server/localAuthRoutes.ts:20](../server/localAuthRoutes.ts#L20) |
-| GET | `/manifest.webmanifest` | [server.ts:1444](../server.ts#L1444) |
+| GET | `/manifest.webmanifest` | [server.ts:1446](../server.ts#L1446) |
 | DELETE | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:69](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L69) |
 | GET | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:68](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L68) |
 | POST | `/mcp` | [packages/archioffice-agents/src/server/mcp/httpServer.ts:30](../packages/archioffice-agents/src/server/mcp/httpServer.ts#L30) |
@@ -908,4 +911,4 @@ Ces expressions ne sont pas transformées en endpoints supposés.
 | GET | \`/api/shared/projects/:id/${set.path}\` | [server/routes/projectShareChantier.ts:276](../server/routes/projectShareChantier.ts#L276) |
 | PUT | \`/api/shared/projects/:id/${set.path}/:reserveId\` | [server/routes/projectShareChantier.ts:290](../server/routes/projectShareChantier.ts#L290) |
 | GET | \`/api/shared/projects/:id/${mode}\` | [server/routes/projectShareDocuments.ts:97](../server/routes/projectShareDocuments.ts#L97) |
-| POST | \`/api/tender-rss-sources/${connector}/preview\` | [server/routes/tenderRss.ts:157](../server/routes/tenderRss.ts#L157) |
+| POST | \`/api/tender-rss-sources/${connector}/preview\` | [server/routes/tenderRss.ts:158](../server/routes/tenderRss.ts#L158) |

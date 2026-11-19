@@ -26,6 +26,12 @@ async function assertGroupementContacts(supabaseAdmin: any, tenantId: string, me
   return true;
 }
 
+/** Coordonnée reçue d'un client : un nombre fini, sinon rien. */
+function finiteOrNull(v: unknown): number | null {
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
@@ -75,7 +81,7 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
   app.post("/api/tenders", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { id: providedId, title, client, submission_deadline, status, value, notes, description, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, evaluation_criteria_list, ville_execution, enveloppe_previsionnelle, groupement_retenu_list, honoraires_retenus_montant, fee_distribution, vat_rate, decimal_precision, exclusivite } = req.body;
+      const { id: providedId, title, client, submission_deadline, status, value, notes, description, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, evaluation_criteria_list, ville_execution, adresse_terrain, site_lat, site_lon, enveloppe_previsionnelle, groupement_retenu_list, honoraires_retenus_montant, fee_distribution, vat_rate, decimal_precision, exclusivite } = req.body;
       const erreurTranches = erreurTranchesJson(fee_distribution);
       if (erreurTranches) return res.status(400).json({ error: `Tranches invalides : ${erreurTranches}` });
       if (mandataire_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', mandataire_id, tenantId))) {
@@ -93,7 +99,7 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
       // réunion mise en file juste après peut référencer cet id immédiatement,
       // sans jamais avoir à le remapper une fois la synchro faite.
       const id = providedId || crypto.randomUUID();
-      const { error: te } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').insert({ id, title, client, submission_deadline, status: status || 'Draft', value: value || 0, notes: notes || '', description: description || null, mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null, enveloppe_previsionnelle: enveloppe_previsionnelle ?? null, honoraires_retenus_montant: honoraires_retenus_montant ?? null, fee_distribution: fee_distribution || null, vat_rate: vat_rate ?? 20, decimal_precision: decimal_precision ?? 2, exclusivite: exclusivite || null });
+      const { error: te } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').insert({ id, title, client, submission_deadline, status: status || 'Draft', value: value || 0, notes: notes || '', description: description || null, mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null, adresse_terrain: adresse_terrain || null, site_lat: finiteOrNull(site_lat), site_lon: finiteOrNull(site_lon), enveloppe_previsionnelle: enveloppe_previsionnelle ?? null, honoraires_retenus_montant: honoraires_retenus_montant ?? null, fee_distribution: fee_distribution || null, vat_rate: vat_rate ?? 20, decimal_precision: decimal_precision ?? 2, exclusivite: exclusivite || null });
       if (te) throw te;
       if (specialties_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));
       if (milestones_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').insert(milestonesForInsert(milestones_list, id));
@@ -131,7 +137,7 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
     try {
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { title, client, submission_deadline, status, value, notes, description, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, evaluation_criteria_list, ville_execution, enveloppe_previsionnelle, groupement_retenu_list, honoraires_retenus_montant, fee_distribution, vat_rate, decimal_precision, exclusivite } = req.body;
+      const { title, client, submission_deadline, status, value, notes, description, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, evaluation_criteria_list, ville_execution, adresse_terrain, site_lat, site_lon, enveloppe_previsionnelle, groupement_retenu_list, honoraires_retenus_montant, fee_distribution, vat_rate, decimal_precision, exclusivite } = req.body;
       const erreurTranches = erreurTranchesJson(fee_distribution);
       if (erreurTranches) return res.status(400).json({ error: `Tranches invalides : ${erreurTranches}` });
       if (mandataire_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', mandataire_id, tenantId))) {
@@ -143,7 +149,7 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
       if (!(await assertGroupementContacts(supabaseAdmin, tenantId, groupement_retenu_list))) {
         return res.status(400).json({ error: "Contact du groupement retenu introuvable pour ce cabinet." });
       }
-      const { error: ue } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').update({ title, client, submission_deadline, status, value: value || 0, notes: notes || '', description: description ?? null, mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null, enveloppe_previsionnelle: enveloppe_previsionnelle ?? null, honoraires_retenus_montant: honoraires_retenus_montant ?? null, fee_distribution: fee_distribution ?? null, vat_rate: vat_rate ?? 20, decimal_precision: decimal_precision ?? 2, exclusivite: exclusivite || null }).eq('id', id);
+      const { error: ue } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').update({ title, client, submission_deadline, status, value: value || 0, notes: notes || '', description: description ?? null, mandataire_id: mandataire_id || null, type, surface: surface || 0, construction_cost: construction_cost || 0, honoraires_percent: honoraires_percent || 0, complexity_rate: complexity_rate ?? null, base_fee_percent: base_fee_percent ?? null, miqcp_assessment: miqcp_assessment || null, mandatory_visit: !!mandatory_visit, visit_date: visit_date || null, withdrawal_deadline: withdrawal_deadline || null, archived: !!archived, ville_execution: ville_execution || null, adresse_terrain: adresse_terrain || null, site_lat: finiteOrNull(site_lat), site_lon: finiteOrNull(site_lon), enveloppe_previsionnelle: enveloppe_previsionnelle ?? null, honoraires_retenus_montant: honoraires_retenus_montant ?? null, fee_distribution: fee_distribution ?? null, vat_rate: vat_rate ?? 20, decimal_precision: decimal_precision ?? 2, exclusivite: exclusivite || null }).eq('id', id);
       if (ue) throw ue;
       await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').delete().eq('tender_id', id);
       if (specialties_list?.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').insert(specialties_list.map((s: any) => ({ id: crypto.randomUUID(), tender_id: id, specialty_name: s.specialty_name, contact_id: s.contact_id || null })));

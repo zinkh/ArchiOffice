@@ -29,6 +29,9 @@ import { useUser } from '../UserContext';
 import { formatCurrency, cn } from '../lib/utils';
 import { statusLabel } from '../lib/statusLabel';
 import LinkedMeetings from '../components/LinkedMeetings';
+import { TenderSiteMap } from '../components/TenderSiteMap';
+import { usableSiteAddress } from '../lib/tenderSiteAddress';
+import { useSettings } from '../hooks/useSettings';
 import { linkedMeetingsUrl } from '../lib/linkedMeetings';
 
 type TabId = 'apercu' | 'documents' | 'partenaires' | 'organigramme' | 'references' | 'methodologie' | 'honoraires' | 'reunions';
@@ -71,6 +74,7 @@ export default function TenderDetail() {
   const isEnterprise = tenantPlan === 'enterprise';
 
   const [tender, setTender] = useState<Tender | null>(null);
+  const { settings: agencySettings } = useSettings();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('apercu');
@@ -895,6 +899,19 @@ export default function TenderDetail() {
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Site du chantier : carte, distance depuis l'agence et isochrones */}
+            <div className="rounded-lg p-5 space-y-3" style={surfaceCardStyle()}>
+              <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-text)' }}>{t('tender_site_title')}</h3>
+              <TenderSiteMap
+                address={tender.adresse_terrain}
+                lat={tender.site_lat}
+                lon={tender.site_lon}
+                agencyAddress={agencySettings?.address}
+                suggestedAddress={usableSiteAddress(tender.ville_execution) || usableSiteAddress(sourceMatch?.ville_execution)}
+                onSiteChange={async site => { await saveTenderPatch({ adresse_terrain: site.address || null, site_lat: site.lat, site_lon: site.lon }); }}
+              />
             </div>
 
             {/* Correspondance */}
