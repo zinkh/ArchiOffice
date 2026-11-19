@@ -1296,7 +1296,7 @@ export default function Settings() {
     { key: 'profil', label: 'Mon profil', icon: IconUserCircle, adminOnly: false },
   ] as const;
   const visibleTabs = SETTINGS_TABS.filter(tab => isAdmin || !tab.adminOnly);
-  const [activeTab, setActiveTab] = useState<string>('cabinet');
+  const [activeTab, setActiveTab] = useState<string>(() => new URLSearchParams(location.search).get('tab') || 'cabinet');
   useEffect(() => {
     if (!visibleTabs.some(tab => tab.key === activeTab)) setActiveTab('profil');
   }, [isAdmin]);

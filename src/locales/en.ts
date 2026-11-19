@@ -4516,6 +4516,7 @@ export default {
       "correspondence_linked": "Attached",
       "correspondence_unlink": "Detach",
       "correspondence_none_connected": "Connect a mailbox to search for and attach emails to this record.",
+      "correspondence_open_settings": "Open mailbox settings",
       "correspondence_linked_empty": "No emails attached yet.",
       "correspondence_search_error": "Search failed.",
       "mailbox": "Mailbox",

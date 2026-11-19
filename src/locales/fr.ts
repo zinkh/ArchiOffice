@@ -4666,6 +4666,7 @@ export default {
       "correspondence_linked": "Rattaché",
       "correspondence_unlink": "Détacher",
       "correspondence_none_connected": "Connectez une messagerie pour rechercher et rattacher des emails à cette fiche.",
+      "correspondence_open_settings": "Ouvrir les réglages de messagerie",
       "correspondence_linked_empty": "Aucun email rattaché pour l'instant.",
       "correspondence_search_error": "Échec de la recherche.",
       "mailbox": "Boîte de réception",

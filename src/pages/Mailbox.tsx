@@ -6,6 +6,7 @@
 // listed live on demand, never stored beyond an explicit attach.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh, IconArchive, IconTrash, IconPencil, IconSearch, IconStar, IconStarFilled, IconArrowBackUp, IconArrowForwardUp } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import type { Project, Proposal, Tender } from '../types';
@@ -412,50 +413,11 @@ export default function Mailbox() {
             <span key={a.id} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
               <Icon size={13} />
               {a.displayName || a.email}
-              <button
-                onClick={() => setDefault(a.id)}
-                disabled={a.isDefault}
-                title={a.isDefault ? (t('mail_accounts_default') as string) : (t('mail_accounts_set_default') as string)}
-                className="disabled:opacity-100"
-                style={{ color: a.isDefault ? 'var(--tblr-warning)' : 'var(--tblr-muted)' }}
-              >
-                {a.isDefault ? <IconStarFilled size={13} /> : <IconStar size={13} />}
-              </button>
-              <button onClick={() => disconnect(a.id)} className="ml-1 hover:underline" style={{ color: 'var(--tblr-danger)' }}>{t('correspondence_disconnect')}</button>
             </span>
           );
         })}
-        <button onClick={connectGmail} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-          <IconBrandGoogle size={13} /> {t('correspondence_connect_gmail')}
-        </button>
-        <button onClick={connectOutlook} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-          <IconBrandWindows size={13} /> {t('correspondence_connect_outlook')}
-        </button>
-        <button onClick={() => setShowImapForm(v => !v)} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
-          <IconMailbox size={13} /> {t('correspondence_connect_imap')}
-        </button>
+        <Link to="/settings?tab=communication" className="text-xs underline" style={{ color: 'var(--tblr-primary)' }}>{t('correspondence_open_settings')}</Link>
       </div>
-
-      {showImapForm && (
-        <form onSubmit={connectImap} className="grid grid-cols-2 gap-2 p-3 rounded-lg" style={{ border: '1px solid var(--tblr-border)' }}>
-          <input required placeholder={t('correspondence_connect_imap_host') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.host} onChange={e => setImapForm({ ...imapForm, host: e.target.value })} />
-          <input required placeholder={t('correspondence_connect_imap_port') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.port} onChange={e => setImapForm({ ...imapForm, port: e.target.value })} />
-          <input required type="email" placeholder={t('correspondence_connect_imap_username') as string} className="p-2 rounded-lg text-sm col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.username} onChange={e => setImapForm({ ...imapForm, username: e.target.value })} />
-          <input required type="password" placeholder={t('correspondence_connect_imap_password') as string} className="p-2 rounded-lg text-sm col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.password} onChange={e => setImapForm({ ...imapForm, password: e.target.value })} />
-          <p className="col-span-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('correspondence_connect_imap_password_hint')}</p>
-          <p className="col-span-2 text-xs font-semibold uppercase tracking-wide mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('mail_accounts_smtp_section')}</p>
-          <input placeholder={t('correspondence_connect_imap_host') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.smtpHost} onChange={e => setImapForm({ ...imapForm, smtpHost: e.target.value })} />
-          <input placeholder={t('correspondence_connect_imap_port') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.smtpPort} onChange={e => setImapForm({ ...imapForm, smtpPort: e.target.value })} />
-          <input type="email" placeholder={t('correspondence_connect_imap_username') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.smtpUsername} onChange={e => setImapForm({ ...imapForm, smtpUsername: e.target.value })} />
-          <input type="password" placeholder={t('correspondence_connect_imap_password') as string} className="p-2 rounded-lg text-sm col-span-1" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} value={imapForm.smtpPassword} onChange={e => setImapForm({ ...imapForm, smtpPassword: e.target.value })} />
-          <div className="col-span-2 flex items-center gap-2">
-            <button type="submit" disabled={imapConnecting} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-60" style={{ background: 'var(--tblr-primary)', color: 'white' }}>
-              {imapConnecting && <IconLoader2 size={13} className="animate-spin" />} {t('correspondence_connect_imap_submit')}
-            </button>
-            <button type="button" onClick={() => setShowImapForm(false)} className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('btn_close') as string}</button>
-          </div>
-        </form>
-      )}
 
       {error && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-700 px-3 py-2 text-xs text-red-700 dark:text-red-400">
