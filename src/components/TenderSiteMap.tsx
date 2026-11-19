@@ -13,6 +13,7 @@ import { IconLoader2 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { pointInGeometry } from '../lib/terrainParcelles';
+import { sameSiteAddress } from '../lib/tenderSiteAddress';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
@@ -87,11 +88,13 @@ interface TenderSiteMapProps {
   lon?: number | null;
   /** Adresse du cabinet (Réglages), point de départ des trajets et des isochrones. */
   agencyAddress?: string | null;
+  /** Lieu d'exécution de l'annonce, déjà filtré (`usableSiteAddress`), proposé tant qu'aucune adresse n'est enregistrée. */
+  suggestedAddress?: string | null;
   placeholder?: string;
   onSiteChange: (site: TenderSiteChange) => void | Promise<void>;
 }
 
-export function TenderSiteMap({ address, lat, lon, agencyAddress, placeholder, onSiteChange }: TenderSiteMapProps) {
+export function TenderSiteMap({ address, lat, lon, agencyAddress, suggestedAddress, placeholder, onSiteChange }: TenderSiteMapProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState(address || '');
   const [geocodedSite, setGeocodedSite] = useState<Point | null>(null);
@@ -103,6 +106,9 @@ export function TenderSiteMap({ address, lat, lon, agencyAddress, placeholder, o
   const [isoStatus, setIsoStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [isoPartial, setIsoPartial] = useState(false);
   const [mapReady, setMapReady] = useState(false);
+  const [siteNotFound, setSiteNotFound] = useState(false);
+  const [applyingSuggestion, setApplyingSuggestion] = useState(false);
+  const persistedFor = useRef<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -114,11 +120,20 @@ export function TenderSiteMap({ address, lat, lon, agencyAddress, placeholder, o
   const storedSite: Point | null = Number.isFinite(lat) && Number.isFinite(lon) ? { lat: lat as number, lon: lon as number } : null;
   useEffect(() => {
     setGeocodedSite(null);
+    setSiteNotFound(false);
     if (storedSite || !address || address.trim().length < 3) return;
     let cancelled = false;
     apiFetch<{ lon: number; lat: number }>(`/api/geo/geocode?q=${encodeURIComponent(address)}`)
-      .then(r => { if (!cancelled) setGeocodedSite({ lon: r.lon, lat: r.lat }); })
-      .catch(() => { /* adresse introuvable : la carte reste masquée */ });
+      .then(r => {
+        if (cancelled) return;
+        setGeocodedSite({ lon: r.lon, lat: r.lat });
+        // Adresse reprise d'une annonce (sans coordonnées) : on les garde, une seule fois par adresse.
+        if (persistedFor.current !== address) {
+          persistedFor.current = address;
+          void onSiteChange({ address, lat: r.lat, lon: r.lon });
+        }
+      })
+      .catch(() => { if (!cancelled) setSiteNotFound(true); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, storedSite?.lon, storedSite?.lat]);
@@ -215,6 +230,20 @@ export function TenderSiteMap({ address, lat, lon, agencyAddress, placeholder, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, siteKey, agencyKey, sortedIsochrones, route]);
 
+  // « Utiliser » le lieu d'exécution de l'annonce : adresse telle que publiée, coordonnées géocodées.
+  const applySuggestion = async () => {
+    if (!suggestedAddress) return;
+    setApplyingSuggestion(true);
+    try {
+      let point: { lon: number; lat: number } | null = null;
+      try { point = await apiFetch<{ lon: number; lat: number }>(`/api/geo/geocode?q=${encodeURIComponent(suggestedAddress)}`); } catch { /* introuvable : adresse gardée sans coordonnées */ }
+      persistedFor.current = suggestedAddress;
+      await onSiteChange({ address: suggestedAddress, lat: point?.lat ?? null, lon: point?.lon ?? null });
+    } finally {
+      setApplyingSuggestion(false);
+    }
+  };
+
   const within = site && isoStatus === 'ready' && isochrones.length > 0 ? containingIsochrone(site, isochrones) : undefined;
   const withinLabel = within ? ISOCHRONES.find(i => i.seconds === within)?.label : null;
 
@@ -237,8 +266,22 @@ export function TenderSiteMap({ address, lat, lon, agencyAddress, placeholder, o
         }}
       />
 
+      {!address && suggestedAddress && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <span>{t('tender_site_suggestion', { address: suggestedAddress })}</span>
+          <button type="button" onClick={applySuggestion} disabled={applyingSuggestion} className="font-bold uppercase px-2.5 py-1 rounded-lg disabled:opacity-60" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+            {applyingSuggestion ? <IconLoader2 size={12} className="animate-spin inline" /> : t('tender_site_use_suggestion')}
+          </button>
+        </div>
+      )}
+      {address && sameSiteAddress(address, suggestedAddress) && (
+        <p className="text-xs italic" style={labelStyle}>{t('tender_site_from_announcement')}</p>
+      )}
+
       {!site ? (
-        <p className="text-xs italic" style={labelStyle}>{t('tender_site_no_address')}</p>
+        <p className="text-xs italic" style={labelStyle}>
+          {siteNotFound ? t('tender_site_not_found') : suggestedAddress && !address ? t('tender_site_no_address') : t('tender_site_manual_hint')}
+        </p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 text-sm">

@@ -30,6 +30,7 @@ import { formatCurrency, cn } from '../lib/utils';
 import { statusLabel } from '../lib/statusLabel';
 import LinkedMeetings from '../components/LinkedMeetings';
 import { TenderSiteMap } from '../components/TenderSiteMap';
+import { usableSiteAddress } from '../lib/tenderSiteAddress';
 import { useSettings } from '../hooks/useSettings';
 import { linkedMeetingsUrl } from '../lib/linkedMeetings';
 
@@ -908,7 +909,7 @@ export default function TenderDetail() {
                 lat={tender.site_lat}
                 lon={tender.site_lon}
                 agencyAddress={agencySettings?.address}
-                placeholder={tender.ville_execution || undefined}
+                suggestedAddress={usableSiteAddress(tender.ville_execution) || usableSiteAddress(sourceMatch?.ville_execution)}
                 onSiteChange={async site => { await saveTenderPatch({ adresse_terrain: site.address || null, site_lat: site.lat, site_lon: site.lon }); }}
               />
             </div>

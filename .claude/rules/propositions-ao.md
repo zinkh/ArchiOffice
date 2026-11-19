@@ -328,3 +328,10 @@ enregistrée AVEC ses coordonnées ; une fiche qui n'a qu'une adresse est géoco
 d'oiseau marquée `approximate`) et `GET /api/geo/isochrones` (30 min, 1 h, 1 h 30, 2 h en voiture, DEPUIS L'AGENCE ; une durée refusée par le
 service n'empêche pas les autres, elle est listée dans `failed`). Résultats mis en cache une heure ; rien du cabinet n'est envoyé, seulement
 une adresse ou des coordonnées. Le texte « le site se situe dans l'isochrone de X » vient de `containingIsochrone` (`pointInGeometry`).
+
+**Origine de l'adresse du site** (`src/lib/tenderSiteAddress.ts`, testé) : le « lieu d'exécution » de l'annonce (`ville_execution`) sert d'adresse quand
+`usableSiteAddress` le juge exploitable (jamais « Dépt. 57, 54 » ni « NUTS FRF31 », que les connecteurs écrivent à défaut). À la conversion d'une annonce
+(`POST /api/tender-rss-matches/:id/convert`) il est copié dans `tenders.adresse_terrain` ; la carte géocode alors l'adresse et enregistre ses coordonnées une
+fois. Sur une fiche sans adresse mais avec un lieu exploitable, la carte PROPOSE de l'utiliser (rien n'est écrit sans clic). Sinon l'architecte saisit
+l'adresse à la main dans le même champ. BOAMP (`lieuExecutionOf`) donne « adresse, code postal ville » quand la rubrique le permet. `siteAddressOf` (adresse de la
+fiche, à défaut lieu exploitable) alimente le prompt de « Rédiger avec IA » de la note méthodologique ; toute nouvelle lecture de l'adresse du site passe par elle.
