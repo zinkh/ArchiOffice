@@ -317,3 +317,14 @@ Logique pure et testée dans `src/lib/tranches.ts` (`src/lib/__tests__/tranches.
   ferme et conditionnel ; la liste des phases confiées ne répète pas une mission répartie sur plusieurs tranches) ;
   Excel : un groupe par tranche et les lignes « TOTAL TRANCHES FERMES / CONDITIONNELLES HT » (formules).
 
+
+### Appel d'offres : carte du site, distance depuis l'agence et isochrones
+
+Carte « Site du chantier » de l'onglet Aperçu de `/appels-offres/:id` (`src/components/TenderSiteMap.tsx`, MapLibre sur le plan IGN).
+`tenders.adresse_terrain`, `site_lat`, `site_lon` (`supabase/migrate_tender_site_address.sql`) : l'adresse choisie dans l'autocomplétion est
+enregistrée AVEC ses coordonnées ; une fiche qui n'a qu'une adresse est géocodée à l'affichage. Le point de départ est l'adresse du cabinet
+(`settings.address`, géocodée). Trois relais sans état vers la Géoplateforme de l'IGN, sans clé (`server/routes/geoTravel.ts`,
+`tests/geoTravel.test.ts`) : `GET /api/geo/geocode`, `GET /api/geo/route` (distance et durée par la route, repli sur la distance à vol
+d'oiseau marquée `approximate`) et `GET /api/geo/isochrones` (30 min, 1 h, 1 h 30, 2 h en voiture, DEPUIS L'AGENCE ; une durée refusée par le
+service n'empêche pas les autres, elle est listée dans `failed`). Résultats mis en cache une heure ; rien du cabinet n'est envoyé, seulement
+une adresse ou des coordonnées. Le texte « le site se situe dans l'isochrone de X » vient de `containingIsochrone` (`pointInGeometry`).

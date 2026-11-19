@@ -240,7 +240,8 @@ CREATE TABLE IF NOT EXISTS tenders (
   complexity_rate NUMERIC, base_fee_percent NUMERIC, miqcp_assessment TEXT,
   mandatory_visit BOOLEAN DEFAULT false, visit_date TEXT,
   withdrawal_deadline TEXT, archived BOOLEAN DEFAULT false,
-  ville_execution TEXT, description TEXT
+  ville_execution TEXT, description TEXT,
+  adresse_terrain TEXT, site_lat DOUBLE PRECISION, site_lon DOUBLE PRECISION
 );
 
 CREATE TABLE IF NOT EXISTS tender_specialties (

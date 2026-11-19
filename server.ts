@@ -59,6 +59,7 @@ import { registerPushRoutes } from "./server/routes/push";
 import { registerMessagingRoutes } from "./server/routes/messaging";
 import { registerContactSyncRoutes } from "./server/routes/contactSync";
 import { registerGeoProxyRoutes } from "./server/routes/geoProxy";
+import { registerGeoTravelRoutes } from "./server/routes/geoTravel";
 import { registerMafRoutes } from "./server/routes/maf";
 import { registerTimeTrackingRoutes } from "./server/routes/timeTracking";
 import { registerLeaveRoutes } from "./server/routes/leave";
@@ -1202,6 +1203,7 @@ export async function createApp() {
   registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerContactSyncRoutes(app, { supabaseAdmin, getTenantId });
   registerGeoProxyRoutes(app);
+  registerGeoTravelRoutes(app);
   registerMafRoutes(app, { supabaseAdmin, getTenantId });
   registerTimeTrackingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin });
   registerLeaveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin, businessDaysBetween });

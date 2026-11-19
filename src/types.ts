@@ -818,6 +818,10 @@ export interface Tender {
   evaluation_criteria_list?: TenderEvaluationCriterion[];
   archived?: boolean;
   ville_execution?: string;
+  // Adresse du site du chantier (carte, distance et isochrones de l'onglet Aperçu).
+  adresse_terrain?: string | null;
+  site_lat?: number | null;
+  site_lon?: number | null;
   // Enveloppe prévisionnelle des honoraires — saisie manuellement ou
   // recherchée par l'IA dans le DCE (plan Enterprise). Résultat de la
   // consultation, une fois connu : groupement retenu (plusieurs entreprises
