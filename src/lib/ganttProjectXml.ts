@@ -83,12 +83,12 @@ export function exportGanttProjectXml(project: Project, tasks: PlanningXmlTask[]
   const taskId = new Map(tasks.map((task, index) => [task.id, String(index + 1)]));
   const members = assignedMembers(tasks, team);
   const resourceId = new Map(members.map((member, index) => [member.id, String(index + 1)]));
-  const successors = new Map<string, string[]>();
+  const successors = new Map<string, { id: string; lag: number }[]>();
   for (const task of tasks) {
     for (const predecessor of task.dependencies || []) {
       if (!taskId.has(predecessor)) continue;
       const list = successors.get(predecessor) || [];
-      list.push(task.id);
+      list.push({ id: task.id, lag: task.xmlLags?.[predecessor] ?? 0 });
       successors.set(predecessor, list);
     }
   }
@@ -105,7 +105,7 @@ export function exportGanttProjectXml(project: Project, tasks: PlanningXmlTask[]
     '@_expand': 'true',
     ...(task.description ? { notes: task.description } : {}),
     ...(successors.get(task.id)?.length ? {
-      depend: successors.get(task.id)!.map(id => ({ '@_id': taskId.get(id), '@_type': '2', '@_difference': '0', '@_hardness': 'Strong' })),
+      depend: successors.get(task.id)!.map(s => ({ '@_id': taskId.get(s.id), '@_type': '2', '@_difference': String(s.lag), '@_hardness': 'Strong' })),
     } : {}),
         }));
   const nested = (parent?: string): any[] => tasks.flatMap((task, i) => task.xmlParentId === parent ? [{ ...nodes[i], task: nested(task.id) }] : []);
