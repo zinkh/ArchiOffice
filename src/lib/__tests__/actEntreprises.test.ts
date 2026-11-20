@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  destinatairesEntreprise, completerEmailsContact, radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
+  destinatairesEntreprise, completerEmailsContact, completerTelephoneContact, telephoneEntreprise, radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
 } from '../actEntreprises';
 
 const ent = (p: Partial<EntrepriseSuivi> = {}): EntrepriseSuivi => ({
@@ -208,5 +208,27 @@ describe('completerEmailsContact : adresse corrigée', () => {
   it('sans ancienne adresse sur la fiche, la nouvelle va dans un emplacement libre', () => {
     expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: 'b@x.fr' }, ['z@x.fr']))
       .toEqual({ email: 'b@x.fr' });
+  });
+});
+
+describe('completerTelephoneContact', () => {
+  it('place le numéro dans phone_work et phone quand la fiche n\'en a pas', () => {
+    expect(completerTelephoneContact({}, ' 03 29 58 37 99 ')).toEqual({ phone_work: '03 29 58 37 99', phone: '03 29 58 37 99' });
+  });
+
+  it('remplace le champ qui porte le numéro affiché', () => {
+    const contact = { phone_work: '', phone_mobile: '06 00 00 00 01', phone: '06 00 00 00 01' };
+    const patch = completerTelephoneContact(contact, '06 00 00 00 02');
+    expect(patch).toEqual({ phone_mobile: '06 00 00 00 02', phone: '06 00 00 00 02' });
+    expect(telephoneEntreprise({ contact_id: 'c' }, [{ id: 'c', ...contact, ...patch }])).toBe('06 00 00 00 02');
+  });
+
+  it('ne touche pas à phone quand il porte un autre numéro', () => {
+    expect(completerTelephoneContact({ phone_work: '01', phone: '02' }, '03')).toEqual({ phone_work: '03' });
+  });
+
+  it('rend null quand le numéro est inchangé ou vide', () => {
+    expect(completerTelephoneContact({ phone_work: '01 02 03 04 05' }, ' 01 02 03 04 05 ')).toBeNull();
+    expect(completerTelephoneContact({ phone_work: '01 02 03 04 05' }, '   ')).toBeNull();
   });
 });
