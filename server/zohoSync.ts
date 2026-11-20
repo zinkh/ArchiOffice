@@ -252,6 +252,19 @@ export async function flagInvoicesDeletedUpstream(
  * rather than a guess to avoid — see resolveOrCreateContactFromExternal in
  * server/invoiceClientContact.ts.
  */
+/**
+ * Zoho affiche un libellé (« Brouillon », « Draft »…) à la place du numéro d'une
+ * facture non numérotée. Ce n'est pas un numéro légal : le garder tel quel
+ * faisait échouer l'import du second brouillon sur l'index unique
+ * `idx_invoices_tenant_invoice_number`. Renvoie null pour ces libellés.
+ */
+export function zohoRealInvoiceNumber(raw: unknown): string | null {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return null;
+  if (/^(brouillon|draft|entwurf|borrador|bozza|concept|-+)$/i.test(value)) return null;
+  return value;
+}
+
 export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string, clientId: string | null = null): Record<string, unknown> {
   const total = Number(zohoInv?.total ?? 0);
   const untaxed = zohoInv?.sub_total != null ? Number(zohoInv.sub_total) : null;
@@ -263,7 +276,7 @@ export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string, clientId: 
     id: crypto.randomUUID(),
     tenant_id: tenantId,
     zoho_invoice_id: zohoInv.invoice_id,
-    invoice_number: zohoInv.invoice_number || null,
+    invoice_number: zohoRealInvoiceNumber(zohoInv.invoice_number),
     project_id: null,
     // The Maître d'Ouvrage this invoice is billed to — resolved by the
     // caller (server/routes/zohoInvoice.ts, zohoBooks.ts) via

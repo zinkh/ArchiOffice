@@ -97,3 +97,12 @@ describe('zohoLineItems : avancement par phase', () => {
     expect(line.description).toBe('Acompte');
   });
 });
+
+describe('zohoInvoiceToLocalRow : numéro des brouillons', () => {
+  it('ne garde pas le libellé « Brouillon » comme numéro de facture', async () => {
+    const { zohoInvoiceToLocalRow } = await import('../server/zohoSync');
+    expect(zohoInvoiceToLocalRow({ invoice_id: '1', invoice_number: 'Brouillon' }, 't').invoice_number).toBeNull();
+    expect(zohoInvoiceToLocalRow({ invoice_id: '2', invoice_number: ' draft ' }, 't').invoice_number).toBeNull();
+    expect(zohoInvoiceToLocalRow({ invoice_id: '3', invoice_number: 'FAC-000123' }, 't').invoice_number).toBe('FAC-000123');
+  });
+});
