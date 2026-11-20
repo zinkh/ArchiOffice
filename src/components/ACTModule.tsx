@@ -20,7 +20,7 @@ import {
 } from '../lib/actExport';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
 import ACTEntreprisesTable from './ACTEntreprisesTable';
-import { completerEmailsContact, destinatairesEntreprise } from '../lib/actEntreprises';
+import { completerEmailsContact, completerTelephoneContact, destinatairesEntreprise } from '../lib/actEntreprises';
 import { EntrepriseSearchDialog, type EntrepriseChoisie } from './EntrepriseSearchDialog';
 import { EntrepriseAddForm, type NouvelleEntreprise } from './EntrepriseAddForm';
 import { useQualifications } from '../hooks/useQualifications';
@@ -388,6 +388,18 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
       setExtraContacts(prev => [...prev.filter(c => c.id !== contact.id), { ...contact, ...patch }]);
     } catch (err) { console.error('Échec de la synchronisation des adresses vers le contact:', err); }
   }, [allContacts, entrepriseContacts, corpsEtat, corpsEtatCodesFromContact]);
+
+  /** Reporte sur la fiche contact le numéro saisi sur la ligne (voir completerTelephoneContact). */
+  const syncTelephoneToContact = useCallback(async (e: EntrepriseConsultee, numero: string) => {
+    const contact = allContacts.find(c => c.id === e.contact_id);
+    if (!contact) return;
+    const patch = completerTelephoneContact(contact, numero);
+    if (!patch) return;
+    try {
+      await apiFetch(`/api/contacts/${contact.id}`, { method: 'PUT', body: JSON.stringify(patch) });
+      setExtraContacts(prev => [...prev.filter(c => c.id !== contact.id), { ...contact, ...patch }]);
+    } catch (err) { console.error('Échec de la synchronisation du téléphone vers le contact:', err); }
+  }, [allContacts]);
 
   // Q&R form
   const [showQRForm, setShowQRForm] = useState(false);
@@ -1058,6 +1070,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               }}
               onCreateContact={(rowId, name) => setContactModalFor({ rowId, name })}
               onSyncEmails={(e, avant) => void syncEmailsToContact(e as EntrepriseConsultee, avant)}
+              onSyncTelephone={(e, numero) => void syncTelephoneToContact(e as EntrepriseConsultee, numero)}
             />
           </div>
         </div>

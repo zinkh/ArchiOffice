@@ -74,6 +74,8 @@ interface Props {
   onCreateContact: (rowId: string, name: string) => void;
   /** Appelé à la sortie des champs d'adresses : reporte les adresses saisies sur la fiche de l'entreprise. */
   onSyncEmails?: (e: EntrepriseRow, avant: string[]) => void;
+  /** Appelé à la sortie du champ téléphone : reporte le numéro saisi sur la fiche de l'entreprise. */
+  onSyncTelephone?: (e: EntrepriseRow, numero: string) => void;
   corpsEtatCodesFromContact: (contact: Contact) => string[];
   /** Qualifications des fiches contacts, par identifiant de contact. */
   qualifications?: Record<string, Qualification[]>;
@@ -115,6 +117,30 @@ function lireRegroupement(): Regroupement {
 }
 
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('fr-FR') : '');
+
+/**
+ * Téléphone de l'entreprise : la valeur vient de la fiche contact et la saisie y est reportée
+ * à la sortie du champ (jamais à chaque frappe). Sans fiche liée, le champ est grisé.
+ */
+function ChampTelephone({ valeur, nom, disabled, onCommit }: {
+  valeur: string; nom: string; disabled: boolean; onCommit: (numero: string) => void;
+}) {
+  const [saisie, setSaisie] = useState(valeur);
+  return (
+    <label className="mt-1 flex items-center gap-1 px-2 text-[var(--tblr-muted)]">
+      <IconPhone size={12} aria-hidden="true" className="shrink-0" />
+      <input
+        className="min-w-0 flex-1 text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-1.5 py-1 bg-transparent outline-none disabled:opacity-50"
+        type="tel" inputMode="tel" aria-label={`Téléphone de ${nom || "l'entreprise"}`}
+        placeholder={disabled ? 'Choisir une entreprise' : 'Téléphone'}
+        title={disabled ? "Sélectionnez ou créez la fiche de l'entreprise pour saisir son numéro" : 'Enregistré sur la fiche contact'}
+        value={saisie} disabled={disabled}
+        onChange={ev => setSaisie(ev.target.value)}
+        onBlur={() => { if (saisie.trim() && saisie.trim() !== valeur) onCommit(saisie); }}
+      />
+    </label>
+  );
+}
 
 // ── Envoi du DCE par mail ────────────────────────────────────────────────────
 // Les comptes mail ne sont lus qu'à l'ouverture, pas à chaque affichage du tableau.
@@ -279,7 +305,7 @@ function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPieces
 
 export default function ACTEntreprisesTable({
   projectName, lots, entreprises, onChange, dcePieces, documentsAffaire = [], entrepriseContacts,
-  corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact, onSyncEmails,
+  corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact, onSyncEmails, onSyncTelephone,
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
   depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null, genererPiecesMarche,
   dcePartages = [], onAjouterPartage, onRetirerPartage, onDocumentDepose,
@@ -420,7 +446,6 @@ export default function ACTEntreprisesTable({
         onFocus={() => entrerAdresses(e)}
         onBlur={() => quitterAdresses(e)}
       />
-      {telephoneEntreprise(e, contactsTelephone) && <a className="inline-flex items-center gap-1 text-[0.6875rem] text-[var(--tblr-muted)] hover:text-blue-600 whitespace-nowrap" href={`tel:${telephoneEntreprise(e, contactsTelephone).replace(/[^+0-9]/g, '')}`} title="Appeler l’entreprise"><IconPhone size={12} aria-hidden="true" />{telephoneEntreprise(e, contactsTelephone)}</a>}
       </div>
       <input
         className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
@@ -430,16 +455,24 @@ export default function ACTEntreprisesTable({
         onFocus={() => entrerAdresses(e)}
         onBlur={() => quitterAdresses(e)}
       />
-      {e.contact_id && (
-        <div className="mt-1 px-1">
-          <QualificationBadge
-            resume={resumeQualifications(qualifications[e.contact_id] || [], today)}
-            liste={qualifications[e.contact_id] || []}
-          />
-        </div>
-      )}
+      <ChampTelephone
+        key={`${e.id}:${telephoneEntreprise(e, contactsTelephone)}`}
+        valeur={telephoneEntreprise(e, contactsTelephone)}
+        nom={e.nom}
+        disabled={!e.contact_id}
+        onCommit={numero => onSyncTelephone?.(e, numero)}
+      />
     </>
   );
+
+  const champQualification = (e: EntrepriseRow) => e.contact_id
+    ? (
+      <QualificationBadge
+        resume={resumeQualifications(qualifications[e.contact_id] || [], today)}
+        liste={qualifications[e.contact_id] || []}
+      />
+    )
+    : <span className="text-[0.6875rem] text-[var(--tblr-muted)]">Aucune fiche</span>;
 
   const champCorps = (e: EntrepriseRow) => (
     <MultiSelectDropdown
@@ -558,7 +591,7 @@ export default function ACTEntreprisesTable({
 
   // ── Rendu ──────────────────────────────────────────────────────────────────
 
-  const nbCols = 8;
+  const nbCols = 9;
   const aucuneEntreprise = entreprises.length === 0;
   const pctOffres = resume.total ? Math.round((resume.parStatut.offre_recue / resume.total) * 100) : 0;
 
@@ -785,7 +818,7 @@ export default function ACTEntreprisesTable({
       {/* Liste */}
       {isDesktop ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1060px]">
+          <table className="w-full text-sm min-w-[1200px]">
             <thead className="bg-[var(--tblr-surface-2)]">
               <tr>
                 <th className={cn(TH, 'sticky left-0 z-[2] bg-[var(--tblr-surface-2)] min-w-[280px] w-[280px]')}>
@@ -795,6 +828,7 @@ export default function ACTEntreprisesTable({
                     Entreprise
                   </div>
                 </th>
+                <th className={cn(TH, 'min-w-[140px]')}>Qualification</th>
                 <th className={cn(TH, 'min-w-[200px]')}>Corps d'état</th>
                 <th className={cn(TH, 'min-w-[200px]')}>Lots assignés</th>
                 <th className={cn(TH, 'min-w-[220px]')}>Suivi</th>
@@ -822,6 +856,7 @@ export default function ACTEntreprisesTable({
                           <div className="flex-1 min-w-0">{champNom(e)}</div>
                         </div>
                       </td>
+                      <td className="px-3 py-2.5 pt-3.5">{champQualification(e)}</td>
                       <td className="px-3 py-2.5">{champCorps(e)}</td>
                       <td className="px-3 py-2.5">{champLots(e)}</td>
                       <td className="px-3 py-2.5">{champDates(e)}</td>
@@ -859,7 +894,7 @@ export default function ACTEntreprisesTable({
                       <div className="flex-1 min-w-0">{champNom(e)}</div>
                       {boutonsLigne(e)}
                     </div>
-                    <div className="flex items-center justify-between gap-2">{champStatut(e)}</div>
+                    <div className="flex items-center justify-between gap-2">{champStatut(e)}{champQualification(e)}</div>
                     <div className="grid grid-cols-1 gap-2">
                       {champCorps(e)}
                       {champLots(e)}

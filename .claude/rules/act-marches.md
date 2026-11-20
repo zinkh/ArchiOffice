@@ -50,6 +50,11 @@ migration).
   sans doublon (casse ignorée) ; au-delà de quatre adresses, le surplus reste sur la ligne. **Ligne sans fiche** : si
   elle a un nom et une adresse, la fiche d'une entreprise déjà connue est reprise (même adresse, puis même nom exact),
   sinon une fiche « Entreprise » est créée (nom, adresses, corps d'état de la ligne) et liée à la ligne. Aucune migration.
+- **Téléphone et qualification** : la colonne « Qualification » du tableau porte la pastille (`QualificationBadge`) ;
+  sous le nom de l'entreprise, le champ téléphone lit la fiche contact (`telephoneEntreprise`) et, à la sortie du
+  champ, y reporte le numéro saisi (`completerTelephoneContact`, `syncTelephoneToContact` dans `ACTModule.tsx`) :
+  il remplace le champ qui portait le numéro affiché, à défaut `phone_work`. Un champ vidé n'efface jamais la fiche.
+  Sans fiche liée à la ligne, le champ est grisé. Aucune migration, rien n'est copié dans la consultation.
 - **Envoi du DCE** : le bouton de ligne ouvre `MailComposeModal` (prop
   `initial`) prérempli avec les lots de l'entreprise et les pièces du DCE qui
   la concernent ; à l'envoi, `dce_transmis_le` est posée. Les pièces du DCE
