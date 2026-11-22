@@ -56,6 +56,7 @@ const toSnake: Record<string, string> = {
   architectName: 'architect_name', oaNumber: 'oa_number',
   notificationArchiveDays: 'notification_archive_days',
   googleContactsSyncCategories: 'google_contacts_sync_categories',
+  carddavSyncCategories: 'carddav_sync_categories',
   mailTriageAgentId: 'mail_triage_agent_id',
   mailInboxDomain: 'mail_inbox_domain',
 };
@@ -126,7 +127,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'architect_name', 'oa_number',
         'notification_archive_days',
         'tender_boamp_enabled', 'tender_ted_enabled',
-        'google_contacts_sync_categories',
+        'google_contacts_sync_categories', 'carddav_sync_categories',
         'mail_triage_agent_id', 'mail_inbox_domain',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits', 'invoice_payment_terms_days', 'archive_retention_years']);
