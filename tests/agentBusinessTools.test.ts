@@ -232,6 +232,24 @@ describe('outils métier : situations, notices, consultation, facture, agenda', 
         expect(put.consultation.entreprises).toHaveLength(3);
       });
 
+      it("pose offre_recue_le à aujourd'hui, sans écraser une date existante, et accepte une date donnée", async () => {
+        const aujourdhui = new Date().toISOString().slice(0, 10);
+        const m = stub({ ...routes, 'GET /api/contacts': [{ id: 'c9', company_name: 'Durand Couverture' }] });
+        const r = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Durand Couverture', montant_base_ht: 9000 }, { lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 900 }] });
+        const ents = sent(m, 'PUT', '/act')[0].consultation.entreprises;
+        expect(ents.find((e: any) => e.nom === 'Durand Couverture').offre_recue_le).toBe(aujourdhui);
+        expect(ents.find((e: any) => e.id === 'e1').offre_recue_le).toBe(aujourdhui);
+        expect(r.response.offre_recue_le_posee).toHaveLength(2);
+
+        const m2 = stub({ ...routes, 'GET /api/projects/p1/act': { consultation: { ...actOffres.consultation, entreprises: [{ ...actOffres.consultation.entreprises[0], offre_recue_le: '2026-10-01' }, actOffres.consultation.entreprises[1]] } } });
+        await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 950 }] });
+        expect(sent(m2, 'PUT', '/act')[0].consultation.entreprises[0].offre_recue_le).toBe('2026-10-01');
+        await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 960, offre_recue_le: '2026-11-12' }] });
+        expect(sent(m2, 'PUT', '/act')[1].consultation.entreprises[0].offre_recue_le).toBe('2026-11-12');
+        const bad = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 970, offre_recue_le: '12/11/2026' }] });
+        expect(bad.response.error).toBeDefined();
+      });
+
       it("n'ajoute pas l'entreprise quand la saisie est refusée", async () => {
         const m = stub({ ...routes, 'GET /api/contacts': [{ id: 'c9', company_name: 'Durand Couverture' }] });
         const r = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Durand Couverture', montant_base_ht: -1 }] });
@@ -240,7 +258,8 @@ describe('outils métier : situations, notices, consultation, facture, agenda', 
       });
 
       it('refuse un montant invalide et ne réécrit pas une valeur identique', async () => {
-        const m = stub(routes);
+        const avecDate = { consultation: { ...actOffres.consultation, entreprises: [{ ...actOffres.consultation.entreprises[0], offre_recue_le: '2026-10-01' }, actOffres.consultation.entreprises[1]] } };
+        const m = stub({ ...routes, 'GET /api/projects/p1/act': avecDate });
         const bad = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: -5 }] });
         expect(bad.response.error).toBeDefined();
         const same = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 1000 }] });

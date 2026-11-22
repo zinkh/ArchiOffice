@@ -99,7 +99,10 @@ de DCE ; `list_offres`, `set_offre` et `remove_offre` saisissent les prix REÇUS
 `consultation.offres[]`, jamais dans le DPGF qui reste l'estimation : `set_offre` n'écrit qu'un total HT
 (`mode_saisie: 'total'`), saisir une offre AJOUTE d'office l'entreprise aux entreprises consultées (fiche contact
 rapprochée comme pour `add`, `envoyer_dce: false` : elle a déjà le dossier) et le lot à ses lots, sans rien
-ajouter quand la saisie est refusée ; `remove_offre` ne retire jamais l'entreprise. Un lot saisi poste par poste n'est
+ajouter quand la saisie est refusée ; `remove_offre` ne retire jamais l'entreprise. Un montant saisi pose aussi
+`offre_recue_le` (statut « Offre reçue ») à la date du jour quand l'entreprise n'en a pas, ou à la date donnée
+(`offre_recue_le` de la ligne) ; une date déjà enregistrée n'est jamais écrasée d'office, et une entreprise
+marquée « ne répond pas » garde ce statut (avertissement dans la réponse). Un lot saisi poste par poste n'est
 écrasé qu'avec confirmation, `remove_offre` passe par la confirmation en deux temps ; les prix par article et
 les lignes de négociation restent à l'écran ; ne pose pas `offre_recue_le`, qui se règle par `update`. Limite :
 sans mode enregistré, une offre dont les prix sont arrivés par le portail de dépôt ou un ancien import PRO est

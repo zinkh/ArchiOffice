@@ -141,7 +141,7 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
       "update : [{entreprise (nom, contact_id ou id), lots?, dce_transmis_le?, relance_le?, offre_recue_le?, ne_repond_pas?, envoyer_dce?}] ; dates en YYYY-MM-DD. " +
       "remove : [{entreprise}] avec confirmation en deux temps. Ne prétends jamais avoir ENVOYÉ le DCE : poser dce_transmis_le enregistre une date, l'envoi se fait depuis l'écran. " +
       "OFFRES REÇUES (phase « Collecte des offres », un prix par lot et par entreprise, jamais dans le DPGF qui reste l'estimation) : " +
-      "list_offres (filtres facultatifs lot, entreprise) ; set_offre : offres = [{lot, entreprise (nom) ou contact_id, montant_base_ht (euros HT, total du lot), conforme?, motif_non_conformite?, note_technique? (0 à 100)}] ; saisir une offre AJOUTE d'office l'entreprise aux entreprises consultées (sans DCE à envoyer) et le lot à ses lots, inutile d'appeler add avant ; " +
+      "list_offres (filtres facultatifs lot, entreprise) ; set_offre : offres = [{lot, entreprise (nom) ou contact_id, montant_base_ht (euros HT, total du lot), conforme?, motif_non_conformite?, note_technique? (0 à 100)}] ; saisir une offre AJOUTE d'office l'entreprise aux entreprises consultées (sans DCE à envoyer) et le lot à ses lots, inutile d'appeler add avant ; la date de réception offre_recue_le est posée à aujourd'hui si elle est vide (ou à la date donnée), jamais écrasée d'office ; " +
       "un lot saisi poste par poste n'est écrasé qu'avec confirmation ; remove_offre : [{lot, entreprise}] avec confirmation en deux temps. Les prix par article se saisissent à l'écran. " +
       "Attention : l'écran ACT enregistre seul la consultation qu'il affiche ; modifie-la de préférence quand personne ne l'a ouverte.",
     parametersJsonSchema: {
@@ -158,6 +158,7 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
             properties: {
               lot: { type: 'string', description: 'Numéro du lot (« 02 ») ou identifiant' }, entreprise: { type: 'string', description: 'Nom, contact_id ou id de l\'entreprise consultée' },
               contact_id: { type: 'string', description: 'Fiche contact de l\'entreprise, si le nom est ambigu' },
+              offre_recue_le: { type: 'string', description: 'Date de réception YYYY-MM-DD ; par défaut aujourd\'hui si l\'entreprise n\'en a pas' },
               montant_base_ht: { type: 'number' }, conforme: { type: 'boolean' }, motif_non_conformite: { type: 'string' }, note_technique: { type: 'number' },
             },
           },
@@ -525,7 +526,7 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
   if (!items.length) return failure('offres est requis : [{lot, entreprise, montant_base_ht, conforme?, motif_non_conformite?, note_technique?}].');
   const next: Json[] = offres.map(o => ({ ...o }));
   const changes: Json[] = []; const non_traites: Json[] = []; const ecrasements: Json[] = []; const cibles: Json[] = [];
-  const entreprises_ajoutees: Json[] = []; const lots_ajoutes: Json[] = [];
+  const entreprises_ajoutees: Json[] = []; const lots_ajoutes: Json[] = []; const dates_posees: Json[] = []; const avertissements: Json[] = [];
 
   for (const it of items) {
     const label = `${text(it.entreprise) || text(it.contact_id) || '?'} / lot ${text(it.lot) || '?'}`;
@@ -555,6 +556,7 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
     if (it.conforme !== undefined) patch.conforme = !!it.conforme;
     if (it.motif_non_conformite !== undefined) patch.motif_nc = text(it.motif_non_conformite);
     if (!Object.keys(patch).length) { non_traites.push({ element: label, raison: 'rien à modifier' }); continue; }
+    if (it.offre_recue_le !== undefined && !ISO_DATE.test(text(it.offre_recue_le))) { non_traites.push({ element: label, raison: 'offre_recue_le : YYYY-MM-DD' }); continue; }
 
     // Saisir une offre fait entrer l'entreprise dans la consultation, et le lot dans ses lots.
     let ent = resolveEntreprise(it.entreprise ?? it.contact_id);
@@ -574,8 +576,13 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
     }
     const lotAjoute = !(ent.lots_ids || []).includes(lot.id);
     const existing = next.find(o => String(o.lot_id) === String(lot.id) && String(o.entreprise_id) === String(ent!.id));
-    if (!nouvelle && !lotAjoute && existing && Object.keys(patch).every(k => existing[k] === patch[k])) { non_traites.push({ element: label, raison: 'déjà à jour' }); continue; }
+    // Date de réception : celle donnée, sinon aujourd'hui quand un montant arrive et qu'aucune date n'est enregistrée (jamais écrasée d'office).
+    const datePosee = text(it.offre_recue_le) || (patch.montant_base !== undefined && !ent.offre_recue_le ? today() : '');
+    const dateAChanger = !!datePosee && ent.offre_recue_le !== datePosee;
+    if (!nouvelle && !lotAjoute && !dateAChanger && existing && Object.keys(patch).every(k => existing[k] === patch[k])) { non_traites.push({ element: label, raison: 'déjà à jour' }); continue; }
     if (nouvelle) entreprises_ajoutees.push({ nom: ent.nom, contact_id: ent.contact_id || null });
+    if (dateAChanger) { ent.offre_recue_le = datePosee; dates_posees.push({ entreprise: ent.nom, offre_recue_le: datePosee }); }
+    if (ent.ne_repond_pas && !avertissements.some(a => a.entreprise === ent!.nom)) avertissements.push({ entreprise: ent.nom, message: 'marquée « ne répond pas » : son statut reste « Ne répond pas » tant que cette case n\'est pas décochée (update ne_repond_pas: false).' });
     if (lotAjoute) { ent.lots_ids = [...(ent.lots_ids || []), lot.id]; lots_ajoutes.push({ entreprise: ent.nom, lot: lotNum(String(lot.id)) }); }
 
     if (patch.montant_base !== undefined && existing?.mode_saisie === 'postes' && existing.montant_base !== patch.montant_base) {
@@ -603,8 +610,10 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
       success: true, project_id: pid, [action === 'set_offre' ? 'enregistrees' : 'retirees']: changes,
       ...(entreprises_ajoutees.length ? { entreprises_ajoutees_a_la_consultation: entreprises_ajoutees } : {}),
       ...(lots_ajoutes.length ? { lots_ajoutes_aux_entreprises: lots_ajoutes } : {}),
+      ...(dates_posees.length ? { offre_recue_le_posee: dates_posees } : {}),
+      ...(avertissements.length ? { avertissements } : {}),
       ...(non_traites.length ? { non_traites } : {}), offres: next.map(view),
-      ...(action === 'set_offre' ? { rappel: "Le statut « Offre reçue » d'une entreprise se pose avec update (offre_recue_le) ; le DPGF n'est pas modifié." } : {}),
+      ...(action === 'set_offre' ? { rappel: "Le DPGF n'est pas modifié : les prix reçus restent à part de l'estimation." } : {}),
       record_url: recordUrl,
     },
     summary: `${plural(changes.length, `offre ${done}`, `offres ${done}s`)} (consultation)`,
