@@ -5,6 +5,7 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertPublicHttpUrl } from '../ssrfGuard';
 import { selectAllPages } from '../selectAllPages';
+import { PHONE_SLOTS, phonesForGoogle, phonesFromGoogle } from '../../src/lib/contactPhones';
 import { addToSyncIndex, allGoogleEmails, buildSyncIndex, emailsForGoogle, emailsFromGoogle, findExistingContact, nonEmptyFields, type SyncContactRow } from '../contactSyncMatch';
 
 export interface RouteDeps {
@@ -18,14 +19,14 @@ export interface RouteDeps {
 function mapGooglePersonToContactFields(person: any) {
   const name = person.names?.[0] || {};
   const emails = emailsFromGoogle(person.emailAddresses);
-  const phone = person.phoneNumbers?.[0]?.value || '';
+  const phones = phonesFromGoogle(person.phoneNumbers);
   const org = person.organizations?.[0] || {};
   const addr = person.addresses?.[0] || {};
   return {
     first_name: name.givenName || '',
     last_name: name.familyName || '',
     ...emails,
-    phone,
+    ...phones,
     company_name: org.name || '',
     job_title: org.title || '',
     city: addr.city || '',
@@ -41,7 +42,7 @@ function buildGooglePersonPayload(contact: any) {
   return {
     names: [{ givenName: contact.first_name || '', familyName: contact.last_name || '' }],
     emailAddresses: emailsForGoogle(contact),
-    phoneNumbers: contact.phone ? [{ value: contact.phone }] : [],
+    phoneNumbers: phonesForGoogle(contact),
     organizations: (contact.company_name || contact.job_title)
       ? [{ name: contact.company_name || '', title: contact.job_title || '' }] : [],
     addresses: (contact.city || contact.zip || contact.country)
@@ -225,9 +226,9 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
                   // Google side is more recent — pull it into the local
                   // contact instead of overwriting the newer data with ours.
                   const fields: Record<string, any> = mapGooglePersonToContactFields(googlePerson);
-                  // Une adresse absente côté Google n'efface pas celle de la fiche : une fiche
-                  // jamais envoyée avec ses types n'a, chez Google, qu'une partie de ses adresses.
-                  for (const key of ['email', 'email_work', 'email_home', 'email_other']) {
+                  // Une adresse ou un numéro absent côté Google n'efface pas celui de la fiche : une
+                  // fiche jamais envoyée avec ses types n'a, chez Google, qu'une partie de ses valeurs.
+                  for (const key of ['email', 'email_work', 'email_home', 'email_other', 'phone', ...PHONE_SLOTS]) {
                     if (!fields[key]) delete fields[key];
                   }
                   await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')

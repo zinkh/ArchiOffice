@@ -10,6 +10,7 @@ import { requestGoogleAccessToken } from '../lib/googleAuth';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { ContactFormFields } from '../components/ContactFormFields';
 import { ensureContactCategory } from '../lib/contactCategories';
+import { legacyPhoneSlot, PHONE_SLOTS } from '../lib/contactPhones';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
@@ -271,7 +272,13 @@ export default function Contacts() {
     // formulaire ne lit que les champs par type. On la présente comme adresse de travail ;
     // rien n'est écrit tant qu'on n'enregistre pas, et `email` reste égal à `email_work`.
     const legacyOnly = !!contact.email?.trim() && !contact.email_work && !contact.email_home && !contact.email_other;
-    setNewContact(legacyOnly ? { ...contact, email_work: contact.email } : contact);
+    const legacyPhoneOnly = !!contact.phone?.trim() && PHONE_SLOTS.every(slot => !contact[slot]);
+    setNewContact({
+      ...contact,
+      ...(legacyOnly ? { email_work: contact.email } : {}),
+      // Même chose pour le téléphone : mobile ou fixe selon la forme du numéro (06/07 ou non).
+      ...(legacyPhoneOnly ? { [legacyPhoneSlot(contact.phone)]: contact.phone } : {}),
+    });
     setIsEditing(true);
     setEditingId(contact.id);
     setIsModalOpen(true);
