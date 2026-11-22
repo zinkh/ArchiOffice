@@ -6,6 +6,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertPublicHttpUrl } from '../ssrfGuard';
 import { selectAllPages } from '../selectAllPages';
 import { PHONE_SLOTS, phonesForGoogle, phonesFromGoogle } from '../../src/lib/contactPhones';
+import { vcardTypedValues } from '../vcardTypedValues';
 import { addToSyncIndex, allGoogleEmails, buildSyncIndex, emailsForGoogle, emailsFromGoogle, findExistingContact, nonEmptyFields, type SyncContactRow } from '../contactSyncMatch';
 
 export interface RouteDeps {
@@ -337,21 +338,23 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
 
       for (const vcard of vcards) {
         const fullName = getField(vcard, 'FN');
-        const email = getField(vcard, 'EMAIL');
-        const phone = getField(vcard, 'TEL');
+        // Toutes les adresses et tous les numéros, avec leur type (travail, domicile, mobile...) :
+        // rangés comme ceux de Google Contacts (voir vcardTypedValues.ts).
+        const emails = emailsFromGoogle(vcardTypedValues(vcard, 'EMAIL'));
+        const phones = phonesFromGoogle(vcardTypedValues(vcard, 'TEL'));
         const org = getField(vcard, 'ORG');
         const nField = getField(vcard, 'N');
         const nameParts = nField.split(';');
         const lastName = nameParts[0] || '';
         const firstName = nameParts[1] || (fullName.split(' ')[0] || '');
 
-        if (!fullName && !email) continue;
+        if (!fullName && !emails.email) continue;
 
         const fields = {
           first_name: firstName,
           last_name: lastName || fullName,
-          email: email,
-          phone: phone,
+          ...emails,
+          ...phones,
           company_name: org.split(';')[0] || '',
         };
         const existing = findExistingContact(index, fields);
