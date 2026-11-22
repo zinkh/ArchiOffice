@@ -18,6 +18,7 @@ import type { FunctionDeclarationLike } from './toolTypes.js';
 import type { InternalAuth } from './internalApi.js';
 import { buildRecordUrl } from './recordLinks.js';
 import { createContactResolver, failure, makeRequest, norm, plural, text, type Json, type ToolRequest } from './toolRequest.js';
+import { manageOffresPostes } from './consultationPostes.js';
 
 type Result = { response: Json; summary?: string };
 
@@ -143,13 +144,16 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
       "OFFRES REÇUES (phase « Collecte des offres », un prix par lot et par entreprise, jamais dans le DPGF qui reste l'estimation) : " +
       "list_offres (filtres facultatifs lot, entreprise) ; set_offre : offres = [{lot, entreprise (nom) ou contact_id, montant_base_ht (euros HT, total du lot), conforme?, motif_non_conformite?, note_technique? (0 à 100)}] ; saisir une offre AJOUTE d'office l'entreprise aux entreprises consultées (sans DCE à envoyer) et le lot à ses lots, inutile d'appeler add avant ; la date de réception offre_recue_le est posée à aujourd'hui si elle est vide (ou à la date donnée), jamais écrasée d'office ; " +
       "un devis qui ne couvre qu'une partie du lot se marque partielle: true avec perimetre (« Chape uniquement ») : il reste visible mais n'est jamais classé, noté ni pris pour moins-disant ; " +
-      "un lot saisi poste par poste n'est écrasé qu'avec confirmation ; remove_offre : [{lot, entreprise}] avec confirmation en deux temps. Les prix par article se saisissent à l'écran. " +
+      "un lot saisi poste par poste n'est écrasé qu'avec confirmation ; remove_offre : [{lot, entreprise}] avec confirmation en deux temps. " +
+      "set_postes : saisie du DÉTAIL d'un devis dans le DPGF de référence, offres = [{lot, entreprise, postes: [{numero, prix_unitaire | pour_memoire: true}], postes_ajoutes?: [{numero?, designation, unite?, quantite?, prix_unitaire}]}] : " +
+      "le total du lot est CALCULÉ d'après les prix (jamais saisi) et le lot passe en mode postes ; remplacer un total déjà saisi demande confirmation ; " +
+      "une ligne de devis qui regroupe plusieurs postes ou n'en a aucun se saisit en postes_ajoutes (jamais répartie entre postes) ; un numéro inconnu refuse le lot entier ; le DPGF (estimation) n'est jamais modifié ; rejouer est sans risque. " +
       "Attention : l'écran ACT enregistre seul la consultation qu'il affiche ; modifie-la de préférence quand personne ne l'a ouverte.",
     parametersJsonSchema: {
       type: 'object',
       properties: {
         project_id: projectId,
-        action: { type: 'string', enum: ['list', 'add', 'update', 'remove', 'list_offres', 'set_offre', 'remove_offre'] },
+        action: { type: 'string', enum: ['list', 'add', 'update', 'remove', 'list_offres', 'set_offre', 'set_postes', 'remove_offre'] },
         lot: { type: 'string', description: 'list_offres : numéro de lot à filtrer' },
         entreprise: { type: 'string', description: 'list_offres : entreprise à filtrer (nom, contact_id ou id)' },
         offres: {
@@ -159,6 +163,24 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
             properties: {
               lot: { type: 'string', description: 'Numéro du lot (« 02 ») ou identifiant' }, entreprise: { type: 'string', description: 'Nom, contact_id ou id de l\'entreprise consultée' },
               contact_id: { type: 'string', description: 'Fiche contact de l\'entreprise, si le nom est ambigu' },
+              postes: {
+                type: 'array', description: "set_postes : un P.U. HT par poste du DPGF de ce lot",
+                items: {
+                  type: 'object',
+                  properties: {
+                    numero: { type: 'string', description: 'Numéro du poste dans le lot (« 3.1 », ou « 02.3.1 »)' }, id: { type: 'string', description: 'Identifiant du poste (read_dpgf), si le numéro est ambigu' },
+                    prix_unitaire: { type: 'number', description: 'P.U. HT en euros ; absent si pour_memoire' },
+                    pour_memoire: { type: 'boolean', description: 'Poste non chiffré par l\'entreprise (pour mémoire, en consultation) : jamais un prix de 0' },
+                  },
+                },
+              },
+              postes_ajoutes: {
+                type: 'array', description: "set_postes : lignes du devis sans poste correspondant dans le DPGF (ou regroupant plusieurs postes) : elles restent attachées à l'offre",
+                items: {
+                  type: 'object',
+                  properties: { numero: { type: 'string' }, designation: { type: 'string' }, unite: { type: 'string' }, quantite: { type: 'number' }, prix_unitaire: { type: 'number' }, pour_memoire: { type: 'boolean' } },
+                },
+              },
               offre_recue_le: { type: 'string', description: 'Date de réception YYYY-MM-DD ; par défaut aujourd\'hui si l\'entreprise n\'en a pas' },
               partielle: { type: 'boolean', description: "Devis partiel : ne chiffre qu'une partie du lot (spécialiste en chape...). Jamais classé ni pris pour moins-disant." },
               perimetre: { type: 'string', description: "Ce que couvre une offre partielle (« Chape liquide uniquement »)" },
@@ -418,7 +440,13 @@ async function manageConsultation(request: ToolRequest, pid: string, args: Json)
   if (['list_offres', 'set_offre', 'remove_offre'].includes(action)) {
     return await manageOffres({ request, pid, action, args, consultation, current, lots, lotNum, recordUrl });
   }
-  if (!['add', 'update', 'remove'].includes(action)) return failure('action doit valoir list, add, update, remove, list_offres, set_offre ou remove_offre.');
+  if (action === 'set_postes') {
+    return await manageOffresPostes({
+      request, pid, args, consultation, entreprises: current, lots, lotNum, recordUrl,
+      ecrireConsultation: items => manageOffres({ request, pid, action: 'set_offre', args: { ...args, offres: items }, consultation, current, lots, lotNum, recordUrl, modePostes: true }),
+    });
+  }
+  if (!['add', 'update', 'remove'].includes(action)) return failure('action doit valoir list, add, update, remove, list_offres, set_offre, set_postes ou remove_offre.');
   const items = asItems(args.entreprises);
   if (!items.length) return failure('entreprises est requis.');
 
@@ -496,6 +524,8 @@ async function manageConsultation(request: ToolRequest, pid: string, args: Json)
 interface OffresCtx {
   request: ToolRequest; pid: string; action: string; args: Json; consultation: Json;
   current: Json[]; lots: Json[]; lotNum: (id: string) => unknown; recordUrl: string;
+  /** Appel interne de `set_postes` : le total est calculé d'après les prix, le lot passe en « postes ». */
+  modePostes?: boolean;
 }
 
 /**
@@ -550,7 +580,7 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
       const m = typeof it.montant_base_ht === 'number' ? it.montant_base_ht : Number(String(it.montant_base_ht).replace(/\s/g, '').replace(',', '.'));
       if (!Number.isFinite(m) || m < 0) { non_traites.push({ element: label, raison: 'montant_base_ht : nombre positif ou nul, en euros HT' }); continue; }
       patch.montant_base = Math.round(m * 100) / 100;
-      patch.mode_saisie = 'total';
+      patch.mode_saisie = c.modePostes ? 'postes' : 'total';
     }
     if (it.note_technique !== undefined) {
       const n = Number(it.note_technique);
@@ -593,7 +623,7 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
     if (ent.ne_repond_pas && !avertissements.some(a => a.entreprise === ent!.nom)) avertissements.push({ entreprise: ent.nom, message: 'marquée « ne répond pas » : son statut reste « Ne répond pas » tant que cette case n\'est pas décochée (update ne_repond_pas: false).' });
     if (lotAjoute) { ent.lots_ids = [...(ent.lots_ids || []), lot.id]; lots_ajoutes.push({ entreprise: ent.nom, lot: lotNum(String(lot.id)) }); }
 
-    if (patch.montant_base !== undefined && existing?.mode_saisie === 'postes' && existing.montant_base !== patch.montant_base) {
+    if (!c.modePostes && patch.montant_base !== undefined && existing?.mode_saisie === 'postes' && existing.montant_base !== patch.montant_base) {
       ecrasements.push({ lot: lotNum(String(lot.id)), entreprise: ent.nom, total_calcule_actuel: existing.montant_base, nouveau_total: patch.montant_base });
     }
     if (existing) Object.assign(existing, patch);
@@ -608,7 +638,7 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
   } else if (ecrasements.length && args.confirm !== true) {
     return confirmation(ecrasements, { avertissement: "Ces offres sont saisies poste par poste : saisir un total remplace le montant calculé d'après les prix de chaque article (les prix restent enregistrés mais ne sont plus comptés).", ...(non_traites.length ? { non_traites } : {}) });
   }
-  if (!changes.length) return failure("Aucune modification n'a pu être faite.", { non_traites });
+  if (!changes.length) return failure("Aucune modification n'a pu être faite.", { non_traites, aucune_modification: true });
 
   const { res, json } = await request(`/api/projects/${encodeURIComponent(pid)}/act`, 'PUT', { consultation: { ...EMPTY_CONSULTATION, ...consultation, entreprises: nextEnt, offres: next } });
   if (!res.ok) return failure(json?.error || `Enregistrement impossible (HTTP ${res.status}).`);

@@ -103,7 +103,20 @@ ajouter quand la saisie est refusée ; `remove_offre` ne retire jamais l'entrepr
 `offre_recue_le` (statut « Offre reçue ») à la date du jour quand l'entreprise n'en a pas, ou à la date donnée
 (`offre_recue_le` de la ligne) ; une date déjà enregistrée n'est jamais écrasée d'office, et une entreprise
 marquée « ne répond pas » garde ce statut (avertissement dans la réponse). Un devis qui ne couvre qu'une partie
-du lot (spécialiste en chape) se marque `partielle: true` avec `perimetre` : voir `.claude/rules/act-marches.md`. Un lot saisi poste par poste n'est
+du lot (spécialiste en chape) se marque `partielle: true` avec `perimetre` : voir `.claude/rules/act-marches.md`.
+`set_postes` (`consultationPostes.ts`, testé dans `tests/agentConsultationPostes.test.ts`) saisit le DÉTAIL d'un devis dans
+le DPGF de référence : `offres: [{lot, entreprise, postes: [{numero | id, prix_unitaire | pour_memoire: true}],
+postes_ajoutes?: [{numero?, designation, unite?, quantite?, prix_unitaire | pour_memoire}]}]`. Il écrit ce que l'écran écrit
+(`dpgfs.offres`, `OffreDocument.prix`, offre « Saisie manuelle » créée au besoin, prix corrigé là où il est déjà ; mêmes
+règles que `repartirSaisie`, recopiées car ce paquet n'importe rien de `src/`), puis le lot passe en `mode_saisie:
+'postes'` avec un `montant_base` DÉDUIT des prix (jamais saisi). Ordre : la consultation d'abord (elle ajoute l'entreprise,
+le lot et la date de réception par `set_offre`), puis les prix ; un échec du second temps le dit et rejouer est sans risque.
+Garde-fous : un numéro inconnu ou ambigu refuse le LOT entier (rien n'est écrit, la liste des numéros possibles est
+rendue) ; `pour_memoire` n'est jamais 0 ; remplacer un total saisi à la main demande confirmation (ancien et nouveau
+total) ; une ligne de devis qui regroupe plusieurs postes se saisit en `postes_ajoutes`, JAMAIS répartie entre postes, et
+rejouer la même ligne (même numéro et désignation) la met à jour sans la doubler ; le DPGF n'est jamais modifié.
+Limites : DPGF seulement (une consultation sur le bordereau est refusée) ; un total d'article « option » n'entre pas dans
+le total du lot, comme à l'écran. Un lot saisi poste par poste n'est
 écrasé qu'avec confirmation, `remove_offre` passe par la confirmation en deux temps ; les prix par article et
 les lignes de négociation restent à l'écran ; ne pose pas `offre_recue_le`, qui se règle par `update`. Limite :
 sans mode enregistré, une offre dont les prix sont arrivés par le portail de dépôt ou un ancien import PRO est
