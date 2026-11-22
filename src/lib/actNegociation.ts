@@ -68,6 +68,8 @@ export interface OffreMontant {
   entreprise_id: string;
   montant_base: number;
   conforme?: boolean;
+  /** Devis d'un spécialiste qui ne chiffre qu'une partie du lot : jamais comparé aux offres complètes. */
+  partielle?: boolean;
 }
 
 const arrondi = (n: number) => Math.round(n * 100) / 100;
@@ -203,12 +205,16 @@ export interface RepereLot {
   nbOffres: number;
 }
 
-/** Une offre entre dans la comparaison si elle est conforme, non écartée et chiffrée. */
+/**
+ * Une offre entre dans la comparaison si elle est conforme, non écartée, chiffrée et COMPLÈTE :
+ * une offre partielle (chape seule d'un lot de revêtements, par exemple) serait sinon le moins-disant
+ * et tirerait la moyenne vers le bas.
+ */
 export function offresComparables(
   offres: OffreMontant[], negociations: Negociation[] | undefined, lot_id: string,
 ): { offre: OffreMontant; neg: Negociation | undefined }[] {
   return offres
-    .filter(o => o.lot_id === lot_id && o.conforme !== false && o.montant_base > 0)
+    .filter(o => o.lot_id === lot_id && o.conforme !== false && !o.partielle && o.montant_base > 0)
     .map(offre => ({ offre, neg: trouverNegociation(negociations, lot_id, offre.entreprise_id) }))
     .filter(x => !x.neg?.ecartee);
 }

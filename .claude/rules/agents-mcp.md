@@ -102,7 +102,8 @@ rapprochée comme pour `add`, `envoyer_dce: false` : elle a déjà le dossier) e
 ajouter quand la saisie est refusée ; `remove_offre` ne retire jamais l'entreprise. Un montant saisi pose aussi
 `offre_recue_le` (statut « Offre reçue ») à la date du jour quand l'entreprise n'en a pas, ou à la date donnée
 (`offre_recue_le` de la ligne) ; une date déjà enregistrée n'est jamais écrasée d'office, et une entreprise
-marquée « ne répond pas » garde ce statut (avertissement dans la réponse). Un lot saisi poste par poste n'est
+marquée « ne répond pas » garde ce statut (avertissement dans la réponse). Un devis qui ne couvre qu'une partie
+du lot (spécialiste en chape) se marque `partielle: true` avec `perimetre` : voir `.claude/rules/act-marches.md`. Un lot saisi poste par poste n'est
 écrasé qu'avec confirmation, `remove_offre` passe par la confirmation en deux temps ; les prix par article et
 les lignes de négociation restent à l'écran ; ne pose pas `offre_recue_le`, qui se règle par `update`. Limite :
 sans mode enregistré, une offre dont les prix sont arrivés par le portail de dépôt ou un ancien import PRO est

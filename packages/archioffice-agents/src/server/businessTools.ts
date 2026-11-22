@@ -142,6 +142,7 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
       "remove : [{entreprise}] avec confirmation en deux temps. Ne prétends jamais avoir ENVOYÉ le DCE : poser dce_transmis_le enregistre une date, l'envoi se fait depuis l'écran. " +
       "OFFRES REÇUES (phase « Collecte des offres », un prix par lot et par entreprise, jamais dans le DPGF qui reste l'estimation) : " +
       "list_offres (filtres facultatifs lot, entreprise) ; set_offre : offres = [{lot, entreprise (nom) ou contact_id, montant_base_ht (euros HT, total du lot), conforme?, motif_non_conformite?, note_technique? (0 à 100)}] ; saisir une offre AJOUTE d'office l'entreprise aux entreprises consultées (sans DCE à envoyer) et le lot à ses lots, inutile d'appeler add avant ; la date de réception offre_recue_le est posée à aujourd'hui si elle est vide (ou à la date donnée), jamais écrasée d'office ; " +
+      "un devis qui ne couvre qu'une partie du lot se marque partielle: true avec perimetre (« Chape uniquement ») : il reste visible mais n'est jamais classé, noté ni pris pour moins-disant ; " +
       "un lot saisi poste par poste n'est écrasé qu'avec confirmation ; remove_offre : [{lot, entreprise}] avec confirmation en deux temps. Les prix par article se saisissent à l'écran. " +
       "Attention : l'écran ACT enregistre seul la consultation qu'il affiche ; modifie-la de préférence quand personne ne l'a ouverte.",
     parametersJsonSchema: {
@@ -159,6 +160,8 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
               lot: { type: 'string', description: 'Numéro du lot (« 02 ») ou identifiant' }, entreprise: { type: 'string', description: 'Nom, contact_id ou id de l\'entreprise consultée' },
               contact_id: { type: 'string', description: 'Fiche contact de l\'entreprise, si le nom est ambigu' },
               offre_recue_le: { type: 'string', description: 'Date de réception YYYY-MM-DD ; par défaut aujourd\'hui si l\'entreprise n\'en a pas' },
+              partielle: { type: 'boolean', description: "Devis partiel : ne chiffre qu'une partie du lot (spécialiste en chape...). Jamais classé ni pris pour moins-disant." },
+              perimetre: { type: 'string', description: "Ce que couvre une offre partielle (« Chape liquide uniquement »)" },
               montant_base_ht: { type: 'number' }, conforme: { type: 'boolean' }, motif_non_conformite: { type: 'string' }, note_technique: { type: 'number' },
             },
           },
@@ -508,6 +511,7 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
   const view = (o: Json) => ({
     lot: lotNum(String(o.lot_id)), entreprise: nomEntreprise(String(o.entreprise_id)), montant_base_ht: o.montant_base ?? 0,
     mode_saisie: o.mode_saisie ?? (o.montant_base ? 'total' : null), conforme: o.conforme !== false, motif_non_conformite: o.motif_nc || null, note_technique: o.note_technique ?? 0,
+    partielle: !!o.partielle, perimetre: o.partielle ? (o.perimetre || null) : null,
   });
   const resolveLot = (ref: unknown) => lots.find(l => String(l.id) === text(ref) || norm(l.lot_number) === norm(ref));
   const resolveEntreprise = (ref: unknown) => nextEnt.find(e => String(e.id) === text(ref) || (text(ref) && e.contact_id === text(ref)) || norm(e.nom) === norm(ref));
@@ -555,6 +559,10 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
     }
     if (it.conforme !== undefined) patch.conforme = !!it.conforme;
     if (it.motif_non_conformite !== undefined) patch.motif_nc = text(it.motif_non_conformite);
+    // Offre partielle (devis d'un spécialiste qui ne chiffre qu'une partie du lot) : jamais classée ni prise pour moins-disante.
+    if (it.partielle !== undefined) patch.partielle = !!it.partielle;
+    if (it.perimetre !== undefined) patch.perimetre = text(it.perimetre);
+    if (patch.partielle === false) patch.perimetre = '';
     if (!Object.keys(patch).length) { non_traites.push({ element: label, raison: 'rien à modifier' }); continue; }
     if (it.offre_recue_le !== undefined && !ISO_DATE.test(text(it.offre_recue_le))) { non_traites.push({ element: label, raison: 'offre_recue_le : YYYY-MM-DD' }); continue; }
 

@@ -250,6 +250,21 @@ describe('outils métier : situations, notices, consultation, facture, agenda', 
         expect(bad.response.error).toBeDefined();
       });
 
+      it('marque une offre partielle avec son périmètre, et le retire quand elle ne l\'est plus', async () => {
+        const m = stub(routes);
+        const r = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 1000, partielle: true, perimetre: 'Chape liquide uniquement' }] });
+        expect(r.response.success).toBe(true);
+        expect(sent(m, 'PUT', '/act')[0].consultation.offres.find((o: any) => o.id === 'o1')).toMatchObject({ partielle: true, perimetre: 'Chape liquide uniquement', montant_base: 1000 });
+        expect(r.response.offres.find((o: any) => o.entreprise === 'Dupont SARL')).toMatchObject({ partielle: true, perimetre: 'Chape liquide uniquement' });
+
+        const partielle = { consultation: { ...actOffres.consultation, offres: [{ ...actOffres.consultation.offres[0], partielle: true, perimetre: 'Chape' }, actOffres.consultation.offres[1]] } };
+        const m2 = stub({ ...routes, 'GET /api/projects/p1/act': partielle });
+        await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', partielle: false }] });
+        expect(sent(m2, 'PUT', '/act')[0].consultation.offres.find((o: any) => o.id === 'o1')).toMatchObject({ partielle: false, perimetre: '' });
+        const liste = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'list_offres' });
+        expect(liste.response.offres[0]).toMatchObject({ partielle: true, perimetre: 'Chape' });
+      });
+
       it("n'ajoute pas l'entreprise quand la saisie est refusée", async () => {
         const m = stub({ ...routes, 'GET /api/contacts': [{ id: 'c9', company_name: 'Durand Couverture' }] });
         const r = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Durand Couverture', montant_base_ht: -1 }] });

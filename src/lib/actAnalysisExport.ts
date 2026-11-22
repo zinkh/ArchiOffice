@@ -17,6 +17,9 @@ interface OffreExport {
   note_technique: number;
   conforme: boolean;
   motif_nc?: string;
+  /** Devis partiel : affiché avec son périmètre, jamais pris pour moins-disant ni noté. */
+  partielle?: boolean;
+  perimetre?: string;
 }
 
 interface ComparatifArticleExport {
@@ -89,27 +92,29 @@ export async function generateRAO(
       return;
     }
 
-    const montantsConformes = offresLot.filter(o => o.conforme).map(o => o.montant_base);
-    const minMontant = Math.min(...montantsConformes);
+    // Une offre partielle n'est ni moins-disante ni notée : elle ne couvre pas tout le lot.
+    const montantsConformes = offresLot.filter(o => o.conforme && !o.partielle && o.montant_base > 0).map(o => o.montant_base);
+    const minMontant = montantsConformes.length > 0 ? Math.min(...montantsConformes) : 0;
     const poidsPrix = consultation.criteres.find(c => c.id === 'prix')?.poids ?? 60;
     const poidsTech = consultation.criteres.find(c => c.id === 'tech')?.poids ?? 40;
 
     const head = [['Entreprise', 'Montant HT', '% / moins-disant', 'Conformité', 'Note prix', 'Note tech.', ...consultation.criteres.map(c => `${c.nom}\n(${c.poids}%)`), 'NOTE GLOBALE', 'Rang']];
     const body = offresLot.map(offre => {
       const entreprise = consultation.entreprises.find(e => e.id === offre.entreprise_id);
+      const partielle = !!offre.partielle;
       const pctMinDisant = minMontant > 0 ? ((offre.montant_base - minMontant) / minMontant * 100).toFixed(1) + '%' : '—';
-      const notePrix = offre.conforme && offre.montant_base > 0 ? (minMontant / offre.montant_base * 100).toFixed(1) : '—';
-      const noteGlobale = offre.conforme
-        ? ((parseFloat(notePrix) || 0) * poidsPrix / 100 + (offre.note_technique || 0) * poidsTech / 100).toFixed(1)
-        : 'NC';
+      const notePrix = offre.conforme && !partielle && offre.montant_base > 0 && minMontant > 0 ? (minMontant / offre.montant_base * 100).toFixed(1) : '—';
+      const noteGlobale = !offre.conforme ? 'NC' : partielle ? '—'
+        : ((parseFloat(notePrix) || 0) * poidsPrix / 100 + (offre.note_technique || 0) * poidsTech / 100).toFixed(1);
       const extraCriteres = consultation.criteres.filter(c => c.id !== 'prix' && c.id !== 'tech').map(() => '—');
       return [
         entreprise?.nom || '—',
         euros(offre.montant_base),
-        offre.conforme ? `+${pctMinDisant}` : 'NC',
-        offre.conforme ? 'Conforme' : `Non conforme : ${offre.motif_nc || 'motif non précisé'}`,
+        !offre.conforme ? 'NC' : partielle ? '—' : `+${pctMinDisant}`,
+        !offre.conforme ? `Non conforme : ${offre.motif_nc || 'motif non précisé'}`
+          : partielle ? `Offre partielle${offre.perimetre ? ` : ${offre.perimetre}` : ''}` : 'Conforme',
         notePrix,
-        String(offre.note_technique || '—'),
+        partielle ? '—' : String(offre.note_technique || '—'),
         ...extraCriteres,
         noteGlobale,
         '—',
