@@ -141,7 +141,7 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
       "update : [{entreprise (nom, contact_id ou id), lots?, dce_transmis_le?, relance_le?, offre_recue_le?, ne_repond_pas?, envoyer_dce?}] ; dates en YYYY-MM-DD. " +
       "remove : [{entreprise}] avec confirmation en deux temps. Ne prétends jamais avoir ENVOYÉ le DCE : poser dce_transmis_le enregistre une date, l'envoi se fait depuis l'écran. " +
       "OFFRES REÇUES (phase « Collecte des offres », un prix par lot et par entreprise, jamais dans le DPGF qui reste l'estimation) : " +
-      "list_offres (filtres facultatifs lot, entreprise) ; set_offre : offres = [{lot, entreprise, montant_base_ht (euros HT, total du lot), conforme?, motif_non_conformite?, note_technique? (0 à 100)}], l'entreprise doit être consultée sur ce lot ; " +
+      "list_offres (filtres facultatifs lot, entreprise) ; set_offre : offres = [{lot, entreprise (nom) ou contact_id, montant_base_ht (euros HT, total du lot), conforme?, motif_non_conformite?, note_technique? (0 à 100)}] ; saisir une offre AJOUTE d'office l'entreprise aux entreprises consultées (sans DCE à envoyer) et le lot à ses lots, inutile d'appeler add avant ; " +
       "un lot saisi poste par poste n'est écrasé qu'avec confirmation ; remove_offre : [{lot, entreprise}] avec confirmation en deux temps. Les prix par article se saisissent à l'écran. " +
       "Attention : l'écran ACT enregistre seul la consultation qu'il affiche ; modifie-la de préférence quand personne ne l'a ouverte.",
     parametersJsonSchema: {
@@ -157,6 +157,7 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
             type: 'object',
             properties: {
               lot: { type: 'string', description: 'Numéro du lot (« 02 ») ou identifiant' }, entreprise: { type: 'string', description: 'Nom, contact_id ou id de l\'entreprise consultée' },
+              contact_id: { type: 'string', description: 'Fiche contact de l\'entreprise, si le nom est ambigu' },
               montant_base_ht: { type: 'number' }, conforme: { type: 'boolean' }, motif_non_conformite: { type: 'string' }, note_technique: { type: 'number' },
             },
           },
@@ -500,13 +501,16 @@ interface OffresCtx {
 async function manageOffres(c: OffresCtx): Promise<Result> {
   const { request, pid, action, args, consultation, current, lots, lotNum, recordUrl } = c;
   const offres: Json[] = Array.isArray(consultation.offres) ? consultation.offres : [];
-  const nomEntreprise = (id: string) => current.find(e => String(e.id) === id)?.nom ?? id;
+  // Copie de travail : saisir une offre peut ajouter l'entreprise (et le lot) à la consultation.
+  const nextEnt: Json[] = current.map(e => ({ ...e, lots_ids: [...(e.lots_ids || [])] }));
+  const nomEntreprise = (id: string) => nextEnt.find(e => String(e.id) === id)?.nom ?? id;
   const view = (o: Json) => ({
     lot: lotNum(String(o.lot_id)), entreprise: nomEntreprise(String(o.entreprise_id)), montant_base_ht: o.montant_base ?? 0,
     mode_saisie: o.mode_saisie ?? (o.montant_base ? 'total' : null), conforme: o.conforme !== false, motif_non_conformite: o.motif_nc || null, note_technique: o.note_technique ?? 0,
   });
   const resolveLot = (ref: unknown) => lots.find(l => String(l.id) === text(ref) || norm(l.lot_number) === norm(ref));
-  const resolveEntreprise = (ref: unknown) => current.find(e => String(e.id) === text(ref) || (text(ref) && e.contact_id === text(ref)) || norm(e.nom) === norm(ref));
+  const resolveEntreprise = (ref: unknown) => nextEnt.find(e => String(e.id) === text(ref) || (text(ref) && e.contact_id === text(ref)) || norm(e.nom) === norm(ref));
+  const resolveContact = createContactResolver(request);
 
   if (action === 'list_offres') {
     const lot = args.lot !== undefined ? resolveLot(args.lot) : undefined;
@@ -521,17 +525,16 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
   if (!items.length) return failure('offres est requis : [{lot, entreprise, montant_base_ht, conforme?, motif_non_conformite?, note_technique?}].');
   const next: Json[] = offres.map(o => ({ ...o }));
   const changes: Json[] = []; const non_traites: Json[] = []; const ecrasements: Json[] = []; const cibles: Json[] = [];
+  const entreprises_ajoutees: Json[] = []; const lots_ajoutes: Json[] = [];
 
   for (const it of items) {
-    const label = `${text(it.entreprise) || '?'} / lot ${text(it.lot) || '?'}`;
+    const label = `${text(it.entreprise) || text(it.contact_id) || '?'} / lot ${text(it.lot) || '?'}`;
     const lot = resolveLot(it.lot);
     if (!lot) { non_traites.push({ element: label, raison: 'lot introuvable', lots_possibles: lots.map(l => l.lot_number) }); continue; }
-    const ent = resolveEntreprise(it.entreprise);
-    if (!ent) { non_traites.push({ element: label, raison: "l'entreprise ne fait pas partie des entreprises consultées (action add d'abord)" }); continue; }
-    if (!(ent.lots_ids || []).includes(lot.id)) { non_traites.push({ element: label, raison: "l'entreprise n'est pas consultée sur ce lot (update lots d'abord)" }); continue; }
-    const existing = next.find(o => String(o.lot_id) === String(lot.id) && String(o.entreprise_id) === String(ent.id));
 
     if (action === 'remove_offre') {
+      const ent = resolveEntreprise(it.entreprise ?? it.contact_id);
+      const existing = ent && next.find(o => String(o.lot_id) === String(lot.id) && String(o.entreprise_id) === String(ent.id));
       if (!existing) { non_traites.push({ element: label, raison: 'aucune offre enregistrée' }); continue; }
       if (!cibles.includes(existing)) cibles.push(existing);
       continue;
@@ -552,7 +555,28 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
     if (it.conforme !== undefined) patch.conforme = !!it.conforme;
     if (it.motif_non_conformite !== undefined) patch.motif_nc = text(it.motif_non_conformite);
     if (!Object.keys(patch).length) { non_traites.push({ element: label, raison: 'rien à modifier' }); continue; }
-    if (existing && Object.keys(patch).every(k => existing[k] === patch[k])) { non_traites.push({ element: label, raison: 'déjà à jour' }); continue; }
+
+    // Saisir une offre fait entrer l'entreprise dans la consultation, et le lot dans ses lots.
+    let ent = resolveEntreprise(it.entreprise ?? it.contact_id);
+    let nouvelle = false;
+    if (!ent) {
+      const r = await resolveContact({ contact_id: it.contact_id, nom: text(it.entreprise) });
+      if (r.inconnu) { non_traites.push({ element: label, raison: 'contact_id introuvable dans ce cabinet' }); continue; }
+      if (r.ambigu) { non_traites.push({ element: label, raison: 'plusieurs contacts portent ce nom : précise contact_id', candidats: r.ambigu }); continue; }
+      if (!r.name) { non_traites.push({ element: label, raison: 'entreprise (nom) ou contact_id requis' }); continue; }
+      ent = nextEnt.find(e => (r.contact_id && e.contact_id === r.contact_id) || norm(e.nom) === norm(r.name));
+      if (!ent) {
+        // L'entreprise remet une offre : elle a déjà le dossier, aucun DCE n'est à lui envoyer.
+        ent = { id: crypto.randomUUID(), ...(r.contact_id ? { contact_id: r.contact_id } : {}), nom: r.name, lots_ids: [], envoyer_dce: false };
+        nextEnt.push(ent);
+        nouvelle = true;
+      }
+    }
+    const lotAjoute = !(ent.lots_ids || []).includes(lot.id);
+    const existing = next.find(o => String(o.lot_id) === String(lot.id) && String(o.entreprise_id) === String(ent!.id));
+    if (!nouvelle && !lotAjoute && existing && Object.keys(patch).every(k => existing[k] === patch[k])) { non_traites.push({ element: label, raison: 'déjà à jour' }); continue; }
+    if (nouvelle) entreprises_ajoutees.push({ nom: ent.nom, contact_id: ent.contact_id || null });
+    if (lotAjoute) { ent.lots_ids = [...(ent.lots_ids || []), lot.id]; lots_ajoutes.push({ entreprise: ent.nom, lot: lotNum(String(lot.id)) }); }
 
     if (patch.montant_base !== undefined && existing?.mode_saisie === 'postes' && existing.montant_base !== patch.montant_base) {
       ecrasements.push({ lot: lotNum(String(lot.id)), entreprise: ent.nom, total_calcule_actuel: existing.montant_base, nouveau_total: patch.montant_base });
@@ -571,12 +595,14 @@ async function manageOffres(c: OffresCtx): Promise<Result> {
   }
   if (!changes.length) return failure("Aucune modification n'a pu être faite.", { non_traites });
 
-  const { res, json } = await request(`/api/projects/${encodeURIComponent(pid)}/act`, 'PUT', { consultation: { ...EMPTY_CONSULTATION, ...consultation, offres: next } });
+  const { res, json } = await request(`/api/projects/${encodeURIComponent(pid)}/act`, 'PUT', { consultation: { ...EMPTY_CONSULTATION, ...consultation, entreprises: nextEnt, offres: next } });
   if (!res.ok) return failure(json?.error || `Enregistrement impossible (HTTP ${res.status}).`);
   const done = action === 'set_offre' ? 'enregistrée' : 'retirée';
   return {
     response: {
       success: true, project_id: pid, [action === 'set_offre' ? 'enregistrees' : 'retirees']: changes,
+      ...(entreprises_ajoutees.length ? { entreprises_ajoutees_a_la_consultation: entreprises_ajoutees } : {}),
+      ...(lots_ajoutes.length ? { lots_ajoutes_aux_entreprises: lots_ajoutes } : {}),
       ...(non_traites.length ? { non_traites } : {}), offres: next.map(view),
       ...(action === 'set_offre' ? { rappel: "Le statut « Offre reçue » d'une entreprise se pose avec update (offre_recue_le) ; le DPGF n'est pas modifié." } : {}),
       record_url: recordUrl,

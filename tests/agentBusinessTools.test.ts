@@ -203,13 +203,40 @@ describe('outils métier : situations, notices, consultation, facture, agenda', 
         expect(put.consultation.offres.find((o: any) => o.id === 'o1')).toMatchObject({ montant_base: 1250.5, mode_saisie: 'total', conforme: false, motif_nc: 'hors délai' });
       });
 
-      it("crée une offre absente et refuse un lot sur lequel l'entreprise n'est pas consultée", async () => {
+      it('crée une offre absente pour une entreprise déjà consultée', async () => {
         const m = stub({ ...routes, 'GET /api/projects/p1/act': { consultation: { ...actOffres.consultation, offres: [] } } });
-        const bad = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Dupont SARL', montant_base_ht: 10 }] });
-        expect(bad.response.error).toBeDefined();
-        expect(sent(m, 'PUT', '/act')).toHaveLength(0);
         await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 800 }] });
-        expect(sent(m, 'PUT', '/act')[0].consultation.offres[0]).toMatchObject({ lot_id: 'l1', entreprise_id: 'e1', montant_base: 800, mode_saisie: 'total', conforme: true });
+        const [put] = sent(m, 'PUT', '/act');
+        expect(put.consultation.offres[0]).toMatchObject({ lot_id: 'l1', entreprise_id: 'e1', montant_base: 800, mode_saisie: 'total', conforme: true });
+        expect(put.consultation.entreprises).toHaveLength(2);
+      });
+
+      it("ajoute le lot à une entreprise déjà consultée sur un autre lot", async () => {
+        const m = stub(routes);
+        const r = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Dupont SARL', montant_base_ht: 700 }] });
+        expect(r.response.lots_ajoutes_aux_entreprises).toEqual([{ entreprise: 'Dupont SARL', lot: '02' }]);
+        expect(r.response.entreprises_ajoutees_a_la_consultation).toBeUndefined();
+        const [put] = sent(m, 'PUT', '/act');
+        expect(put.consultation.entreprises.find((e: any) => e.id === 'e1').lots_ids).toEqual(['l1', 'l2']);
+        expect(put.consultation.offres.find((o: any) => o.lot_id === 'l2' && o.entreprise_id === 'e1')).toMatchObject({ montant_base: 700 });
+      });
+
+      it("ajoute à la consultation une entreprise qui n'y figure pas, liée à sa fiche contact, sans DCE à envoyer", async () => {
+        const m = stub({ ...routes, 'GET /api/contacts': [{ id: 'c9', company_name: 'Durand Couverture' }] });
+        const r = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Durand Couverture', montant_base_ht: 9000 }] });
+        expect(r.response.entreprises_ajoutees_a_la_consultation).toEqual([{ nom: 'Durand Couverture', contact_id: 'c9' }]);
+        const [put] = sent(m, 'PUT', '/act');
+        const durand = put.consultation.entreprises.find((e: any) => e.nom === 'Durand Couverture');
+        expect(durand).toMatchObject({ contact_id: 'c9', lots_ids: ['l2'], envoyer_dce: false });
+        expect(put.consultation.offres.find((o: any) => o.entreprise_id === durand.id)).toMatchObject({ lot_id: 'l2', montant_base: 9000, mode_saisie: 'total' });
+        expect(put.consultation.entreprises).toHaveLength(3);
+      });
+
+      it("n'ajoute pas l'entreprise quand la saisie est refusée", async () => {
+        const m = stub({ ...routes, 'GET /api/contacts': [{ id: 'c9', company_name: 'Durand Couverture' }] });
+        const r = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Durand Couverture', montant_base_ht: -1 }] });
+        expect(r.response.error).toBeDefined();
+        expect(sent(m, 'PUT', '/act')).toHaveLength(0);
       });
 
       it('refuse un montant invalide et ne réécrit pas une valeur identique', async () => {
