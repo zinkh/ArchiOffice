@@ -174,6 +174,73 @@ describe('outils métier : situations, notices, consultation, facture, agenda', 
       await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'remove', entreprises: [{ entreprise: 'Dupont SARL' }], confirm: true });
       expect(sent(m, 'PUT', '/act')[0].consultation.entreprises).toEqual([]);
     });
+
+    describe('offres reçues', () => {
+      const actOffres = {
+        consultation: {
+          entreprises: [{ id: 'e1', nom: 'Dupont SARL', contact_id: 'c1', lots_ids: ['l1'] }, { id: 'e2', nom: 'Martin SAS', lots_ids: ['l2'] }],
+          offres: [{ id: 'o1', lot_id: 'l1', entreprise_id: 'e1', montant_base: 1000, mode_saisie: 'total', conforme: true, note_technique: 0 }, { id: 'o2', lot_id: 'l2', entreprise_id: 'e2', montant_base: 5000, mode_saisie: 'postes', conforme: true, note_technique: 0 }],
+          estimation: 'gardée',
+        },
+      };
+      const routes = { 'GET /api/projects/p1/act': actOffres, 'GET /api/projects/p1/lots': lots, 'PUT /api/projects/p1/act': { id: 'a' } };
+
+      it('liste les offres par lot et par entreprise, avec filtre', async () => {
+        stub(routes);
+        const all = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'list_offres' });
+        expect(all.response.offres).toHaveLength(2);
+        expect(all.response.offres[0]).toMatchObject({ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 1000, mode_saisie: 'total' });
+        const one = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'list_offres', lot: '02' });
+        expect(one.response.offres).toHaveLength(1);
+      });
+
+      it('crée et modifie un total HT sans toucher au reste de la consultation', async () => {
+        const m = stub(routes);
+        const r = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'dupont sarl', montant_base_ht: '1 250,50', conforme: false, motif_non_conformite: 'hors délai' }] });
+        expect(r.response.success).toBe(true);
+        const [put] = sent(m, 'PUT', '/act');
+        expect(put.consultation.estimation).toBe('gardée');
+        expect(put.consultation.offres.find((o: any) => o.id === 'o1')).toMatchObject({ montant_base: 1250.5, mode_saisie: 'total', conforme: false, motif_nc: 'hors délai' });
+      });
+
+      it("crée une offre absente et refuse un lot sur lequel l'entreprise n'est pas consultée", async () => {
+        const m = stub({ ...routes, 'GET /api/projects/p1/act': { consultation: { ...actOffres.consultation, offres: [] } } });
+        const bad = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Dupont SARL', montant_base_ht: 10 }] });
+        expect(bad.response.error).toBeDefined();
+        expect(sent(m, 'PUT', '/act')).toHaveLength(0);
+        await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 800 }] });
+        expect(sent(m, 'PUT', '/act')[0].consultation.offres[0]).toMatchObject({ lot_id: 'l1', entreprise_id: 'e1', montant_base: 800, mode_saisie: 'total', conforme: true });
+      });
+
+      it('refuse un montant invalide et ne réécrit pas une valeur identique', async () => {
+        const m = stub(routes);
+        const bad = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: -5 }] });
+        expect(bad.response.error).toBeDefined();
+        const same = await run(['projects'], 'manage_consultation', { project_id: 'p1', action: 'set_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL', montant_base_ht: 1000 }] });
+        expect(same.response.error).toBeDefined();
+        expect(sent(m, 'PUT', '/act')).toHaveLength(0);
+      });
+
+      it('demande confirmation avant de remplacer un total calculé poste par poste', async () => {
+        const m = stub(routes);
+        const args = { project_id: 'p1', action: 'set_offre', offres: [{ lot: '02', entreprise: 'Martin SAS', montant_base_ht: 4000 }] };
+        const first = await run(['projects'], 'manage_consultation', args);
+        expect(first.response.needs_confirmation).toBe(true);
+        expect(first.response.concerne[0]).toMatchObject({ total_calcule_actuel: 5000, nouveau_total: 4000 });
+        expect(sent(m, 'PUT', '/act')).toHaveLength(0);
+        await run(['projects'], 'manage_consultation', { ...args, confirm: true });
+        expect(sent(m, 'PUT', '/act')[0].consultation.offres.find((o: any) => o.id === 'o2')).toMatchObject({ montant_base: 4000, mode_saisie: 'total' });
+      });
+
+      it('retire une offre en deux temps', async () => {
+        const m = stub(routes);
+        const args = { project_id: 'p1', action: 'remove_offre', offres: [{ lot: '01', entreprise: 'Dupont SARL' }] };
+        expect((await run(['projects'], 'manage_consultation', args)).response.needs_confirmation).toBe(true);
+        expect(sent(m, 'PUT', '/act')).toHaveLength(0);
+        await run(['projects'], 'manage_consultation', { ...args, confirm: true });
+        expect(sent(m, 'PUT', '/act')[0].consultation.offres.map((o: any) => o.id)).toEqual(['o2']);
+      });
+    });
   });
 
   describe('facturation', () => {
