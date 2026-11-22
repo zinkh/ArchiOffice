@@ -267,7 +267,11 @@ export default function Contacts() {
   };
 
   const handleEdit = (contact: Contact) => {
-    setNewContact(contact);
+    // Fiche ancienne ou importée dont seule `email` est renseignée : le tableau l'affiche, le
+    // formulaire ne lit que les champs par type. On la présente comme adresse de travail ;
+    // rien n'est écrit tant qu'on n'enregistre pas, et `email` reste égal à `email_work`.
+    const legacyOnly = !!contact.email?.trim() && !contact.email_work && !contact.email_home && !contact.email_other;
+    setNewContact(legacyOnly ? { ...contact, email_work: contact.email } : contact);
     setIsEditing(true);
     setEditingId(contact.id);
     setIsModalOpen(true);

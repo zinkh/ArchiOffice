@@ -5,7 +5,7 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertPublicHttpUrl } from '../ssrfGuard';
 import { selectAllPages } from '../selectAllPages';
-import { addToSyncIndex, buildSyncIndex, findExistingContact, nonEmptyFields, type SyncContactRow } from '../contactSyncMatch';
+import { addToSyncIndex, allGoogleEmails, buildSyncIndex, emailsForGoogle, emailsFromGoogle, findExistingContact, nonEmptyFields, type SyncContactRow } from '../contactSyncMatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -17,14 +17,14 @@ export interface RouteDeps {
 // both directions.
 function mapGooglePersonToContactFields(person: any) {
   const name = person.names?.[0] || {};
-  const email = person.emailAddresses?.[0]?.value || '';
+  const emails = emailsFromGoogle(person.emailAddresses);
   const phone = person.phoneNumbers?.[0]?.value || '';
   const org = person.organizations?.[0] || {};
   const addr = person.addresses?.[0] || {};
   return {
     first_name: name.givenName || '',
     last_name: name.familyName || '',
-    email,
+    ...emails,
     phone,
     company_name: org.name || '',
     job_title: org.title || '',
@@ -40,7 +40,7 @@ function mapGooglePersonToContactFields(person: any) {
 function buildGooglePersonPayload(contact: any) {
   return {
     names: [{ givenName: contact.first_name || '', familyName: contact.last_name || '' }],
-    emailAddresses: contact.email ? [{ value: contact.email }] : [],
+    emailAddresses: emailsForGoogle(contact),
     phoneNumbers: contact.phone ? [{ value: contact.phone }] : [],
     organizations: (contact.company_name || contact.job_title)
       ? [{ name: contact.company_name || '', title: contact.job_title || '' }] : [],
@@ -125,8 +125,7 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
       // creating a duplicate the first time it's pushed.
       const connectionByEmail = new Map<string, any>();
       for (const person of connections) {
-        const email = person.emailAddresses?.[0]?.value;
-        if (email) connectionByEmail.set(email, person);
+        for (const email of allGoogleEmails(person.emailAddresses)) connectionByEmail.set(email.toLowerCase(), person);
       }
 
       // Toutes les fiches du cabinet, lues UNE fois : rapprochement par identifiant Google,
@@ -134,7 +133,7 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
       // pour que deux fiches Google du même nom n'en fassent pas deux locales.
       const { data: localRows, error: localError } = await selectAllPages<SyncContactRow>(
         () => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-          .select('id, first_name, last_name, company_name, email, email_work, email_home, google_resource_name, is_personal, created_at') as any,
+          .select('id, first_name, last_name, company_name, email, email_work, email_home, email_other, google_resource_name, is_personal, created_at') as any,
       );
       if (localError) throw localError;
       const index = buildSyncIndex(localRows);
@@ -225,7 +224,12 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
                 } else {
                   // Google side is more recent — pull it into the local
                   // contact instead of overwriting the newer data with ours.
-                  const fields = mapGooglePersonToContactFields(googlePerson);
+                  const fields: Record<string, any> = mapGooglePersonToContactFields(googlePerson);
+                  // Une adresse absente côté Google n'efface pas celle de la fiche : une fiche
+                  // jamais envoyée avec ses types n'a, chez Google, qu'une partie de ses adresses.
+                  for (const key of ['email', 'email_work', 'email_home', 'email_other']) {
+                    if (!fields[key]) delete fields[key];
+                  }
                   await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
                     .update({ ...fields, updated_at: googleUpdatedAt || new Date().toISOString(), google_synced_at: new Date().toISOString() })
                     .eq('id', contact.id);
@@ -238,7 +242,11 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
             // Not linked (or the link just went stale): reuse a connection
             // already pulled this run if the email matches, rather than
             // creating a duplicate Google contact for the same person.
-            const matched = contact.email ? connectionByEmail.get(contact.email) : undefined;
+            const matched = [contact.email_work, contact.email_home, contact.email_other, contact.email]
+              .map((e: string | null) => (e || '').trim().toLowerCase())
+              .filter(Boolean)
+              .map((e: string) => connectionByEmail.get(e))
+              .find(Boolean);
             if (matched) {
               await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
                 .update({ google_resource_name: matched.resourceName, google_synced_at: new Date().toISOString() })
@@ -321,7 +329,7 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
 
       const { data: localRows, error: localError } = await selectAllPages<SyncContactRow>(
         () => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-          .select('id, first_name, last_name, company_name, email, email_work, email_home, google_resource_name, is_personal, created_at') as any,
+          .select('id, first_name, last_name, company_name, email, email_work, email_home, email_other, google_resource_name, is_personal, created_at') as any,
       );
       if (localError) throw localError;
       const index = buildSyncIndex(localRows);
