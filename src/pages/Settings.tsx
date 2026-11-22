@@ -286,6 +286,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconLabel: 'GC',
   },
   {
+    id: 'carddav',
+    name: 'CardDAV (envoi)',
+    vendor: 'Nextcloud, kDrive, iCloud et serveurs compatibles',
+    description: "Choisissez quelles catégories de contacts du cabinet sont envoyées vers votre carnet d'adresses CardDAV lors d'une synchronisation (l'import CardDAV → ArchiOffice reste actif sans réglage). Le contact modifié le plus récemment l'emporte, et rien n'est jamais supprimé.",
+    category: 'crm',
+    status: 'active',
+    iconBg: 'bg-sky-50',
+    iconColor: 'text-sky-700',
+    iconLabel: 'CD',
+  },
+  {
     id: 'ted',
     name: 'TED (API)',
     vendor: 'Office des publications de l\'Union européenne',
@@ -386,6 +397,7 @@ export default function Settings() {
     tender_boamp_enabled: false,
     tender_ted_enabled: false,
     googleContactsSyncCategories: [] as string[],
+    carddavSyncCategories: [] as string[],
   });
   const [contactCategories, setContactCategories] = useState<{ id: string; name: string }[]>([]);
 
@@ -1986,6 +1998,43 @@ export default function Settings() {
         )}
         {renderSaveButton('google_contacts', () => saveSection('google_contacts', {
           googleContactsSyncCategories: (settings as any).googleContactsSyncCategories,
+        }))}
+      </div>
+    );
+
+    if (pluginId === 'carddav') return (
+      <div className="space-y-4">
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>Import et envoi</p>
+          <p>L'import (CardDAV → ArchiOffice) reste actif sans réglage, depuis Contacts › CardDAV. Les catégories cochées ci-dessous sont en plus envoyées vers votre carnet d'adresses à chaque synchronisation. Aucune catégorie cochée : rien n'est envoyé. Les contacts marqués « Personnel » ne sont jamais envoyés, et aucune fiche n'est supprimée du carnet ni d'ArchiOffice.</p>
+        </div>
+        {contactCategories.length === 0 ? (
+          <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>
+            Aucune catégorie de contact définie pour l'instant — créez-en depuis Contacts › Catégories.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {contactCategories.map(cat => {
+              const selected = (settings as any).carddavSyncCategories.includes(cat.name);
+              return (
+                <label key={cat.id} className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+                  <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{cat.name}</span>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={e => {
+                      const current: string[] = (settings as any).carddavSyncCategories;
+                      const next = e.target.checked ? [...current, cat.name] : current.filter(n => n !== cat.name);
+                      setSettings({ ...settings, carddavSyncCategories: next } as any);
+                    }}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {renderSaveButton('carddav', () => saveSection('carddav', {
+          carddavSyncCategories: (settings as any).carddavSyncCategories,
         }))}
       </div>
     );

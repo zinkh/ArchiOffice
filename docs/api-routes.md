@@ -99,7 +99,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/ai/suggest-articles` | [server/routes/aiSuggestions.ts:31](../server/routes/aiSuggestions.ts#L31) |
 | POST | `/api/archive/bulk` | [server/routes/projectArchive.ts:237](../server/routes/projectArchive.ts#L237) |
 | GET | `/api/archive/candidates` | [server/routes/projectArchive.ts:201](../server/routes/projectArchive.ts#L201) |
-| POST | `/api/auth/google/token` | [server/routes/contactSync.ts:62](../server/routes/contactSync.ts#L62) |
+| POST | `/api/auth/google/token` | [server/routes/contactSync.ts:64](../server/routes/contactSync.ts#L64) |
 | GET | `/api/automation/api-keys` | [server/routes/automationApiKeys.ts:17](../server/routes/automationApiKeys.ts#L17) |
 | POST | `/api/automation/api-keys` | [server/routes/automationApiKeys.ts:29](../server/routes/automationApiKeys.ts#L29) |
 | DELETE | `/api/automation/api-keys/:id` | [server/routes/automationApiKeys.ts:44](../server/routes/automationApiKeys.ts#L44) |
@@ -657,12 +657,12 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/rnb-buildings` | [server/routes/geoProxy.ts:945](../server/routes/geoProxy.ts#L945) |
 | GET | `/api/search` | [server/routes/globalSearch.ts:14](../server/routes/globalSearch.ts#L14) |
 | POST | `/api/send-email` | [server/routes/sendEmail.ts:32](../server/routes/sendEmail.ts#L32) |
-| GET | `/api/settings` | [server/routes/settings.ts:65](../server/routes/settings.ts#L65) |
-| PUT | `/api/settings` | [server/routes/settings.ts:96](../server/routes/settings.ts#L96) |
-| DELETE | `/api/settings/tenant-deletion` | [server/routes/settings.ts:269](../server/routes/settings.ts#L269) |
-| GET | `/api/settings/tenant-deletion` | [server/routes/settings.ts:241](../server/routes/settings.ts#L241) |
-| POST | `/api/settings/tenant-deletion` | [server/routes/settings.ts:252](../server/routes/settings.ts#L252) |
-| GET | `/api/settings/tenant-export` | [server/routes/settings.ts:225](../server/routes/settings.ts#L225) |
+| GET | `/api/settings` | [server/routes/settings.ts:66](../server/routes/settings.ts#L66) |
+| PUT | `/api/settings` | [server/routes/settings.ts:97](../server/routes/settings.ts#L97) |
+| DELETE | `/api/settings/tenant-deletion` | [server/routes/settings.ts:270](../server/routes/settings.ts#L270) |
+| GET | `/api/settings/tenant-deletion` | [server/routes/settings.ts:242](../server/routes/settings.ts#L242) |
+| POST | `/api/settings/tenant-deletion` | [server/routes/settings.ts:253](../server/routes/settings.ts#L253) |
+| GET | `/api/settings/tenant-export` | [server/routes/settings.ts:226](../server/routes/settings.ts#L226) |
 | GET | `/api/shared/projects` | [server/routes/projectShares.ts:343](../server/routes/projectShares.ts#L343) |
 | GET | `/api/shared/projects/:id` | [server/routes/projectShares.ts:368](../server/routes/projectShares.ts#L368) |
 | GET | `/api/shared/projects/:id/act` | [server/routes/projectShareChantier.ts:256](../server/routes/projectShareChantier.ts#L256) |
@@ -721,8 +721,8 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/support/tickets/:id` | [server/routes/support.ts:75](../server/routes/support.ts#L75) |
 | POST | `/api/support/tickets/:id/messages` | [server/routes/support.ts:89](../server/routes/support.ts#L89) |
 | PATCH | `/api/support/tickets/:id/status` | [server/routes/support.ts:125](../server/routes/support.ts#L125) |
-| POST | `/api/sync/carddav` | [server/routes/contactSync.ts:276](../server/routes/contactSync.ts#L276) |
-| POST | `/api/sync/google-contacts` | [server/routes/contactSync.ts:99](../server/routes/contactSync.ts#L99) |
+| POST | `/api/sync/carddav` | [server/routes/contactSync.ts:286](../server/routes/contactSync.ts#L286) |
+| POST | `/api/sync/google-contacts` | [server/routes/contactSync.ts:101](../server/routes/contactSync.ts#L101) |
 | GET | `/api/tasks` | [server/routes/tasks.ts:48](../server/routes/tasks.ts#L48) |
 | POST | `/api/tasks` | [server/routes/tasks.ts:65](../server/routes/tasks.ts#L65) |
 | DELETE | `/api/tasks/:id` | [server/routes/tasks.ts:134](../server/routes/tasks.ts#L134) |
@@ -792,7 +792,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/tenders/:id/estimate-enveloppe` | [server/routes/tenderAi.ts:179](../server/routes/tenderAi.ts#L179) |
 | POST | `/api/tenders/:id/methodology/:noteId/draft-ai` | [server/routes/tenderAi.ts:248](../server/routes/tenderAi.ts#L248) |
 | POST | `/api/tenders/:id/methodology/prefill-sections` | [server/routes/tenderAi.ts:334](../server/routes/tenderAi.ts#L334) |
-| POST | `/api/test-smtp` | [server/routes/settings.ts:281](../server/routes/settings.ts#L281) |
+| POST | `/api/test-smtp` | [server/routes/settings.ts:282](../server/routes/settings.ts#L282) |
 | GET | `/api/time_entries` | [server/routes/timeTracking.ts:109](../server/routes/timeTracking.ts#L109) |
 | POST | `/api/time_entries` | [server/routes/timeTracking.ts:125](../server/routes/timeTracking.ts#L125) |
 | DELETE | `/api/time_entries/:id` | [server/routes/timeTracking.ts:174](../server/routes/timeTracking.ts#L174) |

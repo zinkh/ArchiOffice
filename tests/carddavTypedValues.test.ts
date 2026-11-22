@@ -77,7 +77,7 @@ describe('POST /api/sync/carddav avec des valeurs typées', () => {
     const vcard = 'BEGIN:VCARD\nFN:Claire Aubry\nN:Aubry;Claire\nEMAIL;TYPE=HOME:perso@gmail.com\nEMAIL;TYPE=WORK:pro@agence.fr\nTEL;TYPE=CELL:0612345678\nTEL;TYPE=WORK:0383123456\nEND:VCARD';
     const res = await sync(token, vcard);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ imported: 1, updated: 0 });
+    expect(res.body).toMatchObject({ imported: 1, updated: 0 });
     const c = fakeSupabaseAdmin.getTable('contacts').find(r => r.tenant_id === tenantId && r.last_name === 'Aubry');
     expect(c).toMatchObject({
       email_work: 'pro@agence.fr', email_home: 'perso@gmail.com', email: 'pro@agence.fr',
@@ -94,7 +94,7 @@ describe('POST /api/sync/carddav avec des valeurs typées', () => {
     }]);
     const vcard = 'BEGIN:VCARD\nFN:Claire Aubry\nN:Aubry;Claire\nEMAIL;TYPE=HOME:perso@gmail.com\nTEL;TYPE=CELL:0612345678\nEND:VCARD';
     const res = await sync(token, vcard);
-    expect(res.body).toEqual({ imported: 0, updated: 1 });
+    expect(res.body).toMatchObject({ imported: 0, updated: 1 });
     expect(fakeSupabaseAdmin.getTable('contacts').find(r => r.id === 'c-keep')).toMatchObject({
       email_home: 'perso@gmail.com', phone_home: '0145000000', phone_mobile: '0612345678',
     });

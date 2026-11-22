@@ -117,7 +117,7 @@ export function emailsFromGoogle(list?: Array<{ value?: string; type?: string }>
 }
 
 /** Inverse : les adresses de la fiche, typées, telles que Google les attend. */
-export function emailsForGoogle(contact: Partial<TypedEmails>): Array<{ value: string; type?: string }> {
+export function emailsForGoogle(contact: Partial<Record<keyof TypedEmails, string | null>>): Array<{ value: string; type?: string }> {
   const typed: Array<{ value: string; type?: string }> = [];
   const seen = new Set<string>();
   const push = (value: string | null | undefined, type?: string) => {

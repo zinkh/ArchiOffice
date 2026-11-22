@@ -6,7 +6,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertPublicHttpUrl } from '../ssrfGuard';
 import { selectAllPages } from '../selectAllPages';
 import { PHONE_SLOTS, phonesForGoogle, phonesFromGoogle } from '../../src/lib/contactPhones';
-import { vcardTypedValues } from '../vcardTypedValues';
+import { CardDavError, runCardDavSync } from '../carddavSyncRun';
 import { addToSyncIndex, allGoogleEmails, buildSyncIndex, emailsForGoogle, emailsFromGoogle, findExistingContact, nonEmptyFields, type SyncContactRow } from '../contactSyncMatch';
 
 export interface RouteDeps {
@@ -300,79 +300,10 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
         return res.status(e.status || 400).json({ error: e.message || 'URL invalide' });
       }
 
-      const auth = Buffer.from(`${username}:${password}`).toString('base64');
-
-      // PROPFIND to list vCards
-      const propfindRes = await fetch(url, {
-        method: 'PROPFIND',
-        headers: {
-          Authorization: `Basic ${auth}`,
-          Depth: '1',
-          'Content-Type': 'application/xml',
-        },
-        body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><d:getetag/><card:address-data/></d:prop></d:propfind>'
-      });
-
-      if (!propfindRes.ok) {
-        return res.status(400).json({ error: `Erreur CardDAV ${propfindRes.status}: vérifiez l'URL et les identifiants` });
-      }
-
-      const xml = await propfindRes.text();
-
-      // Simple vCard parser — extract FN, EMAIL, TEL, ORG from each vCard block
-      const vcards = xml.match(/BEGIN:VCARD[\s\S]*?END:VCARD/g) || [];
-      const getField = (vcard: string, field: string) => {
-        const m = vcard.match(new RegExp(`(?:^|\\n)${field}[^:]*:([^\\r\\n]*)`, 'i'));
-        return m ? m[1].trim() : '';
-      };
-
-      let imported = 0;
-      let updated = 0;
-
-      const { data: localRows, error: localError } = await selectAllPages<SyncContactRow>(
-        () => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-          .select('id, first_name, last_name, company_name, email, email_work, email_home, email_other, google_resource_name, is_personal, created_at') as any,
-      );
-      if (localError) throw localError;
-      const index = buildSyncIndex(localRows);
-
-      for (const vcard of vcards) {
-        const fullName = getField(vcard, 'FN');
-        // Toutes les adresses et tous les numéros, avec leur type (travail, domicile, mobile...) :
-        // rangés comme ceux de Google Contacts (voir vcardTypedValues.ts).
-        const emails = emailsFromGoogle(vcardTypedValues(vcard, 'EMAIL'));
-        const phones = phonesFromGoogle(vcardTypedValues(vcard, 'TEL'));
-        const org = getField(vcard, 'ORG');
-        const nField = getField(vcard, 'N');
-        const nameParts = nField.split(';');
-        const lastName = nameParts[0] || '';
-        const firstName = nameParts[1] || (fullName.split(' ')[0] || '');
-
-        if (!fullName && !emails.email) continue;
-
-        const fields = {
-          first_name: firstName,
-          last_name: lastName || fullName,
-          ...emails,
-          ...phones,
-          company_name: org.split(';')[0] || '',
-        };
-        const existing = findExistingContact(index, fields);
-        const now = new Date().toISOString();
-
-        if (existing) {
-          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update({ ...nonEmptyFields(fields), updated_at: now }).eq('id', existing.id);
-          updated++;
-        } else {
-          const id = crypto.randomUUID();
-          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({ ...fields, updated_at: now, id, address: '', city: '', zip: '', state: '', country: '', ca_amount: 0, created_at: now });
-          addToSyncIndex(index, { id, ...fields, created_at: now });
-          imported++;
-        }
-      }
-
-      res.json({ imported, updated });
+      // Import puis envoi : toute la logique est dans server/carddavSyncRun.ts.
+      res.json(await runCardDavSync(supabaseAdmin, tenantId, { url, username, password: password ?? '' }));
     } catch (error: any) {
+      if (error instanceof CardDavError) return res.status(error.status).json({ error: error.message });
       console.error('CardDAV sync error:', error);
       res.status(500).json({ error: error.message || "Erreur de synchronisation CardDAV" });
     }

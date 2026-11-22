@@ -34,10 +34,21 @@ function phoneType(words: string[]): string | undefined {
   if (words.includes('fax')) return words.includes('work') ? 'workFax' : words.includes('home') ? 'homeFax' : 'otherFax';
   if (words.includes('cell') || words.includes('mobile')) return 'mobile';
   if (words.includes('pager')) return 'pager';
+  if (words.includes('main')) return 'main';
   if (words.includes('work')) return 'work';
   if (words.includes('home')) return 'home';
   if (words.includes('other')) return 'other';
   return undefined;
+}
+
+/** Valeur texte vCard décodée : `\n`, `\,`, `\;` et `\\` (un retour à la ligne devient une espace). */
+export function unescapeVcardText(v: string): string {
+  return v.replace(/\\([nN,;\\])/g, (_m, c: string) => (c === 'n' || c === 'N' ? ' ' : c));
+}
+
+/** Découpe une valeur composée (N, ORG) sur ses `;` non échappés, chaque part décodée. */
+export function splitVcardValue(v: string): string[] {
+  return v.split(/(?<!\\);/).map(part => unescapeVcardText(part.trim()));
 }
 
 /**
