@@ -17,6 +17,9 @@ export interface EntrepriseSuivi {
   ne_repond_pas?: boolean;
   visite_creneau_id?: string;
   visite_presence?: import('./actVisites').PresenceVisite;
+  /** Créneau cité dans le dernier message de convocation (ou d'envoi du DCE) et date de ce message. */
+  visite_convoquee_creneau_id?: string;
+  visite_convoquee_le?: string;
   observation?: string;
   /**
    * Date d'une remise faite sur l'espace de dépôt et pas encore traitée. Jamais

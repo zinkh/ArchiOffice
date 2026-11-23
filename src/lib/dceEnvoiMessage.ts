@@ -4,6 +4,8 @@
 // dépôt). Aucun jeton n'est inventé : un bloc sans donnée devient vide et les lignes
 // vides en trop sont resserrées.
 
+import type { BlocVisite } from './actVisites';
+
 export interface LotMessage { lot_number: string; lot_title: string }
 export interface LigneIndiceMessage { designation: string; fichier: string; indice: string }
 
@@ -14,6 +16,8 @@ export interface DonneesMessageDce {
   /** Libellés des pièces du marché (RC, CCAP, acte d'engagement) générées pour ce message. */
   piecesMarche: string[];
   lignesIndices: LigneIndiceMessage[];
+  /** Visite de site : son créneau, ou les créneaux proposés. Absent : aucune visite annoncée. */
+  visite?: BlocVisite;
   /** Lien de dépôt personnel de l'entreprise. */
   lienDepot?: string;
   /** Date limite de remise, déjà mise en forme. */
@@ -37,11 +41,28 @@ export const MODELE_CORPS = [
   '',
   '{{pieces_dossier}}',
   '',
+  '{{visite}}',
+  '',
   '{{depot}}',
   '',
   '{{avertissements}}',
   '',
   'Nous restons à votre disposition pour toute précision.',
+  '',
+  'Cordialement,',
+].join('\n');
+
+/** Convocation à la visite de site, envoyée seule (après l'envoi du DCE ou lors d'un changement de créneau). */
+export const MODELE_SUJET_VISITE = 'Visite de site — {{operation}}';
+
+export const MODELE_CORPS_VISITE = [
+  'Bonjour,',
+  '',
+  'Dans le cadre de la consultation des entreprises pour l\'opération « {{operation}} », nous vous informons de la visite de site suivante.',
+  '',
+  '{{visite}}',
+  '',
+  'Merci de nous confirmer votre présence en répondant à ce message.',
   '',
   'Cordialement,',
 ].join('\n');
@@ -54,6 +75,7 @@ export const JETONS_MODELE: Array<{ jeton: string; aide: string }> = [
   { jeton: 'lots_courts', aide: 'Lots de l\'entreprise, en une ligne (Lot 01, Lot 02)' },
   { jeton: 'pieces_marche', aide: 'Pièces du marché jointes (RC, CCAP, acte d\'engagement)' },
   { jeton: 'pieces_dossier', aide: 'Pièces du dossier et indices de révision' },
+  { jeton: 'visite', aide: 'Visite de site : créneau de l\'entreprise (ou créneaux proposés), lieu et consignes' },
   { jeton: 'depot', aide: 'Lien de dépôt personnel et date limite' },
   { jeton: 'avertissements', aide: 'Pièces non jointes ou lien non créé' },
 ];
@@ -74,6 +96,16 @@ export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
        ...d.lignesIndices.map(l => `- ${l.designation}${l.fichier ? ` : ${l.fichier}` : ''}${l.indice ? ` (indice ${l.indice})` : ''}`),
        '', 'Le tableau des indices est joint à ce message.'].join('\n')
     : '';
+  const v = d.visite;
+  const visite = v && v.creneaux.length
+    ? [
+        v.assigne ? 'Visite de site :' : 'Visite de site, créneaux proposés :',
+        ...v.creneaux.map(c => `- ${c}`),
+        ...(v.assigne ? [] : ['Merci de nous indiquer le créneau que vous retenez.']),
+        ...(v.lieu ? [`Lieu : ${v.lieu}`] : []),
+        ...(v.consignes ? [`Consignes : ${v.consignes}`] : []),
+      ].join('\n')
+    : '';
   const depot = d.lienDepot
     ? ['Vous pouvez remettre votre offre en ligne sur votre espace de dépôt personnel (saisie de l\'offre ou dépôt de vos documents) :', d.lienDepot,
        ...(d.dateLimite ? [`Date limite de remise : ${d.dateLimite}.`] : []),
@@ -91,6 +123,7 @@ export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
     lots_courts: lotsCourts ? ` — ${lotsCourts}` : '',
     pieces_marche: piecesMarche,
     pieces_dossier: piecesDossier,
+    visite,
     depot,
     avertissements,
   };

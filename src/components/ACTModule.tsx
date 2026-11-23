@@ -92,6 +92,9 @@ interface EntrepriseConsultee {
   ne_repond_pas?: boolean;
   visite_creneau_id?: string;
   visite_presence?: import('../lib/actVisites').PresenceVisite;
+  /** Créneau cité dans le dernier message de convocation (ou d'envoi du DCE) et date de ce message. */
+  visite_convoquee_creneau_id?: string;
+  visite_convoquee_le?: string;
   observation?: string;
 }
 
@@ -168,6 +171,8 @@ interface Consultation extends DonneesNegociation {
   dce_documents: DCEDocument[];
   entreprises: EntrepriseConsultee[];
   creneaux_visite?: import('../lib/actVisites').CreneauVisite[];
+  /** Lieu et consignes de la visite de site, cités dans le mail d'envoi du DCE. */
+  visite_site?: import('../lib/actVisites').VisiteSite;
   criteres: CritereNotation[];
   pieces_admin: PieceAdmin[];
   questions: QuestionReponse[];
@@ -1050,6 +1055,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               entreprises={consultation.entreprises}
               creneauxVisite={consultation.creneaux_visite || []}
               onChangeCreneaux={creneaux_visite => update({ ...consultation, creneaux_visite })}
+              visiteSite={consultation.visite_site}
+              onChangeVisiteSite={visite_site => update({ ...consultation, visite_site })}
               onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
               dcePieces={dcePieces}
               dcePartages={dcePartages}
