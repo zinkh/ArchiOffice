@@ -16,6 +16,7 @@ import {
   MAX_LIGNES_SAISIE, controlerLot, extensionDe, formatOctets, validerSaisie, type DepotKind,
 } from '../lib/consultationDepot';
 import { euros, formaterDate, formaterDateHeure } from '../lib/depotAffichage';
+import { libelleVisite } from '../lib/actVisites';
 
 interface Contexte {
   operation: string | null;
@@ -34,6 +35,10 @@ interface Contexte {
     liens?: Array<{ libelle: string; url: string }>;
   }>;
   depots: Array<{ id: string; lot_id: string | null; kind: DepotKind; version: number; nom: string | null; taille: number | null; hors_delai: boolean; recu_le: string }>;
+  /** Visite de site : le créneau de l'entreprise, à défaut les créneaux proposés (dates du chantier, sans fuseau). */
+  visite?: { creneau: string | null; propositions: string[]; lieu: string | null; consignes: string | null } | null;
+  /** Tout le dossier en une archive : nombre de fichiers et taille connue ; absent s'il n'y a rien à rassembler. */
+  dossier_zip?: { fichiers: number; taille: number | null } | null;
 }
 
 interface Recu { recu_le: string; hors_delai: boolean; accuse_envoye: boolean; elements: string[]; empreintes: string[] }
@@ -48,6 +53,74 @@ async function lireReponse(res: Response): Promise<any> {
   const corps = await res.json().catch(() => ({}));
   if (!res.ok) { const e: any = new Error(corps?.error || 'Une erreur est survenue.'); e.status = res.status; e.corps = corps; throw e; }
   return corps;
+}
+
+/** Nom du fichier annoncé par le serveur (Content-Disposition), à défaut un nom neutre. */
+function nomFichierReponse(res: Response): string {
+  const entete = res.headers.get('Content-Disposition') || '';
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(entete)?.[1];
+  if (utf8) { try { return decodeURIComponent(utf8); } catch { /* repli ci-dessous */ } }
+  return /filename="([^"]+)"/i.exec(entete)?.[1] || 'Dossier de consultation.zip';
+}
+
+/**
+ * Bouton « tout le dossier en une fois ». Un simple lien afficherait une page d'erreur brute au
+ * premier refus (archive trop lourde, serveur occupé) : on télécharge donc par fetch et l'on dit
+ * clairement ce qui se passe, la préparation de l'archive pouvant prendre quelques secondes.
+ */
+function TelechargerDossier({ base, zip }: { base: string; zip: NonNullable<Contexte['dossier_zip']> }) {
+  const [etat, setEtat] = useState<'repos' | 'prepare'>('repos');
+  const [erreur, setErreur] = useState<string | null>(null);
+  const telecharger = async () => {
+    setEtat('prepare'); setErreur(null);
+    try {
+      const res = await appelPublic(`${base}/dossier.zip`);
+      if (!res.ok) { const corps = await res.json().catch(() => ({})); throw new Error(corps?.error || 'Le téléchargement a échoué.'); }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = nomFichierReponse(res);
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e: any) {
+      setErreur(e?.message || 'Le téléchargement a échoué.');
+    } finally {
+      setEtat('repos');
+    }
+  };
+  return (
+    <section aria-label="Tout le dossier de consultation" className="space-y-2">
+      <button type="button" onClick={telecharger} disabled={etat === 'prepare'}
+        className={`${BOUTON} border w-full sm:w-auto`} style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}>
+        {etat === 'prepare' ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : <IconDownload size={16} aria-hidden />}
+        {etat === 'prepare' ? 'Préparation de l’archive…' : 'Télécharger tout le dossier en une fois (zip)'}
+      </button>
+      <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+        {zip.fichiers} fichier{zip.fichiers > 1 ? 's' : ''}{zip.taille ? ` · environ ${formatOctets(zip.taille)}` : ''}, rangés par pièce. Les liens externes sont listés dans l’archive.
+      </p>
+      {erreur && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erreur}</p>}
+    </section>
+  );
+}
+
+function VisiteDeSite({ visite }: { visite: NonNullable<Contexte['visite']> }) {
+  return (
+    <section aria-label="Visite de site" className="space-y-2">
+      <h2 className="text-sm font-bold uppercase tracking-wider">Visite de site</h2>
+      <div className="rounded-lg px-3 py-2.5 text-sm space-y-1" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+        {visite.creneau
+          ? <p>Votre visite est fixée au <strong>{libelleVisite(visite.creneau)}</strong>.</p>
+          : (
+            <>
+              <p>Créneaux de visite proposés. Merci d’indiquer au cabinet celui que vous retenez :</p>
+              <ul className="list-disc pl-5">{visite.propositions.map(d => <li key={d}><strong>{libelleVisite(d)}</strong></li>)}</ul>
+            </>
+          )}
+        {visite.lieu && <p>Lieu : {visite.lieu}</p>}
+        {visite.consignes && <p className="whitespace-pre-line">Consignes : {visite.consignes}</p>}
+      </div>
+    </section>
+  );
 }
 
 export default function DepotOffres() {
@@ -126,6 +199,10 @@ export default function DepotOffres() {
             <p style={{ color: 'var(--tblr-muted)' }}>Lots qui vous sont confiés : {ctx.lots.map(l => `Lot ${l.lot_number} ${l.lot_title}`).join(' ; ')}.</p>
           )}
         </section>
+
+        {ctx.visite && <VisiteDeSite visite={ctx.visite} />}
+
+        {ctx.dossier_zip && <TelechargerDossier base={base} zip={ctx.dossier_zip} />}
 
         {(ctx.dce?.length ?? 0) > 0 && (
           <section aria-label="Dossier de consultation des entreprises" className="space-y-2">

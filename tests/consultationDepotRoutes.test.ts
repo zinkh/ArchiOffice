@@ -11,6 +11,7 @@ import { memoryDrive } from '../server/externalStorage/memoryProvider';
 import { invalidateConnectionCache } from '../server/externalStorage/externalConnection';
 import { hacherJeton } from '../server/consultationDepot/tokens';
 import { faussePdf, fausseDocx, fausseOds } from './fixtures/zipBuilder';
+import JSZip from 'jszip';
 
 // Les limiteurs du portail sont réglés pour traverser tout le scénario ; leur
 // coupure est vérifiée dans consultationDepotLimiter.test.ts.
@@ -664,5 +665,145 @@ describe('lecture des montants probables', () => {
 
     fakeSupabaseAdmin.getTable('tenants').find(t => t.id === c.tenantId)!.plan = 'pro';
     expect((await analyser(c, id)).status).toBe(403);
+  });
+});
+
+
+describe('portail public : tout le dossier en une archive et visite de site', () => {
+  const lireZip = async (jeton: string) => {
+    const res = await request(app).get(`/api/public/depot/${jeton}/dossier.zip`)
+      .buffer(true).parse((r, cb) => { const morceaux: Buffer[] = []; r.on('data', (m: Buffer) => morceaux.push(m)); r.on('end', () => cb(null, Buffer.concat(morceaux))); });
+    return res;
+  };
+
+  async function dossier(c: Cabinet, extra: Record<string, any> = {}) {
+    const conn = fakeSupabaseAdmin.getTable('external_storage_connections').find(x => x.tenant_id === c.tenantId)!;
+    const { buildExternalRef } = await import('../server/externalStorage/externalRef');
+    const ajoute = (cle: string, nom: string, contenu: string) => {
+      memoryDrive.files.set(cle, { id: cle, parentId: '', name: nom, buffer: Buffer.from(contenu), mimeType: 'application/pdf', trashed: false });
+      return buildExternalRef({ provider: 'webdav', connectionId: conn.id, externalId: cle, fileName: nom });
+    };
+    const rc = uid('doc'); const cctpA = uid('doc'); const cctpB = uid('doc'); const publie = uid('doc'); const absent = uid('doc');
+    fakeSupabaseAdmin.seed('documents', [
+      { id: rc, tenant_id: c.tenantId, project_id: c.projectId, name: 'RC.pdf', file_url: ajoute('ArchiOffice/RC.pdf', 'RC.pdf', 'contenu RC') },
+      { id: cctpA, tenant_id: c.tenantId, project_id: c.projectId, name: 'CCTP charpente.pdf', file_url: ajoute('ArchiOffice/A.pdf', 'CCTP charpente.pdf', 'contenu A') },
+      { id: cctpB, tenant_id: c.tenantId, project_id: c.projectId, name: 'CCTP couverture.pdf', file_url: ajoute('ArchiOffice/B.pdf', 'CCTP couverture.pdf', 'contenu B') },
+      { id: publie, tenant_id: c.tenantId, project_id: c.projectId, name: 'Notice sécurité.pdf', file_url: ajoute('ArchiOffice/N.pdf', 'Notice sécurité.pdf', 'contenu N') },
+      { id: absent, tenant_id: c.tenantId, project_id: c.projectId, name: 'Disparu.pdf', file_url: buildExternalRef({ provider: 'webdav', connectionId: conn.id, externalId: 'ArchiOffice/disparu.pdf', fileName: 'Disparu.pdf' }) },
+    ]);
+    fakeSupabaseAdmin.seed('act_data', [{
+      id: uid('act'), tenant_id: c.tenantId, project_id: c.projectId,
+      consultation: {
+        dce_documents: [
+          { id: 'p1', nom: 'Règlement de consultation', type_doc: 'RC', tous_lots: true, lots_ids: [], document_ids: [rc, absent] },
+          { id: 'p2', nom: 'CCTP Charpente', type_doc: 'CCTP', tous_lots: false, lots_ids: [c.lotA], document_ids: [cctpA] },
+          { id: 'p3', nom: 'CCTP Couverture', type_doc: 'CCTP', tous_lots: false, lots_ids: [c.lotB], document_ids: [cctpB] },
+          { id: 'p4', nom: 'Plans (kDrive)', type_doc: 'Autre', partage: true, tous_lots: true, lots_ids: [], document_ids: [],
+            liens_externes: [{ libelle: 'Plans', url: 'https://exemple.fr/plans' }, { libelle: 'Piège', url: 'javascript:alert(1)' }] },
+        ],
+        ...extra,
+      },
+    }]);
+    await request(app).put(`/api/projects/${c.projectId}/depot/settings`).set(authHeader(c.token)).send({ published_document_ids: [publie, rc] });
+    return { rc, cctpA, cctpB, publie, absent };
+  }
+
+  it('rassemble les pièces de ses lots et les documents publiés, rangés par pièce, sans doublon', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c); // lot A seulement
+    const res = await lireZip(jeton);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/zip');
+    expect(res.headers['content-disposition']).toMatch(/attachment; filename="Villa Martin - Dossier de consultation\.zip"/);
+    expect(res.headers['cache-control']).toContain('no-store');
+    const zip = await JSZip.loadAsync(res.body as Buffer);
+    const noms = Object.keys(zip.files).filter(n => !zip.files[n].dir).sort();
+    expect(noms).toEqual([
+      'CCTP Charpente/CCTP charpente.pdf',
+      'Documents complémentaires/Notice sécurité.pdf',
+      'Fichiers non ajoutés.txt',
+      'Liens externes.txt',
+      'Règlement de consultation/RC.pdf', // le RC publié aussi n'est pas ajouté deux fois
+    ].sort());
+    expect(await zip.file('Règlement de consultation/RC.pdf')!.async('string')).toBe('contenu RC');
+  });
+
+  it('ne contient jamais la pièce d\'un autre lot', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c);
+    const zip = await JSZip.loadAsync((await lireZip(jeton)).body as Buffer);
+    expect(Object.keys(zip.files).join('\n')).not.toContain('Couverture');
+  });
+
+  it('signale un fichier introuvable et ne garde que les liens https', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c);
+    const zip = await JSZip.loadAsync((await lireZip(jeton)).body as Buffer);
+    expect(await zip.file('Fichiers non ajoutés.txt')!.async('string')).toContain('Disparu.pdf');
+    const liens = await zip.file('Liens externes.txt')!.async('string');
+    expect(liens).toContain('https://exemple.fr/plans');
+    expect(liens).not.toContain('javascript');
+  });
+
+  it('annonce le dossier dans le contexte, sans doublon entre DCE et documents publiés', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c);
+    const ctx = await request(app).get(`/api/public/depot/${jeton}`);
+    expect(ctx.body.dossier_zip.fichiers).toBe(4); // RC, absent, CCTP charpente, notice (RC publié compté une fois)
+  });
+
+  it('répond 404 et n\'annonce rien quand il n\'y a aucun fichier', async () => {
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    expect((await request(app).get(`/api/public/depot/${jeton}`)).body.dossier_zip).toBeNull();
+    expect((await request(app).get(`/api/public/depot/${jeton}/dossier.zip`)).status).toBe(404);
+  });
+
+  it('exige un lien valide : 404 identique pour un jeton inconnu', async () => {
+    expect((await request(app).get(`/api/public/depot/dpt_${'z'.repeat(43)}/dossier.zip`)).status).toBe(404);
+  });
+
+  it('se ferme comme le reste du portail quand le cabinet quitte le plan Enterprise', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c);
+    fakeSupabaseAdmin.getTable('tenants').find(t => t.id === c.tenantId)!.plan = 'pro';
+    expect((await request(app).get(`/api/public/depot/${jeton}/dossier.zip`)).status).toBe(503);
+  });
+
+  it('annonce son créneau de visite, le lieu et les consignes', async () => {
+    const c = cabinet();
+    await dossier(c, {
+      creneaux_visite: [{ id: 'c1', date_heure: '2030-06-10T09:30' }, { id: 'c2', date_heure: '2030-06-12T14:00' }],
+      entreprises: [{ id: 'e1', nom: 'SARL Dupont', lots_ids: [c.lotA], visite_creneau_id: 'c2' }],
+      visite_site: { lieu: ' 12 rue du Chantier ', consignes: 'Casque obligatoire' },
+    });
+    const { jeton } = await inviter(c);
+    const { body } = await request(app).get(`/api/public/depot/${jeton}`);
+    expect(body.visite).toEqual({ creneau: '2030-06-12T14:00', propositions: [], lieu: '12 rue du Chantier', consignes: 'Casque obligatoire' });
+  });
+
+  it('propose les créneaux à venir sans créneau affecté, jamais ceux du passé, et ne montre pas les autres entreprises', async () => {
+    const c = cabinet();
+    await dossier(c, {
+      creneaux_visite: [{ id: 'p', date_heure: '2020-01-01T09:00' }, { id: 'c1', date_heure: '2030-06-10T09:30' }],
+      entreprises: [{ id: 'e1', nom: 'SARL Dupont', lots_ids: [c.lotA] }, { id: 'e2', nom: 'Autre SARL', lots_ids: [c.lotB], visite_creneau_id: 'c1' }],
+    });
+    const { jeton } = await inviter(c);
+    const { body } = await request(app).get(`/api/public/depot/${jeton}`);
+    expect(body.visite.creneau).toBeNull();
+    expect(body.visite.propositions).toEqual(['2030-06-10T09:30']);
+    expect(JSON.stringify(body)).not.toContain('Autre SARL');
+  });
+
+  it('n\'annonce aucune visite sans créneau citable', async () => {
+    const c = cabinet();
+    await dossier(c, { visite_site: { lieu: 'Chantier' }, creneaux_visite: [] });
+    const { jeton } = await inviter(c);
+    expect((await request(app).get(`/api/public/depot/${jeton}`)).body.visite).toBeNull();
   });
 });
