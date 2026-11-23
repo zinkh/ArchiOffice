@@ -125,6 +125,10 @@ interface Offre {
   note_technique: number;
   conforme: boolean;
   motif_nc?: string;
+  /** Devis qui ne chiffre qu'une partie du lot (spécialiste en chape, par exemple) : jamais classé ni noté. */
+  partielle?: boolean;
+  /** Ce que couvre l'offre partielle, en clair (« Chape liquide uniquement »). */
+  perimetre?: string;
   /**
    * Comment l'offre de ce lot a été saisie. « total » : montant_base est tapé.
    * « postes » : les prix unitaires sont dans les offres du document de
@@ -1395,6 +1399,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Note technique /100</th>
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Conforme</th>
                         <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Motif NC</th>
+                        <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Offre partielle</th>
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Options / variantes</th>
                       </tr>
                     </thead>
@@ -1474,6 +1479,20 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                                   onChange={e => updateOffre({ motif_nc: e.target.value })} />
                               )}
                             </td>
+                            <td className="px-4 py-3">
+                              <label className="inline-flex items-center gap-1.5 text-xs font-bold cursor-pointer">
+                                <input type="checkbox" checked={!!offre.partielle}
+                                  onChange={e => updateOffre({ partielle: e.target.checked, ...(e.target.checked ? {} : { perimetre: '' }) })}
+                                  className="w-4 h-4 rounded accent-amber-600" />
+                                Partielle
+                              </label>
+                              {offre.partielle && (
+                                <input className="mt-1.5 w-full min-w-[9rem] text-xs px-2 py-1.5 border border-amber-300 dark:border-amber-700 rounded-lg bg-white dark:bg-zinc-900 outline-none"
+                                  placeholder="Périmètre (ex. chape uniquement)" aria-label={`Périmètre de l'offre partielle de ${entreprise.nom}`}
+                                  value={offre.perimetre || ''}
+                                  onChange={e => updateOffre({ perimetre: e.target.value })} />
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-center">
                               <button
                                 type="button" aria-expanded={lignesOuvertes.has(cleLignes)} onClick={() => basculerLignes(cleLignes)}
@@ -1485,7 +1504,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                           </tr>
                           {lignesOuvertes.has(cleLignes) && (
                             <tr className="bg-[var(--tblr-surface-2)]/40">
-                              <td colSpan={7} className="px-4 py-3">
+                              <td colSpan={8} className="px-4 py-3">
                                 <LignesOffreEditor
                                   lotId={lot.id} entrepriseId={entreprise.id} negociations={consultation.negociations}
                                   onChange={negociations => update({ ...consultation, negociations })}
@@ -1497,7 +1516,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                         );
                       })}
                       {entreprisesLot.length === 0 && (
-                        <tr><td colSpan={7} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
+                        <tr><td colSpan={8} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1792,7 +1811,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
           {/* Par lot */}
           {lots.map(lot => {
             const offresLot = offresCourantes.filter(o => o.lot_id === lot.id);
-            const offresConformes = offresLot.filter(o => o.conforme && o.montant_base > 0);
+            // Une offre partielle ne couvre pas tout le lot : ni moins-disant, ni notée, ni classée.
+            const offresConformes = offresLot.filter(o => o.conforme && !o.partielle && o.montant_base > 0);
             const minMontant = offresConformes.length > 0 ? Math.min(...offresConformes.map(o => o.montant_base)) : 0;
             const attribution = consultation.attributions.find(a => a.lot_id === lot.id);
             const poidsPrix = consultation.criteres.find(c => c.id === 'prix')?.poids ?? 60;
@@ -1800,12 +1820,12 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
 
             const scored = offresLot.map(offre => {
               const entreprise = consultation.entreprises.find(e => e.id === offre.entreprise_id);
-              const notePrix = offre.conforme && offre.montant_base > 0 && minMontant > 0
+              const notePrix = offre.conforme && !offre.partielle && offre.montant_base > 0 && minMontant > 0
                 ? minMontant / offre.montant_base * 100 : 0;
-              const noteGlobale = offre.conforme
+              const noteGlobale = offre.conforme && !offre.partielle
                 ? notePrix * poidsPrix / 100 + (offre.note_technique || 0) * poidsTech / 100 : 0;
               return { offre, entreprise, notePrix, noteGlobale };
-            }).sort((a, b) => b.noteGlobale - a.noteGlobale);
+            }).sort((a, b) => Number(!!a.offre.partielle) - Number(!!b.offre.partielle) || b.noteGlobale - a.noteGlobale);
 
             return (
               <div key={lot.id} className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
@@ -1861,13 +1881,18 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                             !offre.conforme && 'bg-red-50/50 dark:bg-red-900/10',
                           )}>
                             <td className="px-4 py-3 text-center">
-                              {offre.conforme ? (
+                              {offre.partielle ? (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Partielle</span>
+                              ) : offre.conforme ? (
                                 <span className={cn('text-sm font-black', rank === 0 ? 'text-yellow-500' : rank === 1 ? 'text-[var(--tblr-muted)]' : rank === 2 ? 'text-amber-600' : 'text-[var(--tblr-muted)]')}>
                                   {rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `#${rank + 1}`}
                                 </span>
                               ) : <span className="text-red-500 text-xs font-bold">NC</span>}
                             </td>
-                            <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">{entreprise?.nom || '—'}</td>
+                            <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">
+                              {entreprise?.nom || '—'}
+                              {offre.partielle && <span className="block text-[0.6875rem] font-normal text-amber-700 dark:text-amber-300">Offre partielle{offre.perimetre ? ` : ${offre.perimetre}` : ''}</span>}
+                            </td>
                             <td className="px-4 py-3 text-right font-bold text-[var(--tblr-text)]">
                               {fmt(offre.montant_base)}
                               {(() => {
@@ -1878,17 +1903,17 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                               })()}
                             </td>
                             <td className="px-4 py-3 text-right text-[var(--tblr-muted)] text-xs">
-                              {offre.conforme && pctMinDisant !== '—' ? `+${pctMinDisant}%` : '—'}
+                              {offre.conforme && !offre.partielle && pctMinDisant !== '—' ? `+${pctMinDisant}%` : '—'}
                             </td>
                             <td className="px-4 py-3 text-center font-bold" style={{ color: offre.conforme ? '#206bc4' : '#d63939' }}>
-                              {offre.conforme ? notePrix.toFixed(1) : 'NC'}
+                              {!offre.conforme ? 'NC' : offre.partielle ? '—' : notePrix.toFixed(1)}
                             </td>
                             <td className="px-4 py-3 text-center font-bold text-indigo-600 dark:text-indigo-400">
-                              {offre.conforme ? (offre.note_technique || '—') : 'NC'}
+                              {!offre.conforme ? 'NC' : offre.partielle ? '—' : (offre.note_technique || '—')}
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', offre.conforme && rank === 0 ? 'bg-green-100 text-green-700' : 'text-[var(--tblr-muted)]')}>
-                                {offre.conforme ? noteGlobale.toFixed(1) : 'NC'}
+                              <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', offre.conforme && !offre.partielle && rank === 0 ? 'bg-green-100 text-green-700' : 'text-[var(--tblr-muted)]')}>
+                                {!offre.conforme ? 'NC' : offre.partielle ? '—' : noteGlobale.toFixed(1)}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-center">

@@ -94,6 +94,17 @@ L'import des offres a quitté l'onglet PRO : le DPGF et le DQE/BPU n'ont plus ni
 - **Saisie** (`act/OffrePostesDialog.tsx`) : un P.U. par article en regard de l'estimation et de l'écart, « pour mémoire » (`null`, jamais 0), postes ajoutés par l'entreprise, collage d'une colonne de tableur, Entrée passe à la ligne suivante. `repartirSaisie` (`src/lib/comparatifPrix.ts`, testé) range chaque prix **dans l'offre qui le porte** (la plus récente), les prix nouveaux dans l'offre « Saisie manuelle », un prix effacé disparaît de toutes. Plusieurs fichiers d'une même entreprise se superposent (`prixEntreprise`, le plus récent gagne). L'import d'un bordereau (`OffreImportDialog`) passe en « postes » les lots de l'entreprise qu'il chiffre.
 - **Comparatif** (`act/ComparatifPrixUnitaires.tsx`, logique pure `construireLot`) : par lot, colonne **Estimation** (P.U. du document) puis un P.U. par entreprise, médiane, meilleur prix (au moins deux entreprises), écart à l'estimation (rouge au-delà de +15 %, ambre en dessous de -15 %), total du lot calculé (base seulement, options et PSE comparées mais non comptées), classement. Une entreprise au total seul reste dans les totaux et le classement, colonne hachurée sans détail. Filtre « écarts de plus de 10 % ou pour mémoire ». Sous 768 px, une carte par article.
 - **`consultation.comparatif` se dérive des offres** pour les lots rattachés au document (`comparatifDepuisOffres`, via `versComparatif`) : l'analyse, la négociation, le RAO et l'export Excel le lisent par `consultationCourante`. Les lots sans lot de document gardent le tableau manuel (« Comparatif manuel »).
+- **Saisie par poste depuis le MCP** (`set_postes`, voir `agents-mcp.md`) : mêmes données que « Saisir les postes » (offre
+  « Saisie manuelle » du DPGF, `postesAjoutes`), même total déduit ; `consultationPostes.ts` recopie `chapitresDuLot`,
+  `totalLotPostes` et `repartirSaisie` de `comparatifPrix.ts` : **toute évolution de l'un se répercute sur l'autre**.
+- **Offre partielle** (`Offre.partielle`, `Offre.perimetre`, jsonb, aucune migration) : un devis qui ne chiffre
+  qu'une partie du lot (spécialiste en chape, par exemple) se coche « Partielle » dans la collecte des offres, avec
+  son périmètre en clair. Elle reste visible (badge ambre, périmètre sous le nom, RAO et comparatif) mais n'est
+  **jamais classée, notée ni prise pour moins-disante** : `offresComparables` (`actNegociation.ts`, donc `reperesLot`,
+  la synthèse économique et la moyenne), l'analyse de `ACTModule` et le RAO (`actAnalysisExport.ts`) l'écartent. Un lot
+  qui n'a que des offres partielles est donc compté à son estimation dans les totaux. Elle peut encore être attribuée
+  (bouton « Attribuer »), ce qui ne dit rien du reste du lot. Écrite par le MCP avec `set_offre` (`partielle`, `perimetre`).
+  Pas encore fait : le comparatif des P.U. (`comparatifPrix.ts`) et l'export Excel du comparatif ne la distinguent pas.
 - **Pas encore fait** : la négociation travaille toujours sur les totaux et les lignes d'option, pas sur les P.U. ; l'export Excel du comparatif n'a pas de colonnes de P.U. par entreprise (il exporte les montants par article) ; interface non vérifiée dans un navigateur réel.
 - Tests : `src/lib/__tests__/comparatifPrix.test.ts`.
 
