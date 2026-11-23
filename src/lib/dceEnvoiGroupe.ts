@@ -5,8 +5,8 @@
 import { destinatairesEntreprise, type EntrepriseSuivi } from './actEntreprises';
 import { visiteNotifiee } from './actVisites';
 
-/** `dce` : envoi du dossier ; `visite` : convocation à la visite ; `reponse` : diffusion d'une réponse publique ; `additif` : modification du DCE. */
-export type ModeEnvoi = 'dce' | 'visite' | 'reponse' | 'additif';
+/** `dce` : envoi du dossier ; `visite` : convocation à la visite ; `reponse` : diffusion d'une réponse publique ; `additif` : modification du DCE ; `quantites` : demande de confirmation des quantités. */
+export type ModeEnvoi = 'dce' | 'visite' | 'reponse' | 'additif' | 'quantites';
 
 export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot' | 'sans_creneau';
 
@@ -40,8 +40,10 @@ export function planEnvoiGroupe(
       : mode === 'dce' && entreprise.lots_ids.length === 0 ? 'sans_lot'
       : mode === 'visite' && !entreprise.visite_creneau_id ? 'sans_creneau'
       : undefined;
-    const dejaEnvoye = mode === 'dce' ? !!entreprise.dce_transmis_le : mode === 'visite' ? visiteNotifiee(entreprise) : dejaDiffusee.has(entreprise.id);
-    const dejaLe = mode === 'dce' ? entreprise.dce_transmis_le : mode === 'visite' ? entreprise.visite_convoquee_le : undefined;
+    const dejaEnvoye = mode === 'dce' ? !!entreprise.dce_transmis_le : mode === 'visite' ? visiteNotifiee(entreprise)
+      : mode === 'quantites' ? !!entreprise.quantites_demandees_le : dejaDiffusee.has(entreprise.id);
+    const dejaLe = mode === 'dce' ? entreprise.dce_transmis_le : mode === 'visite' ? entreprise.visite_convoquee_le
+      : mode === 'quantites' ? entreprise.quantites_demandees_le : undefined;
     return { entreprise, destinataires, motif, dejaEnvoye, dejaLe };
   });
 }
@@ -73,6 +75,7 @@ export function marquageEnvoi(e: EntrepriseSuivi, mode: ModeEnvoi, aujourdhui: s
     ? { visite_convoquee_creneau_id: e.visite_creneau_id, visite_convoquee_le: aujourdhui }
     : {};
   if (mode === 'reponse' || mode === 'additif') return {};
+  if (mode === 'quantites') return { quantites_demandees_le: aujourdhui };
   if (mode === 'visite') return convocation;
   return { dce_transmis_le: e.dce_transmis_le || aujourdhui, envoyer_dce: true, ne_repond_pas: false, ...convocation };
 }

@@ -13,6 +13,7 @@ import type { DonneesMessageDce } from './dceEnvoiMessage';
 import type { EntrepriseSuivi } from './actEntreprises';
 import { visitePourMessage, type CreneauVisite, type VisiteSite } from './actVisites';
 import type { ProjectLot } from '../types';
+import type { LotQuantitesAConfirmer } from './quantitesConfirmation';
 
 /** Pièce du DCE telle que la reçoit la préparation (même forme que PieceDce du tableau). */
 export interface PieceDcePreparation {
@@ -45,6 +46,11 @@ export interface ContexteEnvoiDce {
    * sans pièces du marché ni nouveau lien de dépôt (un nouveau lien révoquerait celui que l'entreprise a déjà).
    */
   additif?: { revision: DceRevision; numero: number };
+  /**
+   * Demande de confirmation des quantités : par entreprise, les postes à confirmer. Rien n'est joint (ni DCE ni pièces
+   * du marché) ; un lien de dépôt personnel est créé, c'est là que l'entreprise répond.
+   */
+  quantites?: Record<string, LotQuantitesAConfirmer[]>;
 }
 
 export interface PreparationEntreprise {
@@ -63,6 +69,7 @@ export function donneesSansReseau(ctx: ContexteEnvoiDce, entreprise: EntrepriseS
     lignesIndices: lignesIndices(piecesEntreprise, ctx.documents),
     visite: ctx.visite ? visitePourMessage(entreprise, ctx.visite.creneaux, ctx.visite.site) : undefined,
     questionReponse: ctx.questionReponse,
+    quantites: ctx.quantites?.[entreprise.id],
     additif: ctx.additif ? blocAdditif(ctx.additif.revision, ctx.additif.numero, dateFr(ctx.additif.revision.cree_le)) : undefined,
     dateLimite: ctx.deadlineAt ? formaterDateHeure(ctx.deadlineAt) : undefined,
     depotNonPropose: !ctx.depotActif ? ctx.depotIndisponible : undefined,
@@ -71,6 +78,7 @@ export function donneesSansReseau(ctx: ContexteEnvoiDce, entreprise: EntrepriseS
 }
 
 export async function preparerEnvoiEntreprise(ctx: ContexteEnvoiDce, entreprise: EntrepriseSuivi): Promise<PreparationEntreprise> {
+  if (ctx.quantites) return preparerQuantites(ctx, entreprise);
   const piecesEntreprise = piecesDeEntreprise(ctx.pieces, entreprise.lots_ids);
   const lignes = lignesIndices(piecesEntreprise, ctx.documents);
   const revisees = ctx.additif ? new Set(ctx.additif.revision.pieces.map(p => p.id)) : null;
@@ -128,4 +136,22 @@ export async function preparerEnvoiEntreprise(ctx: ContexteEnvoiDce, entreprise:
       piecesMarche, lienDepot, echecLienDepot, echecsPieces: echecs,
     },
   };
+}
+
+/** Demande de quantités : aucun fichier, seulement le lien de dépôt personnel où l'entreprise répond. */
+async function preparerQuantites(ctx: ContexteEnvoiDce, entreprise: EntrepriseSuivi): Promise<PreparationEntreprise> {
+  let lienDepot: string | undefined; let echecLienDepot = false;
+  if (ctx.depotActif && ctx.projectId) {
+    try {
+      const r = await apiFetch<{ url: string }>(`/api/projects/${ctx.projectId}/depot/invites`, {
+        method: 'POST',
+        body: JSON.stringify({
+          entreprise_id: entreprise.id, entreprise_nom: entreprise.nom, email: entreprise.email || undefined,
+          contact_id: entreprise.contact_id || undefined, lots_ids: entreprise.lots_ids,
+        }),
+      });
+      lienDepot = r.url;
+    } catch { echecLienDepot = true; }
+  }
+  return { fichiers: [], donnees: { ...donneesSansReseau(ctx, entreprise), lienDepot, echecLienDepot, echecsPieces: [] } };
 }

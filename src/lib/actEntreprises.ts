@@ -20,6 +20,8 @@ export interface EntrepriseSuivi {
   /** Créneau cité dans le dernier message de convocation (ou d'envoi du DCE) et date de ce message. */
   visite_convoquee_creneau_id?: string;
   visite_convoquee_le?: string;
+  /** Date du message « quantités à confirmer » : la page de dépôt de l'entreprise ouvre alors la confirmation de ses quantités. */
+  quantites_demandees_le?: string;
   observation?: string;
   /**
    * Date d'une remise faite sur l'espace de dépôt et pas encore traitée. Jamais

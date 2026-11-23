@@ -15,7 +15,7 @@ import type { EntrepriseSuivi } from '../../lib/actEntreprises';
 import type { PieceMarcheGeneree } from '../../lib/marchePieces';
 import { LIBELLE_MOTIF, lignesCochees, planEnvoiGroupe, type ModeEnvoi } from '../../lib/dceEnvoiGroupe';
 import {
-  JETONS_MODELE, MODELE_CORPS, MODELE_CORPS_ADDITIF, MODELE_SUJET_ADDITIF, MODELE_CORPS_REPONSE, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_REPONSE, MODELE_SUJET_VISITE, blocsMessageDce, jetonsInconnus, remplirModele,
+  JETONS_MODELE, MODELE_CORPS, MODELE_CORPS_ADDITIF, MODELE_SUJET_ADDITIF, MODELE_CORPS_QUANTITES, MODELE_CORPS_REPONSE, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_QUANTITES, MODELE_SUJET_REPONSE, MODELE_SUJET_VISITE, blocsMessageDce, jetonsInconnus, remplirModele,
 } from '../../lib/dceEnvoiMessage';
 import { donneesSansReseau, preparerEnvoiEntreprise, type ContexteEnvoiDce } from '../../lib/dceEnvoiPreparation';
 
@@ -38,6 +38,11 @@ const TEXTES: Record<ModeEnvoi, { sujet: string; corps: string; objet: string; v
     sujet: MODELE_SUJET_ADDITIF, corps: MODELE_CORPS_ADDITIF, objet: 'l\'additif', verbe: 'Envoyer l\'additif à',
     description: 'Seules les entreprises qui ont déjà reçu le DCE et que les pièces modifiées concernent sont proposées. Chacune reçoit son propre message, avec un lien « j\'ai bien reçu » qui lui est personnel.',
     pied: 'Les fichiers des pièces modifiées et le tableau des indices sont joints à chaque message. Aucun nouveau lien de dépôt n\'est créé : celui de l\'entreprise reste valable.',
+  },
+  quantites: {
+    sujet: MODELE_SUJET_QUANTITES, corps: MODELE_CORPS_QUANTITES, objet: 'la demande de confirmation des quantités', verbe: 'Demander confirmation à',
+    description: 'Seules les entreprises dont la quantité diffère du dossier sont proposées. Chacune reçoit ses propres postes et répond depuis sa page de dépôt. Sa réponse ne modifie jamais son offre : vous l\'appliquez vous-même depuis le comparatif.',
+    pied: 'Aucune pièce n\'est jointe. Un nouveau lien de dépôt personnel est créé à l\'envoi : il remplace le précédent de l\'entreprise.',
   },
   reponse: {
     sujet: MODELE_SUJET_REPONSE, corps: MODELE_CORPS_REPONSE, objet: 'la réponse', verbe: 'Envoyer la réponse à',
@@ -97,7 +102,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
     if (!ligne) return null;
     const base = donneesSansReseau(contexte, ligne.entreprise);
     const donnees = {
-      ...base, lienDepot: mode === 'dce' && contexte.depotActif ? LIEN_APERCU : undefined,
+      ...base, lienDepot: (mode === 'dce' || mode === 'quantites') && contexte.depotActif ? LIEN_APERCU : undefined,
       additif: base.additif ? { ...base.additif, lienAccuse: LIEN_ACCUSE_APERCU } : undefined,
     };
     const blocs = blocsMessageDce(donnees);
@@ -140,7 +145,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
       maj(id, { etat: 'encours' });
       try {
         // Une convocation ne joint rien et ne crée aucun lien de dépôt : pas de préparation réseau.
-        const prepBrute = mode === 'dce' || mode === 'additif'
+        const prepBrute = mode === 'dce' || mode === 'additif' || mode === 'quantites'
           ? await preparerEnvoiEntreprise(ctx, ligne.entreprise)
           : { fichiers: [] as File[], donnees: donneesSansReseau(contexte, ligne.entreprise) };
         const prep = mode === 'additif' && prepBrute.donnees.additif
@@ -176,7 +181,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
     if (aEnvoyer.length === 0 || enCours) return;
     const objet = TEXTES[mode].objet;
     const message = `Envoyer ${objet} à ${aEnvoyer.length} entreprise${aEnvoyer.length > 1 ? 's' : ''}, un message individuel chacune ?`
-      + (dejaCoches ? `\n\n${dejaCoches} d'entre elles l'ont déjà reçu${mode === 'dce' ? ' : leur lien de dépôt précédent sera révoqué' : ''}.` : '');
+      + (dejaCoches ? `\n\n${dejaCoches} d'entre elles l'ont déjà reçu${mode === 'dce' || mode === 'quantites' ? ' : leur lien de dépôt précédent sera révoqué' : ''}.` : '');
     if (!window.confirm(message)) return;
     void lancer(aEnvoyer);
   };
@@ -221,7 +226,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
                     </div>
                     <div className="text-xs text-right shrink-0 max-w-[16rem]">
                       {l.motif && <span className="text-amber-700 dark:text-amber-300">{LIBELLE_MOTIF[l.motif]}</span>}
-                      {!l.motif && l.dejaEnvoye && !st && <span className="text-[var(--tblr-muted)]">{mode === 'dce' ? 'DCE transmis' : 'Déjà convoquée'}{l.dejaLe ? ` le ${fmtDate(l.dejaLe)}` : ''}</span>}
+                      {!l.motif && l.dejaEnvoye && !st && <span className="text-[var(--tblr-muted)]">{mode === 'dce' ? 'DCE transmis' : mode === 'quantites' ? 'Déjà demandé' : 'Déjà convoquée'}{l.dejaLe ? ` le ${fmtDate(l.dejaLe)}` : ''}</span>}
                       {st?.etat === 'attente' && <span className="text-[var(--tblr-muted)]">En attente</span>}
                       {st?.etat === 'encours' && <span className="inline-flex items-center gap-1 text-blue-700"><IconLoader2 size={13} className="animate-spin" /> Envoi…</span>}
                       {st?.etat === 'envoye' && <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300"><IconCheck size={13} /> Envoyé</span>}

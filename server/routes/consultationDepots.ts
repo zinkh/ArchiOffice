@@ -296,6 +296,25 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
     }
   });
 
+  // ── Réponses aux quantités à confirmer ─────────────────────────────────────
+  // Lecture seule : l'écran de l'ACT les montre dans le panneau des quantités et l'architecte les applique
+  // à l'offre. Rien n'est modifié ici.
+  app.get('/api/projects/:projectId/depot/quantites/reponses', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await projetDuCabinet(tenantId, req.params.projectId))) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_quantites_reponses')
+        .select('entreprise_id, ligne_id, choix, quantite, updated_at').eq('project_id', req.params.projectId);
+      res.json(((data as any[]) || []).map(r => ({
+        entreprise_id: r.entreprise_id, ligne_id: r.ligne_id, choix: r.choix,
+        quantite: r.quantite == null ? null : Number(r.quantite), repondu_le: r.updated_at,
+      })));
+    } catch (err: any) {
+      console.error('[GET depot/quantites/reponses]', err?.message);
+      res.status(500).json({ error: 'Lecture des réponses impossible.' });
+    }
+  });
+
   // ── Questions des entreprises ──────────────────────────────────────────────
   // Boîte de réception : l'écran de l'ACT reprend chaque question dans consultation.questions (où la
   // réponse est saisie) en comparant les identifiants, sans rien marquer ici. Lecture permise même

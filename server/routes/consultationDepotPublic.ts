@@ -39,6 +39,8 @@ import { piecesDeEntreprise } from '../../src/lib/dceIndices';
 import { assainirLiensExternes } from '../../src/lib/dossierPartageMail';
 import { MAX_QUESTIONS_PAR_ENTREPRISE, questionsOuvertes, validerQuestion } from '../../src/lib/depotQuestions';
 import { additifsDeLentreprise, type DceRevision } from '../../src/lib/dceRevisions';
+import { lotsAConfirmer, sourcesQuantites } from '../consultationDepot/quantitesAConfirmer';
+import { validerReponsesQuantites } from '../../src/lib/quantitesConfirmation';
 import { echapperHtml, lireAccuse, type AccusePayload } from '../consultationDepot/accuseAdditif';
 import {
   DEPOT_EXTENSIONS, DEPOT_FORMAT_LABELS, DEPOT_KINDS_FICHIER, DEPOT_TABLEURS,
@@ -263,6 +265,40 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
     }));
   };
 
+
+  /**
+   * Quantités que le cabinet demande à CETTE entreprise de confirmer : seulement après l'envoi du message
+   * « quantités à confirmer » (drapeau posé sur l'entreprise dans la consultation), et seulement ses propres
+   * postes. Chaque ligne porte la réponse déjà donnée, pour qu'elle puisse la revoir.
+   */
+  const quantitesDeLinvitation = async (inv: InvitationDepot, lots: any[]) => {
+    const { data: act } = await supabaseAdmin
+      .from('act_data').select('consultation')
+      .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).maybeSingle();
+    const entreprise = (Array.isArray((act as any)?.consultation?.entreprises) ? (act as any).consultation.entreprises : []).find((e: any) => e?.id === inv.entreprise_id);
+    if (!entreprise?.quantites_demandees_le) return null;
+    const titre = (id: string) => { const l = lots.find(x => x.id === id); return l ? `Lot ${l.lot_number} ${l.lot_title}` : 'Lot'; };
+    const aConfirmer = lotsAConfirmer(await sourcesQuantites(supabaseAdmin, inv.tenant_id, inv.project_id), inv.entreprise_id, inv.lots_ids, titre);
+    if (!aConfirmer.length) return null;
+    const { data: reponses } = await supabaseAdmin
+      .from('consultation_quantites_reponses').select('ligne_id, choix, quantite').eq('invite_id', inv.id);
+    const parLigne = new Map(((reponses as any[]) || []).map(r => [r.ligne_id, r]));
+    return {
+      demandees_le: String(entreprise.quantites_demandees_le),
+      lots: aConfirmer.map(l => ({
+        lot: l.lot,
+        lignes: l.lignes.map(x => {
+          const r = parLigne.get(x.ligneId);
+          return {
+            ligne_id: x.ligneId, code: x.code, titre: x.titre, unite: x.unite,
+            quantite_dossier: x.quantiteDossier, quantite_entreprise: x.quantiteEntreprise,
+            reponse: r ? { choix: r.choix, quantite: r.quantite == null ? null : Number(r.quantite) } : null,
+          };
+        }),
+      })),
+    };
+  };
+
   // ── Contexte du portail ────────────────────────────────────────────────────
   app.get('/api/public/depot/:token', depotReadLimiter, garde, async (req: any, res: any) => {
     try {
@@ -282,6 +318,7 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
       const visite = await visiteDeLinvitation(inv).catch(() => null);
       const questions = await questionsDeLinvitation(inv).catch(() => null);
       const additifs = await additifsDeLinvitation(inv).catch(() => []);
+      const quantites = await quantitesDeLinvitation(inv, lots).catch(() => null);
       // Fichiers que l'archive « tout le dossier » contiendrait (sans doublon entre pièces du DCE et documents publiés).
       const fichiersDossier = new Map<string, number | null>();
       for (const p of dce) for (const f of p.fichiers) fichiersDossier.set(f.id, f.taille);
@@ -321,6 +358,7 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
         visite,
         questions,
         additifs,
+        quantites,
         // Lien « tout le dossier en une archive » : absent s'il n'y a aucun fichier à rassembler.
         dossier_zip: fichiersDossier.size > 0
           ? { fichiers: fichiersDossier.size, taille: [...fichiersDossier.values()].reduce<number>((s, t) => s + (t ?? 0), 0) || null }
@@ -564,6 +602,45 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
     } catch (e: any) {
       console.error('[POST /api/public/depot/:token/questions]', e?.message);
       res.status(500).json({ error: "La question n'a pas pu être enregistrée. Merci de réessayer." });
+    }
+  });
+
+
+  // ── Réponse de l'entreprise aux quantités à confirmer ───────────────────────
+  // Enregistrée à part (consultation_quantites_reponses) : elle ne change jamais l'offre, c'est
+  // l'architecte qui l'applique. Une nouvelle réponse sur un poste remplace la précédente.
+  app.post('/api/public/depot/:token/quantites', depotWriteLimiter, garde, async (req: any, res: any) => {
+    const { invitation: inv, project } = req.depot as ContexteDepot;
+    try {
+      const lots = await lotsDeLinvitation(inv);
+      const demande = await quantitesDeLinvitation(inv, lots);
+      if (!demande) return res.status(409).json({ error: "Aucune quantité n'est à confirmer pour votre offre. Contactez le cabinet." });
+      const autorises = new Set<string>(demande.lots.flatMap(l => l.lignes.map(x => x.ligne_id)));
+      const controle = validerReponsesQuantites(req.body, autorises);
+      if (!controle.ok) return res.status(400).json({ error: controle.raison });
+
+      const { data: existantes } = await supabaseAdmin.from('consultation_quantites_reponses').select('id, ligne_id').eq('invite_id', inv.id);
+      const idParLigne = new Map(((existantes as any[]) || []).map(r => [r.ligne_id, r.id]));
+      const maintenant = new Date().toISOString();
+      for (const r of controle.reponses) {
+        const valeurs = { choix: r.choix, quantite: r.choix === 'autre' ? r.quantite ?? null : null, updated_at: maintenant };
+        const idExistant = idParLigne.get(r.ligneId);
+        const { error } = idExistant
+          ? await supabaseAdmin.from('consultation_quantites_reponses').update(valeurs).eq('id', idExistant).eq('invite_id', inv.id)
+          : await supabaseAdmin.from('consultation_quantites_reponses').insert({
+            id: crypto.randomUUID(), tenant_id: inv.tenant_id, project_id: inv.project_id, invite_id: inv.id,
+            entreprise_id: inv.entreprise_id, entreprise_nom: inv.entreprise_nom, ligne_id: r.ligneId, ...valeurs, created_at: maintenant,
+          });
+        if (error) throw error;
+      }
+      await notifierDepot(supabaseAdmin, inv.tenant_id, inv.project_id, {
+        titre: 'Quantités confirmées par une entreprise',
+        corps: `${inv.entreprise_nom} a répondu sur ${controle.reponses.length} poste${controle.reponses.length > 1 ? 's' : ''} pour ${project.name || "l'opération"}.`,
+      }).catch(() => {});
+      res.status(201).json({ enregistrees: controle.reponses.length, recu_le: maintenant });
+    } catch (e: any) {
+      console.error('[POST /api/public/depot/:token/quantites]', e?.message);
+      res.status(500).json({ error: "Votre réponse n'a pas pu être enregistrée. Merci de réessayer." });
     }
   });
 
