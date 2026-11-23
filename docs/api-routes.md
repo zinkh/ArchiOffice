@@ -4,7 +4,7 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-862 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+867 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
@@ -169,10 +169,10 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | DELETE | `/api/croquis/:id/background` | [server/routes/croquis.ts:326](../server/routes/croquis.ts#L326) |
 | POST | `/api/croquis/:id/background` | [server/routes/croquis.ts:322](../server/routes/croquis.ts#L322) |
 | POST | `/api/croquis/:id/preview` | [server/routes/croquis.ts:323](../server/routes/croquis.ts#L323) |
-| POST | `/api/depots/:id/analyser` | [server/routes/consultationDepots.ts:347](../server/routes/consultationDepots.ts#L347) |
-| POST | `/api/depots/:id/integrer` | [server/routes/consultationDepots.ts:341](../server/routes/consultationDepots.ts#L341) |
-| POST | `/api/depots/:id/rejeter` | [server/routes/consultationDepots.ts:342](../server/routes/consultationDepots.ts#L342) |
-| GET | `/api/depots/:id/url` | [server/routes/consultationDepots.ts:304](../server/routes/consultationDepots.ts#L304) |
+| POST | `/api/depots/:id/analyser` | [server/routes/consultationDepots.ts:383](../server/routes/consultationDepots.ts#L383) |
+| POST | `/api/depots/:id/integrer` | [server/routes/consultationDepots.ts:377](../server/routes/consultationDepots.ts#L377) |
+| POST | `/api/depots/:id/rejeter` | [server/routes/consultationDepots.ts:378](../server/routes/consultationDepots.ts#L378) |
+| GET | `/api/depots/:id/url` | [server/routes/consultationDepots.ts:340](../server/routes/consultationDepots.ts#L340) |
 | POST | `/api/detail-situations` | [server/routes/situations.ts:199](../server/routes/situations.ts#L199) |
 | DELETE | `/api/detail-situations/:id` | [server/routes/situations.ts:236](../server/routes/situations.ts#L236) |
 | PUT | `/api/detail-situations/:id` | [server/routes/situations.ts:221](../server/routes/situations.ts#L221) |
@@ -518,9 +518,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/projects/:projectId/depot/invites` | [server/routes/consultationDepots.ts:176](../server/routes/consultationDepots.ts#L176) |
 | POST | `/api/projects/:projectId/depot/invites` | [server/routes/consultationDepots.ts:197](../server/routes/consultationDepots.ts#L197) |
 | DELETE | `/api/projects/:projectId/depot/invites/:id` | [server/routes/consultationDepots.ts:248](../server/routes/consultationDepots.ts#L248) |
+| GET | `/api/projects/:projectId/depot/questions` | [server/routes/consultationDepots.ts:265](../server/routes/consultationDepots.ts#L265) |
+| DELETE | `/api/projects/:projectId/depot/questions/:id` | [server/routes/consultationDepots.ts:284](../server/routes/consultationDepots.ts#L284) |
 | GET | `/api/projects/:projectId/depot/settings` | [server/routes/consultationDepots.ts:84](../server/routes/consultationDepots.ts#L84) |
 | PUT | `/api/projects/:projectId/depot/settings` | [server/routes/consultationDepots.ts:102](../server/routes/consultationDepots.ts#L102) |
-| GET | `/api/projects/:projectId/depots` | [server/routes/consultationDepots.ts:262](../server/routes/consultationDepots.ts#L262) |
+| GET | `/api/projects/:projectId/depots` | [server/routes/consultationDepots.ts:298](../server/routes/consultationDepots.ts#L298) |
 | GET | `/api/projects/:projectId/devis-travaux-modificatifs` | [server/routes/travauxModificatifs.ts:255](../server/routes/travauxModificatifs.ts#L255) |
 | POST | `/api/projects/:projectId/devis-travaux-modificatifs` | [server/routes/travauxModificatifs.ts:308](../server/routes/travauxModificatifs.ts#L308) |
 | GET | `/api/projects/:projectId/doe` | [server/routes/doeAtelier.ts:89](../server/routes/doeAtelier.ts#L89) |
@@ -590,11 +592,14 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/proposals/:id/signature/sync` | [server/routes/signatures.ts:110](../server/routes/signatures.ts#L110) |
 | POST | `/api/proposals/import` | [server/routes/proposals.ts:264](../server/routes/proposals.ts#L264) |
 | GET | `/api/public/chantier/:token` | [server/routes/panneaux.ts:179](../server/routes/panneaux.ts#L179) |
-| GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:167](../server/routes/consultationDepotPublic.ts#L167) |
-| DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:442](../server/routes/consultationDepotPublic.ts#L442) |
-| POST | `/api/public/depot/:token/fichiers` | [server/routes/consultationDepotPublic.ts:305](../server/routes/consultationDepotPublic.ts#L305) |
-| GET | `/api/public/depot/:token/pieces/:docId` | [server/routes/consultationDepotPublic.ts:234](../server/routes/consultationDepotPublic.ts#L234) |
-| POST | `/api/public/depot/:token/saisie` | [server/routes/consultationDepotPublic.ts:403](../server/routes/consultationDepotPublic.ts#L403) |
+| GET | `/api/public/depot/:token` | [server/routes/consultationDepotPublic.ts:239](../server/routes/consultationDepotPublic.ts#L239) |
+| DELETE | `/api/public/depot/:token/depots/:id` | [server/routes/consultationDepotPublic.ts:656](../server/routes/consultationDepotPublic.ts#L656) |
+| GET | `/api/public/depot/:token/dossier.zip` | [server/routes/consultationDepotPublic.ts:357](../server/routes/consultationDepotPublic.ts#L357) |
+| POST | `/api/public/depot/:token/fichiers` | [server/routes/consultationDepotPublic.ts:519](../server/routes/consultationDepotPublic.ts#L519) |
+| GET | `/api/public/depot/:token/pieces/:docId` | [server/routes/consultationDepotPublic.ts:318](../server/routes/consultationDepotPublic.ts#L318) |
+| POST | `/api/public/depot/:token/questions` | [server/routes/consultationDepotPublic.ts:422](../server/routes/consultationDepotPublic.ts#L422) |
+| POST | `/api/public/depot/:token/saisie` | [server/routes/consultationDepotPublic.ts:617](../server/routes/consultationDepotPublic.ts#L617) |
+| POST | `/api/public/depot/:token/visite/confirmer` | [server/routes/consultationDepotPublic.ts:463](../server/routes/consultationDepotPublic.ts#L463) |
 | GET | `/api/public/doe/:token` | [server/routes/doeAtelierPublic.ts:94](../server/routes/doeAtelierPublic.ts#L94) |
 | DELETE | `/api/public/doe/:token/documents/:id` | [server/routes/doeAtelierPublic.ts:243](../server/routes/doeAtelierPublic.ts#L243) |
 | POST | `/api/public/doe/:token/fichiers` | [server/routes/doeAtelierPublic.ts:144](../server/routes/doeAtelierPublic.ts#L144) |

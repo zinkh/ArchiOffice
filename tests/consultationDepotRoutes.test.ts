@@ -11,6 +11,7 @@ import { memoryDrive } from '../server/externalStorage/memoryProvider';
 import { invalidateConnectionCache } from '../server/externalStorage/externalConnection';
 import { hacherJeton } from '../server/consultationDepot/tokens';
 import { faussePdf, fausseDocx, fausseOds } from './fixtures/zipBuilder';
+import JSZip from 'jszip';
 
 // Les limiteurs du portail sont réglés pour traverser tout le scénario ; leur
 // coupure est vérifiée dans consultationDepotLimiter.test.ts.
@@ -664,5 +665,304 @@ describe('lecture des montants probables', () => {
 
     fakeSupabaseAdmin.getTable('tenants').find(t => t.id === c.tenantId)!.plan = 'pro';
     expect((await analyser(c, id)).status).toBe(403);
+  });
+});
+
+
+describe('portail public : tout le dossier en une archive et visite de site', () => {
+  const lireZip = async (jeton: string) => {
+    const res = await request(app).get(`/api/public/depot/${jeton}/dossier.zip`)
+      .buffer(true).parse((r, cb) => { const morceaux: Buffer[] = []; r.on('data', (m: Buffer) => morceaux.push(m)); r.on('end', () => cb(null, Buffer.concat(morceaux))); });
+    return res;
+  };
+
+  async function dossier(c: Cabinet, extra: Record<string, any> = {}) {
+    const conn = fakeSupabaseAdmin.getTable('external_storage_connections').find(x => x.tenant_id === c.tenantId)!;
+    const { buildExternalRef } = await import('../server/externalStorage/externalRef');
+    const ajoute = (cle: string, nom: string, contenu: string) => {
+      memoryDrive.files.set(cle, { id: cle, parentId: '', name: nom, buffer: Buffer.from(contenu), mimeType: 'application/pdf', trashed: false });
+      return buildExternalRef({ provider: 'webdav', connectionId: conn.id, externalId: cle, fileName: nom });
+    };
+    const rc = uid('doc'); const cctpA = uid('doc'); const cctpB = uid('doc'); const publie = uid('doc'); const absent = uid('doc');
+    fakeSupabaseAdmin.seed('documents', [
+      { id: rc, tenant_id: c.tenantId, project_id: c.projectId, name: 'RC.pdf', file_url: ajoute('ArchiOffice/RC.pdf', 'RC.pdf', 'contenu RC') },
+      { id: cctpA, tenant_id: c.tenantId, project_id: c.projectId, name: 'CCTP charpente.pdf', file_url: ajoute('ArchiOffice/A.pdf', 'CCTP charpente.pdf', 'contenu A') },
+      { id: cctpB, tenant_id: c.tenantId, project_id: c.projectId, name: 'CCTP couverture.pdf', file_url: ajoute('ArchiOffice/B.pdf', 'CCTP couverture.pdf', 'contenu B') },
+      { id: publie, tenant_id: c.tenantId, project_id: c.projectId, name: 'Notice sécurité.pdf', file_url: ajoute('ArchiOffice/N.pdf', 'Notice sécurité.pdf', 'contenu N') },
+      { id: absent, tenant_id: c.tenantId, project_id: c.projectId, name: 'Disparu.pdf', file_url: buildExternalRef({ provider: 'webdav', connectionId: conn.id, externalId: 'ArchiOffice/disparu.pdf', fileName: 'Disparu.pdf' }) },
+    ]);
+    fakeSupabaseAdmin.seed('act_data', [{
+      id: uid('act'), tenant_id: c.tenantId, project_id: c.projectId,
+      consultation: {
+        dce_documents: [
+          { id: 'p1', nom: 'Règlement de consultation', type_doc: 'RC', tous_lots: true, lots_ids: [], document_ids: [rc, absent] },
+          { id: 'p2', nom: 'CCTP Charpente', type_doc: 'CCTP', tous_lots: false, lots_ids: [c.lotA], document_ids: [cctpA] },
+          { id: 'p3', nom: 'CCTP Couverture', type_doc: 'CCTP', tous_lots: false, lots_ids: [c.lotB], document_ids: [cctpB] },
+          { id: 'p4', nom: 'Plans (kDrive)', type_doc: 'Autre', partage: true, tous_lots: true, lots_ids: [], document_ids: [],
+            liens_externes: [{ libelle: 'Plans', url: 'https://exemple.fr/plans' }, { libelle: 'Piège', url: 'javascript:alert(1)' }] },
+        ],
+        ...extra,
+      },
+    }]);
+    await request(app).put(`/api/projects/${c.projectId}/depot/settings`).set(authHeader(c.token)).send({ published_document_ids: [publie, rc] });
+    return { rc, cctpA, cctpB, publie, absent };
+  }
+
+  it('rassemble les pièces de ses lots et les documents publiés, rangés par pièce, sans doublon', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c); // lot A seulement
+    const res = await lireZip(jeton);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/zip');
+    expect(res.headers['content-disposition']).toMatch(/attachment; filename="Villa Martin - Dossier de consultation\.zip"/);
+    expect(res.headers['cache-control']).toContain('no-store');
+    const zip = await JSZip.loadAsync(res.body as Buffer);
+    const noms = Object.keys(zip.files).filter(n => !zip.files[n].dir).sort();
+    expect(noms).toEqual([
+      'CCTP Charpente/CCTP charpente.pdf',
+      'Documents complémentaires/Notice sécurité.pdf',
+      'Fichiers non ajoutés.txt',
+      'Liens externes.txt',
+      'Règlement de consultation/RC.pdf', // le RC publié aussi n'est pas ajouté deux fois
+    ].sort());
+    expect(await zip.file('Règlement de consultation/RC.pdf')!.async('string')).toBe('contenu RC');
+  });
+
+  it('ne contient jamais la pièce d\'un autre lot', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c);
+    const zip = await JSZip.loadAsync((await lireZip(jeton)).body as Buffer);
+    expect(Object.keys(zip.files).join('\n')).not.toContain('Couverture');
+  });
+
+  it('signale un fichier introuvable et ne garde que les liens https', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c);
+    const zip = await JSZip.loadAsync((await lireZip(jeton)).body as Buffer);
+    expect(await zip.file('Fichiers non ajoutés.txt')!.async('string')).toContain('Disparu.pdf');
+    const liens = await zip.file('Liens externes.txt')!.async('string');
+    expect(liens).toContain('https://exemple.fr/plans');
+    expect(liens).not.toContain('javascript');
+  });
+
+  it('annonce le dossier dans le contexte, sans doublon entre DCE et documents publiés', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c);
+    const ctx = await request(app).get(`/api/public/depot/${jeton}`);
+    expect(ctx.body.dossier_zip.fichiers).toBe(4); // RC, absent, CCTP charpente, notice (RC publié compté une fois)
+  });
+
+  it('répond 404 et n\'annonce rien quand il n\'y a aucun fichier', async () => {
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    expect((await request(app).get(`/api/public/depot/${jeton}`)).body.dossier_zip).toBeNull();
+    expect((await request(app).get(`/api/public/depot/${jeton}/dossier.zip`)).status).toBe(404);
+  });
+
+  it('exige un lien valide : 404 identique pour un jeton inconnu', async () => {
+    expect((await request(app).get(`/api/public/depot/dpt_${'z'.repeat(43)}/dossier.zip`)).status).toBe(404);
+  });
+
+  it('se ferme comme le reste du portail quand le cabinet quitte le plan Enterprise', async () => {
+    const c = cabinet();
+    await dossier(c);
+    const { jeton } = await inviter(c);
+    fakeSupabaseAdmin.getTable('tenants').find(t => t.id === c.tenantId)!.plan = 'pro';
+    expect((await request(app).get(`/api/public/depot/${jeton}/dossier.zip`)).status).toBe(503);
+  });
+
+  it('annonce son créneau de visite, le lieu et les consignes', async () => {
+    const c = cabinet();
+    await dossier(c, {
+      creneaux_visite: [{ id: 'c1', date_heure: '2030-06-10T09:30' }, { id: 'c2', date_heure: '2030-06-12T14:00' }],
+      entreprises: [{ id: 'e1', nom: 'SARL Dupont', lots_ids: [c.lotA], visite_creneau_id: 'c2' }],
+      visite_site: { lieu: ' 12 rue du Chantier ', consignes: 'Casque obligatoire' },
+    });
+    const { jeton } = await inviter(c);
+    const { body } = await request(app).get(`/api/public/depot/${jeton}`);
+    expect(body.visite).toEqual({ creneau: '2030-06-12T14:00', propositions: [], lieu: '12 rue du Chantier', consignes: 'Casque obligatoire', confirmee_le: null });
+  });
+
+  it('propose les créneaux à venir sans créneau affecté, jamais ceux du passé, et ne montre pas les autres entreprises', async () => {
+    const c = cabinet();
+    await dossier(c, {
+      creneaux_visite: [{ id: 'p', date_heure: '2020-01-01T09:00' }, { id: 'c1', date_heure: '2030-06-10T09:30' }],
+      entreprises: [{ id: 'e1', nom: 'SARL Dupont', lots_ids: [c.lotA] }, { id: 'e2', nom: 'Autre SARL', lots_ids: [c.lotB], visite_creneau_id: 'c1' }],
+    });
+    const { jeton } = await inviter(c);
+    const { body } = await request(app).get(`/api/public/depot/${jeton}`);
+    expect(body.visite.creneau).toBeNull();
+    expect(body.visite.propositions).toEqual(['2030-06-10T09:30']);
+    expect(JSON.stringify(body)).not.toContain('Autre SARL');
+  });
+
+  it('n\'annonce aucune visite sans créneau citable', async () => {
+    const c = cabinet();
+    await dossier(c, { visite_site: { lieu: 'Chantier' }, creneaux_visite: [] });
+    const { jeton } = await inviter(c);
+    expect((await request(app).get(`/api/public/depot/${jeton}`)).body.visite).toBeNull();
+  });
+});
+
+
+describe('portail public : questions et confirmation de présence', () => {
+  const consultation = (c: Cabinet, extra: Record<string, any> = {}) => fakeSupabaseAdmin.seed('act_data', [{
+    id: uid('act'), tenant_id: c.tenantId, project_id: c.projectId, consultation: extra,
+  }]);
+  const poser = (jeton: string, corps: Record<string, any>) => request(app).post(`/api/public/depot/${jeton}/questions`).send(corps);
+  const questionsEn = (projectId: string) => fakeSupabaseAdmin.getTable('consultation_depot_questions').filter(q => q.project_id === projectId);
+
+  it('enregistre la question dans la boîte de réception, jamais dans la consultation', async () => {
+    const c = cabinet();
+    consultation(c, { questions: [] });
+    const { jeton } = await inviter(c);
+    const r = await poser(jeton, { objet: ' Cotes ', question: 'Quelle est la cote du linteau ?', lot_id: c.lotA });
+    expect(r.status).toBe(201);
+    const [ligne] = questionsEn(c.projectId);
+    expect(ligne).toMatchObject({ entreprise_id: 'e1', entreprise_nom: 'SARL Dupont', lot_id: c.lotA, objet: 'Cotes', question: 'Quelle est la cote du linteau ?' });
+    expect(fakeSupabaseAdmin.getTable('act_data').find(a => a.project_id === c.projectId)!.consultation.questions).toEqual([]);
+  });
+
+  it('rend la question à l\'entreprise, en attente puis avec la réponse saisie par l\'architecte', async () => {
+    const c = cabinet();
+    consultation(c, { questions: [] });
+    const { jeton } = await inviter(c);
+    const { body: { question } } = await poser(jeton, { question: 'Quelle est la cote du linteau ?' });
+    let ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.questions.mes_questions).toMatchObject([{ id: question.id, reponse: null }]);
+    // L'architecte répond dans la consultation (où la réponse fait foi).
+    fakeSupabaseAdmin.getTable('act_data').find(a => a.project_id === c.projectId)!.consultation.questions = [
+      { id: question.id, entreprise_id: 'e1', question: 'x', reponse: '  1,20 m  ', date_reponse: '2026-11-24', publique: false },
+    ];
+    ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.questions.mes_questions[0]).toMatchObject({ reponse: '1,20 m', reponse_le: '2026-11-24' });
+  });
+
+  it('refuse une question vide, trop longue ou visant un lot qui n\'est pas le sien', async () => {
+    const c = cabinet();
+    const { jeton } = await inviter(c); // lot A seulement
+    expect((await poser(jeton, { question: '   ' })).status).toBe(400);
+    expect((await poser(jeton, { question: 'x'.repeat(2001) })).status).toBe(400);
+    expect((await poser(jeton, { question: 'Une vraie question', lot_id: c.lotB })).status).toBe(400);
+    expect(questionsEn(c.projectId)).toHaveLength(0);
+  });
+
+  it('refuse après la date limite des questions, accepte avant', async () => {
+    const c = cabinet();
+    consultation(c, { date_limite_questions: '2020-01-01T10:00' });
+    const { jeton } = await inviter(c);
+    const r = await poser(jeton, { question: 'Une question tardive ?' });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toContain('date limite');
+    const ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.questions).toMatchObject({ ouvertes: false, date_limite: '2020-01-01T10:00' });
+    fakeSupabaseAdmin.getTable('act_data').find(a => a.project_id === c.projectId)!.consultation.date_limite_questions = '2099-01-01T10:00';
+    expect((await poser(jeton, { question: 'Une question dans les temps ?' })).status).toBe(201);
+  });
+
+  it('plafonne le nombre de questions par entreprise', async () => {
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    for (let i = 0; i < 20; i += 1) expect((await poser(jeton, { question: `Question numéro ${i} ?` })).status).toBe(201);
+    expect((await poser(jeton, { question: 'Une de trop ?' })).status).toBe(429);
+  });
+
+  it('une entreprise ne voit jamais les questions d\'une autre, mais lit les réponses publiques sans le nom de l\'auteur', async () => {
+    const c = cabinet();
+    const a = await inviter(c);
+    const b = await inviter(c, { entreprise_id: 'e2', entreprise_nom: 'SA Concurrent', email: 'c@example.test', lots_ids: [c.lotA] });
+    const q = (await poser(a.jeton, { question: 'Question secrète de Dupont ?' })).body.question;
+    consultation(c, { questions: [
+      { id: q.id, entreprise_id: 'e1', entreprise_nom: 'SARL Dupont', question: 'Question secrète de Dupont ?', reponse: 'Réponse privée', publique: false },
+      { id: 'pub', entreprise_id: 'e1', entreprise_nom: 'SARL Dupont', question: 'Épaisseur du plancher ?', objet: 'Plancher', reponse: 'Vingt centimètres', date_reponse: '2026-11-24', publique: true },
+    ] });
+    const ctxB = (await request(app).get(`/api/public/depot/${b.jeton}`)).body;
+    expect(ctxB.questions.mes_questions).toEqual([]);
+    expect(ctxB.questions.reponses_publiques).toEqual([{ id: 'pub', objet: 'Plancher', question: 'Épaisseur du plancher ?', reponse: 'Vingt centimètres', reponse_le: '2026-11-24' }]);
+    expect(JSON.stringify(ctxB)).not.toContain('Dupont');
+    expect(JSON.stringify(ctxB)).not.toContain('Réponse privée');
+  });
+
+  it('une réponse publique d\'un lot n\'est montrée qu\'aux entreprises de ce lot', async () => {
+    const c = cabinet();
+    consultation(c, { questions: [
+      { id: 'lotB', entreprise_id: 'x', question: 'Pente de toiture ?', reponse: 'Trente degrés', publique: true, lot_id: c.lotB },
+      { id: 'general', entreprise_id: 'x', question: 'Horaires de chantier ?', reponse: '8h-17h', publique: true },
+      { id: 'sansReponse', entreprise_id: 'x', question: 'Sans réponse ?', publique: true },
+    ] });
+    const { jeton } = await inviter(c); // lot A seulement
+    const ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.questions.reponses_publiques.map((r: any) => r.id)).toEqual(['general']);
+  });
+
+  it('ferme les questions comme le reste du portail quand le lien est invalide', async () => {
+    expect((await poser(`dpt_${'q'.repeat(43)}`, { question: 'Une question ?' })).status).toBe(404);
+  });
+
+  it('n\'a aucun créneau à confirmer sans créneau affecté', async () => {
+    const c = cabinet();
+    consultation(c, { creneaux_visite: [{ id: 'c1', date_heure: '2030-06-10T09:30' }], entreprises: [{ id: 'e1', lots_ids: [c.lotA] }] });
+    const { jeton } = await inviter(c);
+    expect((await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`)).status).toBe(409);
+  });
+
+  it('confirme la présence sur l\'invitation, une seule fois, sans toucher à la consultation', async () => {
+    const c = cabinet();
+    consultation(c, {
+      creneaux_visite: [{ id: 'c1', date_heure: '2030-06-10T09:30' }],
+      entreprises: [{ id: 'e1', lots_ids: [c.lotA], visite_creneau_id: 'c1', visite_presence: 'prevue' }],
+    });
+    const { jeton } = await inviter(c);
+    const premiere = await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`);
+    expect(premiere.status).toBe(200);
+    const seconde = await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`);
+    expect(seconde.body.confirmee_le).toBe(premiere.body.confirmee_le);
+    const ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.visite.confirmee_le).toBe(premiere.body.confirmee_le);
+    const act = fakeSupabaseAdmin.getTable('act_data').find(a => a.project_id === c.projectId)!;
+    expect(act.consultation.entreprises[0].visite_presence).toBe('prevue');
+  });
+
+  it('côté cabinet : liste les questions de l\'affaire, authentification exigée, jamais celles d\'un autre cabinet', async () => {
+    const c = cabinet();
+    const autre = cabinet();
+    const { jeton } = await inviter(c);
+    const { jeton: jetonAutre } = await inviter(autre);
+    await poser(jeton, { question: 'Question du cabinet A ?' });
+    await poser(jetonAutre, { question: 'Question du cabinet B ?' });
+    expect((await request(app).get(`/api/projects/${c.projectId}/depot/questions`)).status).toBe(401);
+    const liste = await request(app).get(`/api/projects/${c.projectId}/depot/questions`).set(authHeader(c.token));
+    expect(liste.status).toBe(200);
+    expect(liste.body.map((q: any) => q.question)).toEqual(['Question du cabinet A ?']);
+    expect(Object.keys(liste.body[0]).sort()).toEqual(['created_at', 'entreprise_id', 'entreprise_nom', 'id', 'lot_id', 'objet', 'question']);
+    const croise = await request(app).get(`/api/projects/${autre.projectId}/depot/questions`).set(authHeader(c.token));
+    expect(croise.status).toBe(404);
+  });
+
+  it('côté cabinet : supprimer une question la retire de la boîte de réception, pas celle d\'un autre cabinet', async () => {
+    const c = cabinet();
+    const autre = cabinet();
+    const { jeton } = await inviter(c);
+    const { jeton: jetonAutre } = await inviter(autre);
+    const q = (await poser(jeton, { question: 'À supprimer ?' })).body.question;
+    const qAutre = (await poser(jetonAutre, { question: 'À conserver ?' })).body.question;
+    await request(app).delete(`/api/projects/${autre.projectId}/depot/questions/${q.id}`).set(authHeader(autre.token)).expect(200);
+    expect(questionsEn(c.projectId)).toHaveLength(1); // le DELETE d'un autre cabinet n'a rien supprimé
+    await request(app).delete(`/api/projects/${c.projectId}/depot/questions/${q.id}`).set(authHeader(c.token)).expect(200);
+    expect(questionsEn(c.projectId)).toHaveLength(0);
+    expect(questionsEn(autre.projectId).map(x => x.id)).toEqual([qAutre.id]);
+  });
+
+  it('la liste des liens du cabinet expose la confirmation de présence', async () => {
+    const c = cabinet();
+    consultation(c, { creneaux_visite: [{ id: 'c1', date_heure: '2030-06-10T09:30' }], entreprises: [{ id: 'e1', lots_ids: [c.lotA], visite_creneau_id: 'c1' }] });
+    const { jeton } = await inviter(c);
+    await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`).expect(200);
+    const liens = await request(app).get(`/api/projects/${c.projectId}/depot/invites`).set(authHeader(c.token));
+    expect(liens.body[0].visite_confirmee_le).toBeTruthy();
   });
 });

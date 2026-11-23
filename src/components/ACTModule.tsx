@@ -39,6 +39,7 @@ import AttributionDirecte from './act/AttributionDirecte';
 import { attribuerSansOffre, estAttributionDirecte, retirerAttribution } from '../lib/attributionDirecte';
 import type { ParametresMarche } from '../lib/actMarche';
 import { useConsultationDepot } from '../hooks/useConsultationDepot';
+import { questionsAReprendre, type QuestionRecue } from '../lib/depotQuestions';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
@@ -118,6 +119,10 @@ interface QuestionReponse {
   reponse?: string;
   date_reponse?: string;
   publique: boolean;
+  /** Question posée depuis la page de dépôt : objet, lot visé et origine. */
+  objet?: string;
+  lot_id?: string;
+  source?: 'depot';
 }
 
 interface Offre {
@@ -176,6 +181,8 @@ interface Consultation extends DonneesNegociation {
   criteres: CritereNotation[];
   pieces_admin: PieceAdmin[];
   questions: QuestionReponse[];
+  /** Fin des questions des entreprises (page de dépôt) : au-delà, elles sont refusées. */
+  date_limite_questions?: string;
   offres: Offre[];
   attributions: Attribution[];
   comparatif: ComparatifLot[];
@@ -448,6 +455,30 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   }, [projectId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Questions posées par les entreprises depuis la page de dépôt : reprises dans la consultation, où la
+  // réponse est saisie. Comparées par identifiant, donc rejouables sans doublon ; reprises aussi au retour
+  // sur l'onglet, une question pouvant arriver pendant que l'écran est ouvert.
+  useEffect(() => {
+    if (!loaded) return;
+    let vivant = true;
+    const reprendre = async () => {
+      try {
+        const recues = await apiFetch<QuestionRecue[]>(`/api/projects/${projectId}/depot/questions`);
+        if (!vivant || !Array.isArray(recues)) return;
+        setConsultation(prev => {
+          const nouvelles = questionsAReprendre(prev.questions, recues);
+          if (nouvelles.length === 0) return prev;
+          editVersion.current += 1;
+          setDirty(true);
+          return { ...prev, questions: [...prev.questions, ...nouvelles] };
+        });
+      } catch { /* boîte de réception indisponible : rien à reprendre */ }
+    };
+    void reprendre();
+    window.addEventListener('focus', reprendre);
+    return () => { vivant = false; window.removeEventListener('focus', reprendre); };
+  }, [loaded, projectId]);
 
   const save = useCallback((c: Consultation, p: Phase): Promise<void> => {
     // Les écritures partent l'une après l'autre : deux requêtes en vol
@@ -1226,7 +1257,17 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconMessageDots size={15} /> Questions / Réponses
                 </h3>
-                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Centralisez les questions des entreprises et les réponses publiques</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Centralisez les questions des entreprises et les réponses publiques. Celles posées depuis la page de dépôt arrivent ici.</p>
+                <label className="mt-2 flex items-center gap-2 text-[0.6875rem] text-[var(--tblr-muted)]">
+                  Date limite des questions
+                  <input type="datetime-local" aria-label="Date limite des questions des entreprises"
+                    className="text-xs px-2 py-1 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none"
+                    value={consultation.date_limite_questions || ''}
+                    onChange={e => update({ ...consultation, date_limite_questions: e.target.value || undefined })} />
+                  {consultation.date_limite_questions && (
+                    <button type="button" className="underline" onClick={() => update({ ...consultation, date_limite_questions: undefined })}>Retirer</button>
+                  )}
+                </label>
               </div>
               <button onClick={() => setShowQRForm(!showQRForm)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700">
                 <IconPlus size={13} /> Nouvelle question
@@ -1285,8 +1326,16 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                         <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{q.entreprise_nom}</span>
                         <span className="text-[0.6875rem] text-[var(--tblr-muted)]">{new Date(q.date_question).toLocaleDateString('fr-FR')}</span>
                         {q.publique && <span className="text-[0.6875rem] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">Publique</span>}
+                        {q.source === 'depot' && <span className="text-[0.6875rem] px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 font-bold">Page de dépôt</span>}
+                        {q.lot_id && (() => { const l = lots.find(x => x.id === q.lot_id); return l ? <span className="text-[0.6875rem] text-[var(--tblr-muted)]">Lot {l.lot_number}</span> : null; })()}
                       </div>
-                      <p className="text-sm text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)] rounded-lg px-3 py-2">{q.question}</p>
+                      {q.objet && <p className="text-xs font-semibold mb-1">{q.objet}</p>}
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)] rounded-lg px-3 py-2 whitespace-pre-line">{q.question}</p>
+                      <label className="mt-1.5 inline-flex items-center gap-1.5 text-[0.6875rem] text-[var(--tblr-muted)] cursor-pointer">
+                        <input type="checkbox" className="rounded w-3.5 h-3.5" checked={q.publique}
+                          onChange={e => update({ ...consultation, questions: consultation.questions.map(x => (x.id === q.id ? { ...x, publique: e.target.checked } : x)) })} />
+                        Réponse communiquée à toutes les entreprises du lot (sans citer l'auteur)
+                      </label>
                       {q.reponse ? (
                         <div className="mt-2 ml-4 pl-3 border-l-2 border-blue-300">
                           <p className="text-xs text-[var(--tblr-muted)] mb-0.5">Réponse — {q.date_reponse && new Date(q.date_reponse).toLocaleDateString('fr-FR')}</p>
@@ -1321,7 +1370,11 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                         )
                       )}
                     </div>
-                    <button onClick={() => update({ ...consultation, questions: consultation.questions.filter(x => x.id !== q.id) })} className="p-1 text-zinc-300 hover:text-red-500 flex-shrink-0"><IconTrash size={13} /></button>
+                    <button onClick={() => {
+                      update({ ...consultation, questions: consultation.questions.filter(x => x.id !== q.id) });
+                      // Une question de la page de dépôt quitte aussi la boîte de réception, sinon elle serait reprise au prochain chargement.
+                      if (q.source === 'depot') void apiFetch(`/api/projects/${projectId}/depot/questions/${encodeURIComponent(q.id)}`, { method: 'DELETE' }).catch(() => {});
+                    }} className="p-1 text-zinc-300 hover:text-red-500 flex-shrink-0" aria-label="Supprimer la question"><IconTrash size={13} /></button>
                   </div>
                 </div>
               ))}

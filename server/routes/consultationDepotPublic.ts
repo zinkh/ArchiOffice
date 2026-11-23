@@ -19,7 +19,11 @@
 import crypto from 'crypto';
 import multer from 'multer';
 import type { Express } from 'express';
-import { depotReadLimiter, depotWriteLimiter } from '../rateLimit';
+import { depotReadLimiter, depotWriteLimiter, depotZipLimiter } from '../rateLimit';
+import {
+  DOSSIER_COMPLEMENTAIRE, construireArchive, nomArchive, reserverConstruction,
+  type EntreeArchive, type LienArchive,
+} from '../consultationDepot/dossierZip';
 import { evaluerEligibilite, type DepsEligibilite, type ProjetDepot } from '../consultationDepot/eligibility';
 import { resoudreInvitation, type InvitationDepot } from '../consultationDepot/invites';
 import { verifierOctets } from '../consultationDepot/fileRules';
@@ -33,6 +37,7 @@ import { parseStorageRef } from '../storagePaths';
 import { loadSuspendedTenants } from '../tenantSuspension';
 import { piecesDeEntreprise } from '../../src/lib/dceIndices';
 import { assainirLiensExternes } from '../../src/lib/dossierPartageMail';
+import { MAX_QUESTIONS_PAR_ENTREPRISE, questionsOuvertes, validerQuestion } from '../../src/lib/depotQuestions';
 import {
   DEPOT_EXTENSIONS, DEPOT_FORMAT_LABELS, DEPOT_KINDS_FICHIER, DEPOT_TABLEURS,
   MAX_DEPOT_OCTETS, MAX_FICHIER_OCTETS, MAX_FICHIERS_PAR_DEPOT,
@@ -163,6 +168,73 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
     });
   };
 
+  /**
+   * Visite de site de cette entreprise, lue dans la consultation : son créneau, à défaut les créneaux
+   * encore à venir qu'elle peut choisir, avec le lieu et les consignes. Les dates restent celles du
+   * chantier, sans fuseau (voir src/lib/actVisites.ts). Meilleur effort : null en cas de doute.
+   */
+  const visiteDeLinvitation = async (inv: InvitationDepot) => {
+    const { data: act } = await supabaseAdmin
+      .from('act_data').select('consultation')
+      .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).maybeSingle();
+    const consultation = (act as any)?.consultation;
+    const creneaux: Array<{ id: string; date_heure: string }> = (Array.isArray(consultation?.creneaux_visite) ? consultation.creneaux_visite : [])
+      .filter((c: any) => c && typeof c.id === 'string' && typeof c.date_heure === 'string' && !Number.isNaN(new Date(c.date_heure).getTime()))
+      .sort((a: any, b: any) => a.date_heure.localeCompare(b.date_heure));
+    const entreprise = (Array.isArray(consultation?.entreprises) ? consultation.entreprises : []).find((e: any) => e?.id === inv.entreprise_id);
+    const affecte = creneaux.find(c => c.id === entreprise?.visite_creneau_id);
+    const lieu = typeof consultation?.visite_site?.lieu === 'string' ? consultation.visite_site.lieu.trim().slice(0, 500) : '';
+    const consignes = typeof consultation?.visite_site?.consignes === 'string' ? consultation.visite_site.consignes.trim().slice(0, 2000) : '';
+    // Un créneau d'hier reste affiché (la visite peut avoir lieu aujourd'hui) ; au-delà, il est passé.
+    const limite = Date.now() - 24 * 60 * 60 * 1000;
+    const proposes = affecte ? [] : creneaux.filter(c => new Date(c.date_heure).getTime() >= limite).map(c => c.date_heure);
+    if (!affecte && proposes.length === 0) return null;
+    return {
+      creneau: affecte ? affecte.date_heure : null, propositions: proposes, lieu: lieu || null, consignes: consignes || null,
+      // La confirmation n'a de sens que pour un créneau affecté.
+      confirmee_le: affecte ? (inv.visite_confirmee_le || null) : null,
+    };
+  };
+
+  /**
+   * Questions de l'entreprise et réponses publiques. Une question posée est lue dans la boîte de réception ;
+   * sa réponse, saisie par l'architecte, est lue dans consultation.questions (où elle fait foi), par id.
+   * Les réponses publiques sont rendues SANS le nom de l'entreprise qui avait posé la question.
+   */
+  const questionsDeLinvitation = async (inv: InvitationDepot) => {
+    const { data: act } = await supabaseAdmin
+      .from('act_data').select('consultation')
+      .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).maybeSingle();
+    const consultation = (act as any)?.consultation;
+    const saisies: any[] = (Array.isArray(consultation?.questions) ? consultation.questions : []).filter((q: any) => q && typeof q === 'object');
+    const { data: lignes } = await supabaseAdmin
+      .from('consultation_depot_questions').select('id, objet, question, lot_id, created_at')
+      .eq('invite_id', inv.id).order('created_at', { ascending: false });
+    const reponseDe = (id: string) => {
+      const q = saisies.find(x => String(x.id) === id);
+      return q && typeof q.reponse === 'string' && q.reponse.trim() ? { reponse: q.reponse.trim(), reponse_le: q.date_reponse || null } : null;
+    };
+    const dateLimite = typeof consultation?.date_limite_questions === 'string' ? consultation.date_limite_questions : null;
+    const mesIds = new Set(((lignes as any[]) || []).map(l => String(l.id)));
+    return {
+      date_limite: dateLimite,
+      ouvertes: questionsOuvertes(dateLimite),
+      mes_questions: ((lignes as any[]) || []).map(l => ({
+        id: l.id as string, objet: l.objet || null, question: l.question as string, lot_id: l.lot_id || null,
+        envoyee_le: l.created_at as string, ...(reponseDe(String(l.id)) || { reponse: null, reponse_le: null }),
+      })),
+      reponses_publiques: saisies
+        .filter(q => q.publique === true && typeof q.reponse === 'string' && q.reponse.trim() && !mesIds.has(String(q.id))
+          // Une question d'un lot est publique pour les entreprises de CE lot ; sans lot, pour toutes.
+          && (!q.lot_id || inv.lots_ids.includes(String(q.lot_id))))
+        .map(q => ({
+          id: String(q.id), objet: typeof q.objet === 'string' ? q.objet : null, question: String(q.question || ''),
+          reponse: String(q.reponse).trim(), reponse_le: q.date_reponse || null,
+        })),
+    };
+  };
+
+
   // ── Contexte du portail ────────────────────────────────────────────────────
   app.get('/api/public/depot/:token', depotReadLimiter, garde, async (req: any, res: any) => {
     try {
@@ -179,6 +251,12 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
         pieces = (data as any[]) || [];
       }
       const dce = await dceDeLinvitation(inv, lots).catch(() => []);
+      const visite = await visiteDeLinvitation(inv).catch(() => null);
+      const questions = await questionsDeLinvitation(inv).catch(() => null);
+      // Fichiers que l'archive « tout le dossier » contiendrait (sans doublon entre pièces du DCE et documents publiés).
+      const fichiersDossier = new Map<string, number | null>();
+      for (const p of dce) for (const f of p.fichiers) fichiersDossier.set(f.id, f.taille);
+      for (const p of pieces) if (!fichiersDossier.has(p.id)) fichiersDossier.set(p.id, p.size_bytes ?? null);
 
       const { data: mesDepots } = await supabaseAdmin
         .from('consultation_depots')
@@ -211,6 +289,12 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
         instructions: reglages.instructions || null,
         pieces: pieces.map(p => ({ id: p.id, nom: p.name, taille: p.size_bytes ?? null })),
         dce,
+        visite,
+        questions,
+        // Lien « tout le dossier en une archive » : absent s'il n'y a aucun fichier à rassembler.
+        dossier_zip: fichiersDossier.size > 0
+          ? { fichiers: fichiersDossier.size, taille: [...fichiersDossier.values()].reduce<number>((s, t) => s + (t ?? 0), 0) || null }
+          : null,
         depots: ((mesDepots as any[]) || []).filter(d => d.status !== 'retire').map(d => ({
           id: d.id, lot_id: d.lot_id, kind: d.kind, version: d.version, nom: d.file_name,
           taille: d.size_bytes ?? null, hors_delai: !!d.hors_delai, recu_le: d.received_at,
@@ -263,6 +347,136 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
     } catch (e: any) {
       console.error('[GET /api/public/depot/:token/pieces]', e?.message);
       res.status(500).json({ error: 'Pièce indisponible.' });
+    }
+  });
+
+  // ── Tout le dossier de consultation en une archive ─────────────────────────
+  // Ce que l'entreprise peut déjà télécharger pièce par pièce (pièces du DCE de ses lots et
+  // documents publiés), rangé par pièce. Rien d'autre : la liste vient de `dceDeLinvitation` et des
+  // réglages, comme la route des pièces.
+  app.get('/api/public/depot/:token/dossier.zip', depotZipLimiter, garde, async (req: any, res: any) => {
+    const { invitation: inv, project, reglages } = req.depot as ContexteDepot;
+    let liberer: (() => void) | null = null;
+    try {
+      const lots = await lotsDeLinvitation(inv);
+      const dce = await dceDeLinvitation(inv, lots).catch(() => []);
+      const publies: string[] = Array.isArray(reglages.published_document_ids) ? reglages.published_document_ids : [];
+      const ids = [...new Set([...dce.flatMap(p => p.fichiers.map(f => f.id)), ...publies])];
+      const { data: docs } = ids.length
+        ? await supabaseAdmin
+          .from('documents').select('id, name, file_url')
+          .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).in('id', ids)
+        : { data: [] };
+      const parId = new Map(((docs as any[]) || []).map(d => [d.id as string, d]));
+      const vus = new Set<string>();
+      const entrees: EntreeArchive[] = [];
+      for (const piece of dce) {
+        for (const f of piece.fichiers) {
+          const d = parId.get(f.id);
+          if (!d || vus.has(d.id)) continue;
+          vus.add(d.id);
+          entrees.push({ id: d.id, nom: d.name, dossier: piece.nom || 'Pièce du DCE', fileUrl: d.file_url });
+        }
+      }
+      for (const id of publies) {
+        const d = parId.get(id);
+        if (!d || vus.has(id)) continue;
+        vus.add(id);
+        entrees.push({ id, nom: d.name, dossier: DOSSIER_COMPLEMENTAIRE, fileUrl: d.file_url });
+      }
+      const liens: LienArchive[] = dce.flatMap(p => (p.liens ?? []).map(l => ({ dossier: p.nom || 'Pièce du DCE', libelle: l.libelle, url: l.url })));
+      // Sans aucun fichier, une archive ne contiendrait que des liens : la page les affiche déjà.
+      if (entrees.length === 0) return res.status(404).json({ error: 'Aucun document à télécharger.' });
+
+      liberer = reserverConstruction();
+      if (!liberer) {
+        res.setHeader('Retry-After', '15');
+        return res.status(503).json({ error: 'Plusieurs archives sont en préparation. Réessayez dans quelques instants.' });
+      }
+      const archive = await construireArchive(supabaseAdmin, inv.tenant_id, entrees, liens);
+      if (!archive.ok) {
+        return res.status(archive.raison === 'vide' ? 404 : 413).json({
+          error: archive.raison === 'vide'
+            ? 'Aucun document à télécharger.'
+            : 'Le dossier est trop volumineux pour une seule archive : téléchargez les pièces une par une.',
+        });
+      }
+      const nom = nomArchive(project.name);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${nom.ascii}"; filename*=UTF-8''${encodeURIComponent(nom.utf8)}`);
+      res.setHeader('Content-Length', String(archive.buffer.length));
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(archive.buffer);
+    } catch (e: any) {
+      console.error('[GET /api/public/depot/:token/dossier.zip]', e?.message);
+      res.status(500).json({ error: "L'archive n'a pas pu être préparée. Téléchargez les pièces une par une." });
+    } finally {
+      liberer?.();
+    }
+  });
+
+  // ── Question de l'entreprise ───────────────────────────────────────────────
+  // Arrive dans la boîte de réception du cabinet (consultation_depot_questions), qui la reprend
+  // dans consultation.questions. Jamais publiée par elle-même : c'est l'architecte qui répond et
+  // choisit de rendre la réponse publique.
+  app.post('/api/public/depot/:token/questions', depotWriteLimiter, garde, async (req: any, res: any) => {
+    const { invitation: inv, project } = req.depot as ContexteDepot;
+    try {
+      const controle = validerQuestion(req.body);
+      if (!controle.ok) return res.status(400).json({ error: controle.raison });
+      const lot = lotAutorise(inv, req.body?.lot_id);
+      if (!lot.ok) return res.status(400).json({ error: 'Ce lot ne fait pas partie de votre consultation.' });
+
+      const { data: act } = await supabaseAdmin
+        .from('act_data').select('consultation')
+        .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).maybeSingle();
+      if (!questionsOuvertes((act as any)?.consultation?.date_limite_questions)) {
+        return res.status(403).json({ error: 'La date limite des questions est passée. Contactez directement le cabinet.' });
+      }
+      const { data: deja } = await supabaseAdmin.from('consultation_depot_questions').select('id').eq('invite_id', inv.id);
+      if (((deja as any[]) || []).length >= MAX_QUESTIONS_PAR_ENTREPRISE) {
+        return res.status(429).json({ error: `Vous avez atteint la limite de ${MAX_QUESTIONS_PAR_ENTREPRISE} questions. Contactez directement le cabinet.` });
+      }
+
+      const id = crypto.randomUUID();
+      const creeLe = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('consultation_depot_questions').insert({
+        id, tenant_id: inv.tenant_id, project_id: inv.project_id, invite_id: inv.id,
+        entreprise_id: inv.entreprise_id, entreprise_nom: inv.entreprise_nom, lot_id: lot.lotId,
+        objet: controle.objet, question: controle.question, created_at: creeLe,
+      });
+      if (error) throw error;
+      // Meilleur effort : une notification ratée ne fait jamais perdre la question enregistrée.
+      await notifierDepot(supabaseAdmin, inv.tenant_id, inv.project_id, {
+        titre: 'Question d\'une entreprise',
+        corps: `${inv.entreprise_nom} a posé une question pour ${project.name || "l'opération"}.`,
+      }).catch(() => {});
+      res.status(201).json({ question: { id, objet: controle.objet, question: controle.question, lot_id: lot.lotId, envoyee_le: creeLe } });
+    } catch (e: any) {
+      console.error('[POST /api/public/depot/:token/questions]', e?.message);
+      res.status(500).json({ error: "La question n'a pas pu être enregistrée. Merci de réessayer." });
+    }
+  });
+
+  // ── Confirmation de présence à la visite ───────────────────────────────────
+  // Posée sur l'invitation, jamais dans la consultation : l'architecte reste maître du pointage.
+  app.post('/api/public/depot/:token/visite/confirmer', depotWriteLimiter, garde, async (req: any, res: any) => {
+    const { invitation: inv, project } = req.depot as ContexteDepot;
+    try {
+      const visite = await visiteDeLinvitation(inv).catch(() => null);
+      if (!visite?.creneau) return res.status(409).json({ error: "Aucun créneau de visite ne vous est affecté. Contactez le cabinet." });
+      if (inv.visite_confirmee_le) return res.json({ confirmee_le: inv.visite_confirmee_le });
+      const confirmeeLe = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('consultation_depot_invites').update({ visite_confirmee_le: confirmeeLe }).eq('id', inv.id);
+      if (error) throw error;
+      await notifierDepot(supabaseAdmin, inv.tenant_id, inv.project_id, {
+        titre: 'Présence à la visite confirmée',
+        corps: `${inv.entreprise_nom} confirme sa présence à la visite de ${project.name || "l'opération"}.`,
+      }).catch(() => {});
+      res.json({ confirmee_le: confirmeeLe });
+    } catch (e: any) {
+      console.error('[POST /api/public/depot/:token/visite/confirmer]', e?.message);
+      res.status(500).json({ error: "La confirmation n'a pas pu être enregistrée. Merci de réessayer." });
     }
   });
 

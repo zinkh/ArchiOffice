@@ -177,14 +177,14 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_depot_invites')
-        .select('id, entreprise_id, entreprise_nom, email, lots_ids, expires_at, revoked_at, last_opened_at, created_at')
+        .select('id, entreprise_id, entreprise_nom, email, lots_ids, expires_at, revoked_at, last_opened_at, visite_confirmee_le, created_at')
         .eq('project_id', req.params.projectId).order('created_at', { ascending: false });
       // Liste blanche explicite : le haché du jeton ne sort jamais, quelle que
       // soit la requête SQL.
       res.json(((data as any[]) || []).map(l => ({
         id: l.id, entreprise_id: l.entreprise_id, entreprise_nom: l.entreprise_nom, email: l.email,
         lots_ids: l.lots_ids, expires_at: l.expires_at, revoked_at: l.revoked_at,
-        last_opened_at: l.last_opened_at, created_at: l.created_at,
+        last_opened_at: l.last_opened_at, visite_confirmee_le: l.visite_confirmee_le ?? null, created_at: l.created_at,
       })));
     } catch (err: any) {
       console.error('[GET depot/invites]', err?.message);
@@ -255,6 +255,42 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
     } catch (err: any) {
       console.error('[DELETE depot/invites]', err?.message);
       res.status(500).json({ error: "Le lien n'a pas pu être révoqué." });
+    }
+  });
+
+  // ── Questions des entreprises ──────────────────────────────────────────────
+  // Boîte de réception : l'écran de l'ACT reprend chaque question dans consultation.questions (où la
+  // réponse est saisie) en comparant les identifiants, sans rien marquer ici. Lecture permise même
+  // après un changement de plan : des questions déjà posées ne deviennent pas illisibles.
+  app.get('/api/projects/:projectId/depot/questions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await projetDuCabinet(tenantId, req.params.projectId))) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_depot_questions')
+        .select('id, entreprise_id, entreprise_nom, lot_id, objet, question, created_at')
+        .eq('project_id', req.params.projectId).order('created_at', { ascending: true });
+      res.json(((data as any[]) || []).map(q => ({
+        id: q.id, entreprise_id: q.entreprise_id, entreprise_nom: q.entreprise_nom, lot_id: q.lot_id ?? null,
+        objet: q.objet ?? null, question: q.question, created_at: q.created_at,
+      })));
+    } catch (err: any) {
+      console.error('[GET depot/questions]', err?.message);
+      res.status(500).json({ error: 'Lecture des questions impossible.' });
+    }
+  });
+
+  // Supprimer une question dans l'ACT la retire aussi de la boîte de réception : sans cela l'écran la
+  // reprendrait au prochain chargement.
+  app.delete('/api/projects/:projectId/depot/questions/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_depot_questions')
+        .delete().eq('id', req.params.id).eq('project_id', req.params.projectId);
+      if (error) throw error;
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error('[DELETE depot/questions]', err?.message);
+      res.status(500).json({ error: "La question n'a pas pu être supprimée." });
     }
   });
 

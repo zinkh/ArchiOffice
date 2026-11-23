@@ -340,6 +340,22 @@ restent lisibles par le cabinet.
   Aucune migration, rien à cocher. Le téléchargement (`.../pieces/:docId`) n'accepte qu'un fichier de
   ces pièces ou une pièce complémentaire cochée dans les réglages (`published_document_ids`, visible
   par toutes les entreprises) : un fichier du DCE d'un autre lot est refusé (404).
+- **Tout le dossier en une archive** (`GET /api/public/depot/:token/dossier.zip`,
+  `server/consultationDepot/dossierZip.ts`, testé) : le bouton « Télécharger tout le dossier en une fois (zip) » de
+  la page rassemble EXACTEMENT ce que l'entreprise peut déjà télécharger pièce par pièce (pièces du DCE de ses lots,
+  documents publiés, sans doublon), un dossier par pièce (« Documents complémentaires » pour les publiés), accents
+  conservés et noms assainis (`segmentArchive`, `cheminsUniques`). Les liens externes (https seulement) vont dans
+  `Liens externes.txt`, un fichier illisible dans `Fichiers non ajoutés.txt` : il n'arrête pas l'archive. Construite
+  EN MÉMOIRE, donc bornée : 150 Mo et 300 fichiers (413 au-delà, jamais d'archive tronquée), 2 constructions
+  simultanées (503 + `Retry-After`) et un limiteur dédié `depotZipLimiter` (`DEPOT_ZIP_LIMIT`, 10 par 15 min et par
+  IP). Mêmes gardes que les autres routes (jeton, plan, marché privé, stockage). Le bouton télécharge par `fetch` pour
+  afficher l'erreur en clair au lieu d'une page JSON. Les pièces générées à l'envoi (RC, CCAP, acte d'engagement) n'y
+  sont pas : elles ne sont jointes qu'au mail. Le contexte porte `dossier_zip` (nombre et taille connue), absent
+  quand il n'y a aucun fichier.
+- **Visite de site sur la page** (`visite` du contexte, lue dans `consultation` : `creneaux_visite`, `visite_site`,
+  `visite_creneau_id` de l'entreprise) : son créneau, à défaut les créneaux à venir à choisir, avec lieu et consignes.
+  Les dates restent celles du chantier, sans fuseau. Une entreprise ne voit jamais les créneaux ni les noms des autres.
+  La page n'écrit rien : la confirmation de présence viendra avec les questions.
 - **Dossier partagé** (bouton « Ajouter un dossier (zip, lien) » de la fenêtre d'envoi du DCE,
   `act/DossierPartageDialog.tsx`, logique pure `src/lib/dossierPartageMail.ts`, testée) : un zip ou autre
   fichier téléversé (`POST /api/documents`, 50 Mo au plus, catégorie DCE, rangé dans les documents de l'affaire),

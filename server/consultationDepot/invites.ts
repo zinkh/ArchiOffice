@@ -13,6 +13,8 @@ export interface InvitationDepot {
   expires_at: string;
   revoked_at: string | null;
   last_opened_at: string | null;
+  /** Présence à la visite de site confirmée par l'entreprise depuis sa page. */
+  visite_confirmee_le?: string | null;
   created_at: string;
 }
 
