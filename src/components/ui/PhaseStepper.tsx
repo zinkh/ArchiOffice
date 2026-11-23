@@ -48,7 +48,7 @@ export function PhaseStepper({ steps, currentId, activeId, onSelect, size = 'def
           <React.Fragment key={step.id}>
             {i > 0 && (
               <div
-                className={cn('h-0.5 flex-1 min-w-[16px] shrink-0 transition-colors', compact ? 'mt-[15px]' : 'mt-[19px]')}
+                className={cn('h-px flex-1 min-w-[16px] shrink-0 transition-colors', compact ? 'mt-[15px]' : 'mt-[19px]')}
                 style={{ background: i <= currentIndex ? 'var(--tblr-primary)' : 'var(--tblr-border)' }}
               />
             )}
@@ -61,19 +61,19 @@ export function PhaseStepper({ steps, currentId, activeId, onSelect, size = 'def
               aria-pressed={onSelect ? isActive : undefined}
               data-step-active={isActive || undefined}
               className={cn(
-                'flex flex-col items-center rounded-xl shrink-0 transition-colors',
+                'flex flex-col items-center rounded-sm shrink-0 transition-colors',
                 compact ? 'gap-1 px-1.5 py-1.5' : 'gap-1.5 px-2.5 py-2',
                 onSelect && 'hover:bg-[var(--tblr-surface-2)] cursor-pointer'
               )}
               style={isActive ? { background: 'var(--tblr-primary-lt)' } : undefined}
             >
               <span
-                className={cn(nodeSize, 'relative rounded-xl flex items-center justify-center text-xs font-bold border-2 transition-colors shrink-0')}
+                className={cn(nodeSize, 'relative rounded-sm flex items-center justify-center text-xs font-bold border-2 transition-colors shrink-0')}
                 style={
                   status === 'done'
                     ? { background: 'var(--tblr-primary)', borderColor: 'var(--tblr-primary)', color: '#fff' }
                     : status === 'current'
-                    ? { background: 'var(--tblr-primary)', borderColor: 'var(--tblr-primary)', color: '#fff', boxShadow: '0 0 0 4px var(--tblr-primary-lt)' }
+                    ? { background: 'var(--tblr-primary)', borderColor: 'var(--tblr-primary)', color: '#fff', boxShadow: '0 0 0 3px var(--tblr-primary-lt)' }
                     : { background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }
                 }
               >

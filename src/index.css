@@ -676,3 +676,34 @@ button, [role="button"], [role="tab"], .btn {
 @media (pointer: coarse), (max-width: 639px) {
   .planning-link-handle { opacity: 1; }
 }
+
+/* ──────────────────────────────────────────────────
+   Fiche affaire : charte du cabinet, encre sur papier.
+   Les jetons Tabler sont redéfinis dans la fiche seulement : noir, blanc et
+   gris. Les couleurs de statut (succès, danger, avertissement) restent celles
+   du thème pour porter une donnée.
+────────────────────────────────────────────────── */
+.fiche-affaire {
+  --tblr-primary:    #111111;
+  --tblr-primary-lt: #ededed;
+  --tblr-text:       #111111;
+  --tblr-muted:      #595959;
+  --tblr-border:     #c9c9c9;
+  --tblr-surface-2:  #f5f5f5;
+  --fiche-rule:      #111111;
+}
+.dark .fiche-affaire {
+  --tblr-primary:    #f2f2f2;
+  --tblr-primary-lt: #333333;
+  --tblr-text:       #ececec;
+  --tblr-muted:      #a8a8a8;
+  --tblr-border:     #4a4a4a;
+  --tblr-surface-2:  #2c2c2c;
+  --fiche-rule:      #ececec;
+}
+@media (prefers-contrast: more) {
+  .fiche-affaire { --tblr-border: #6e6e6e; --tblr-muted: #3d3d3d; }
+  .dark .fiche-affaire { --tblr-border: #8a8a8a; --tblr-muted: #cfcfcf; }
+}
+/* Texte blanc posé sur fond « primary » : en sombre le fond devient clair. */
+.dark .fiche-affaire [style*="background: var(--tblr-primary)"] { color: #111111 !important; }

@@ -1924,7 +1924,7 @@ export default function ProjectDetail() {
   );
 
   return (
-    <div className="flex flex-col lg:h-full">
+    <div className="fiche-affaire flex flex-col lg:h-full">
       <Toast toast={toast} />
       {projectLoadState !== 'ready' && projectLoadState !== 'loading' && (
         <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
@@ -1942,75 +1942,80 @@ export default function ProjectDetail() {
       {/* Compact topbar : réservée au bureau. Sur téléphone, l'affaire est déjà
           nommée par ses onglets, et suppression comme changement de phase se
           font au bureau ; l'état d'enregistrement passe dans la barre de section. */}
-      <div
-        className="shrink-0 hidden md:flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b"
-        style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+      <header
+        className="shrink-0 hidden md:grid grid-cols-[auto_minmax(0,1fr)_auto] border-b-2"
+        style={{ borderColor: 'var(--fiche-rule)', background: 'var(--tblr-surface)' }}
       >
-        <button
-          type="button"
-          onClick={leaveToProjects}
-          className="w-8 h-8 flex items-center justify-center rounded-lg border transition-colors hover:bg-[var(--tblr-surface-2)] shrink-0"
-          style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
-          title={t('projectdetail_back_to_projects')}
-          aria-label={t('projectdetail_back_to_projects')}
-        >
-          <IconArrowLeft size={18} />
-        </button>
-        {/* Sur un téléphone, titre, retour et actions tiennent sur une ligne : le
-            titre cède sa largeur (tronqué) plutôt que de repousser les actions. */}
-        <div className="flex items-baseline gap-2.5 min-w-0 flex-1 lg:flex-none">
-          <h1 className="font-bold text-base truncate min-w-0" style={{ color: 'var(--tblr-text)' }} title={project.name}>{project.name}</h1>
-          {(project.project_code || project.reference) && (
-            <span className="font-mono text-[0.6875rem] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{project.project_code || project.reference}</span>
-          )}
-          <span
-            className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[0.6875rem] font-semibold shrink-0 whitespace-nowrap"
-            style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+        {/* Cartouche : numéro d'affaire, intitulé, statut, comme le bloc-titre d'une planche. */}
+        <div className="flex items-stretch min-w-0 col-span-2 divide-x" style={{ borderColor: 'var(--tblr-border)' }}>
+          <button
+            type="button"
+            onClick={leaveToProjects}
+            className="w-11 flex items-center justify-center transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--tblr-primary)]"
+            style={{ color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}
+            title={t('projectdetail_back_to_projects')}
+            aria-label={t('projectdetail_back_to_projects')}
           >
-            {project.is_chantier
-              ? t('projectdetail_header_chantier')
-              : (['Planning', 'In Progress', 'Completed', 'On Hold'].includes(project.status)
-                ? t(`projects_status_${project.status.toLowerCase().replace(' ', '_')}`)
-                : project.status)}
-          </span>
-        </div>
-
-        <div className="order-3 w-full lg:order-none lg:w-auto lg:flex-1 flex justify-start lg:justify-end min-w-0">
-          <div className="flex items-center gap-2 min-w-0 w-full lg:w-auto">
-            <PhaseStepper
-              className="min-w-0 flex-1 lg:flex-none"
-              ariaLabel={t('project_phase_stepper_label')}
-              stepTitle={step => t('project_phase_stepper_view', { phase: step.label })}
-              size="compact"
-              steps={missionPhases.map(phase => ({ id: phase, label: phase }))}
-              currentId={actualCurrentPhase}
-              activeId={viewedPhase || actualCurrentPhase}
-              badges={phaseBadges}
-              // Une pastille montre le journal de sa phase ; la phase réelle
-              // n'avance que par « Passer en … », confirmé.
-              onSelect={phase => { setViewedPhase(phase as DocumentPhase); setActiveTab('INFOS'); setShowFullEditor(false); }}
-            />
-            {upcomingPhase && (
-              <button
-                type="button"
-                onClick={() => { void advancePhase(); }}
-                title={t('project_phase_advance_title', { phase: upcomingPhase })}
-                className="shrink-0 group h-8 pl-3 pr-1 inline-flex items-center gap-2 rounded-full text-[0.8125rem] font-semibold whitespace-nowrap transition-colors hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
-                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
-              >
-                {t('project_phase_advance', { phase: upcomingPhase })}
-                <span className="w-6 h-6 rounded-full inline-flex items-center justify-center text-white transition-transform group-hover:translate-x-0.5" style={{ background: 'var(--tblr-primary)' }}>
-                  <IconArrowRight size={14} aria-hidden />
-                </span>
-              </button>
-            )}
+            <IconArrowLeft size={18} />
+          </button>
+          {(project.project_code || project.reference) && (
+            <div className="px-4 py-2 flex flex-col justify-center shrink-0 border-l" style={{ borderColor: 'var(--tblr-border)' }}>
+              <span className="font-mono text-lg font-semibold leading-none tabular-nums" style={{ color: 'var(--tblr-text)' }}>
+                {project.project_code || project.reference}
+              </span>
+            </div>
+          )}
+          <div className="px-4 py-2 flex flex-col justify-center min-w-0 flex-1 border-l" style={{ borderColor: 'var(--tblr-border)' }}>
+            <h1 className="font-semibold text-xl leading-tight truncate tracking-tight" style={{ color: 'var(--tblr-text)' }} title={project.name}>
+              {project.name}
+            </h1>
+            <div className="flex items-center gap-3 mt-1 min-w-0">
+              <span className="text-[0.8125rem] font-medium shrink-0" style={{ color: 'var(--tblr-text)' }}>
+                {project.is_chantier
+                  ? t('projectdetail_header_chantier')
+                  : (['Planning', 'In Progress', 'Completed', 'On Hold'].includes(project.status)
+                    ? t(`projects_status_${project.status.toLowerCase().replace(' ', '_')}`)
+                    : project.status)}
+              </span>
+              {project.address && (
+                <span className="text-[0.8125rem] truncate" style={{ color: 'var(--tblr-muted)' }}>{project.address}</span>
+              )}
+            </div>
           </div>
         </div>
-
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0 lg:ml-0 lg:order-none">
+        <div className="flex items-center px-4 border-l" style={{ borderColor: 'var(--tblr-border)' }}>
           <AutosaveIndicator status={autosaveStatus} onRetry={() => { void saveNow(); }} />
         </div>
-      </div>
+
+        {/* Avancement de la mission : une ligne de phases sous le cartouche. */}
+        <div className="col-span-3 flex items-center gap-3 px-4 py-1.5 border-t min-w-0" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+          <PhaseStepper
+            className="min-w-0 flex-1"
+            ariaLabel={t('project_phase_stepper_label')}
+            stepTitle={step => t('project_phase_stepper_view', { phase: step.label })}
+            size="compact"
+            steps={missionPhases.map(phase => ({ id: phase, label: phase }))}
+            currentId={actualCurrentPhase}
+            activeId={viewedPhase || actualCurrentPhase}
+            badges={phaseBadges}
+            // Une pastille montre le journal de sa phase ; la phase réelle
+            // n'avance que par « Passer en … », confirmé.
+            onSelect={phase => { setViewedPhase(phase as DocumentPhase); setActiveTab('INFOS'); setShowFullEditor(false); }}
+          />
+          {upcomingPhase && (
+            <button
+              type="button"
+              onClick={() => { void advancePhase(); }}
+              title={t('project_phase_advance_title', { phase: upcomingPhase })}
+              className="shrink-0 h-8 px-3 inline-flex items-center gap-2 border text-[0.8125rem] font-semibold whitespace-nowrap transition-colors hover:bg-[var(--tblr-primary)] hover:text-[var(--tblr-surface)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+              style={{ borderColor: 'var(--tblr-primary)', color: 'var(--tblr-primary)' }}
+            >
+              {t('project_phase_advance', { phase: upcomingPhase })}
+              <IconArrowRight size={14} aria-hidden />
+            </button>
+          )}
+        </div>
+      </header>
 
       {/* Tab bar : repliable au bureau (sur téléphone, le sélecteur reste toujours là) */}
       <div className="shrink-0 px-4 pt-3 flex items-start gap-2">
