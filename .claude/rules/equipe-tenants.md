@@ -528,7 +528,7 @@ qu'il n'est pas ajouté à cette liste. Le métré (`metre`) en fait partie.
   lignes (`metreEnTexte`). Tests : `tests/projectShareMetre.test.ts`,
   `tests/sharedDocumentMetre.test.ts`.
 
-Écrans : `ProposeEdit` dans `SharedDocument.tsx` (invité), `ShareProposalsInbox.tsx`
+Écran du confrère (`SharedDocument.tsx`, un seul pour le CCTP et le DPGF, onglets) : **lecture d'abord, annotation au clic**. Trois zones (sommaire, document, « Mes retours »), bascule Lecture / Annoter ; un passage sélectionné affiche seul ses actions (commenter, proposer une modification, quantité, unité, prix, métré). **Ce que le confrère propose ou commente s'accumule en brouillons locaux et part en une fois** (« Envoyer mes retours ») : le serveur est inchangé, l'envoi appelle `POST .../proposals` et `.../comments` à la suite, le premier refus (dont `PROPOSAL_LIMIT`) arrête l'envoi et laisse le reste en brouillon avec le message. L'aperçu avant/après d'un texte vient de `src/lib/wordDiff.ts` (segments, jamais de HTML injecté). Mise en forme selon `DESIGN.md` (jetons `--tblr-*`, bleu unique, statuts en vert, orange, rouge). Tests : `tests/sharedDocumentMetre.test.ts`, `src/lib/__tests__/wordDiff.test.ts`. Pas encore vérifié dans un navigateur. Autres écrans : `ShareProposalsInbox.tsx`
 (cabinet : actuel face à proposé, approuver, refuser avec motif, alerte de limite, historique)
 et niveau « propositions » du choix des droits par lot dans `ProjectSharesPanel.tsx`. Tests :
 `tests/projectShareProposals.test.ts`, `tests/projectShareProposalsPrices.test.ts`,
