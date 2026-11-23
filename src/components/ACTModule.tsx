@@ -766,8 +766,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   // Le comparatif lu par l'analyse, la négociation et l'export Excel se déduit
   // des offres pour les lots rattachés au document ; les autres gardent leur saisie manuelle.
   const comparatifEffectif = useMemo(
-    () => comparatifDepuisOffres(lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif),
-    [lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif],
+    () => comparatifDepuisOffres(lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif, consultation.base_quantites ?? 'moe'),
+    [lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif, consultation.base_quantites],
   );
   const lotsSansDocument = useMemo(
     () => lots.filter(l => !lotsDocument.some(d => d.projectLotId === l.id)),

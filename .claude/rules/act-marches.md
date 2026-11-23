@@ -389,8 +389,13 @@ restent lisibles par le cabinet.
   saisie poste par poste. Saisie : colonne « Qté entreprise » de `OffrePostesDialog`, import du bordereau (`OffreImportDialog` reprend
   la quantité du fichier quand elle diffère), `set_postes` du MCP (`quantite` par poste). `repartirSaisie` pose la quantité dans l'offre
   qui porte déjà le prix de l'article (à défaut « Saisie manuelle ») et ne touche aux quantités enregistrées que si l'appel en fournit.
-  **Pas encore fait** : l'export Excel du comparatif par article (`versComparatif`) reste sur les quantités du maître d'œuvre ; un
-  message « quantités à confirmer » à l'entreprise ; la saisie de la quantité depuis la page de dépôt.
+  **Export et comparatif enregistré** : `versComparatif` / `comparatifDepuisOffres` prennent la base (`quantitesOffre.ts`, module
+  SANS dépendance, pour ne pas fermer de cercle avec `comparatifPrix.ts`) : les montants par article et le sous-total suivent la base,
+  et chaque article porte `ecartsQuantites` (quantité, acceptée ou non, P.U.). L'export Excel du comparatif
+  (`generateComparatifExcel`) dit la base dans le sous-titre, ajoute « Qté document » et « Qté entreprise » à la feuille d'une
+  entreprise qui a changé des quantités (les autres feuilles sont inchangées) et une feuille « Quantités modifiées » (écart, P.U., effet
+  HT, acceptée, du plus lourd au plus léger : `lignesEcartsQuantites`) ; sans écart, le classeur est celui d'avant.
+  **Pas encore fait** : un message « quantités à confirmer » à l'entreprise ; la saisie de la quantité depuis la page de dépôt.
 - **Questions des entreprises** (`POST /api/public/depot/:token/questions`, `src/lib/depotQuestions.ts`, testé ;
   migration `supabase/migrate_consultation_depot_questions.sql`) : la question arrive dans la boîte de réception
   `consultation_depot_questions` (jamais publiée d'office, jamais dans la consultation par la route), 2000 caractères

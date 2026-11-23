@@ -6,9 +6,10 @@ import type { ProjectLot } from '../types';
 import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
 import {
-  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO,
+  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO, FORMAT_QUANTITE,
   type Cellule, type Colonne,
 } from './xlsxLetterhead';
+import { LIBELLE_BASE, type BaseQuantites } from './quantitesOffre';
 
 interface OffreExport {
   lot_id: string;
@@ -30,6 +31,11 @@ interface ComparatifArticleExport {
   is_section_header?: boolean;
   is_subtotal?: boolean;
   ajoute_par?: string;
+  unite?: string;
+  /** Quantité du document (DPGF ou DQE). */
+  quantite?: number;
+  /** Entreprises qui ont remis une autre quantité que celle du document. */
+  ecartsQuantites?: Record<string, { quantite: number; acceptee: boolean; prixUnitaire: number | null }>;
 }
 
 /** Ce que ces exports lisent d'une consultation ; ACTModule en porte davantage. */
@@ -39,6 +45,8 @@ export interface ConsultationExport {
   offres: OffreExport[];
   attributions: { lot_id: string; entreprise_id: string; montant: number }[];
   comparatif?: { lot_id: string; articles: ComparatifArticleExport[] }[];
+  /** Base de quantités des montants du comparatif : celle du maître d'œuvre (défaut) ou celles des entreprises. */
+  base_quantites?: BaseQuantites;
 }
 
 const nomFichier = (s: string) => s.replace(/\s+/g, '_');
@@ -154,6 +162,57 @@ export async function generateRAO(
 
 const cellule = (v: number | undefined | null): Cellule => (v == null ? '' : v);
 
+/** Une quantité remise par une entreprise et différente de celle du document, prête à être tabulée. */
+export interface LigneEcartQuantite {
+  lot: string;
+  entrepriseId: string;
+  entreprise: string;
+  code: string;
+  titre: string;
+  unite: string;
+  quantiteDocument: number;
+  quantiteEntreprise: number;
+  ecart: number;
+  prixUnitaire: number | null;
+  /** (quantité entreprise - quantité du document) x P.U. ; null sans prix chiffré. */
+  effet: number | null;
+  acceptee: boolean;
+}
+
+/**
+ * Les quantités changées par les entreprises, dans l'ordre des lots, puis du plus lourd en euros au plus léger
+ * (les postes sans prix en dernier). Le document n'est jamais modifié : ces lignes ne font que les rapporter.
+ */
+export function lignesEcartsQuantites(
+  lots: Array<{ id: string; lot_number: string; lot_title: string }>,
+  comparatif: NonNullable<ConsultationExport['comparatif']>,
+  entreprises: Array<{ id: string; nom: string }>,
+): LigneEcartQuantite[] {
+  const sortie: LigneEcartQuantite[] = [];
+  for (const lot of lots) {
+    const lignes: LigneEcartQuantite[] = [];
+    for (const a of comparatif.find(c => c.lot_id === lot.id)?.articles ?? []) {
+      if (!a.ecartsQuantites) continue;
+      for (const e of entreprises) {
+        const ec = a.ecartsQuantites[e.id];
+        if (!ec) continue;
+        const doc = a.quantite ?? 0;
+        lignes.push({
+          lot: `Lot ${lot.lot_number} - ${lot.lot_title}`, entrepriseId: e.id, entreprise: e.nom, code: a.code || '', titre: a.titre,
+          unite: a.unite ?? '', quantiteDocument: doc, quantiteEntreprise: ec.quantite, ecart: ec.quantite - doc,
+          prixUnitaire: ec.prixUnitaire, effet: ec.prixUnitaire != null ? (ec.quantite - doc) * ec.prixUnitaire : null, acceptee: ec.acceptee,
+        });
+      }
+    }
+    lignes.sort((x, y) => {
+      if ((x.effet == null) !== (y.effet == null)) return x.effet == null ? 1 : -1;
+      return Math.abs(y.effet ?? 0) - Math.abs(x.effet ?? 0) || x.code.localeCompare(y.code, 'fr', { numeric: true });
+    });
+    sortie.push(...lignes);
+  }
+  return sortie;
+}
+
 export async function generateComparatifExcel(
   lots: ProjectLot[],
   consultation: ConsultationExport,
@@ -163,6 +222,8 @@ export async function generateComparatifExcel(
   const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
   const entreprises = consultation.entreprises;
   const comparatif = consultation.comparatif ?? [];
+  const base = consultation.base_quantites ?? 'moe';
+  const ecarts = lignesEcartsQuantites(lots, comparatif, entreprises);
 
   // ── Comparaison : une colonne par entreprise ───────────────────────────────
   const colonnes: Colonne[] = [
@@ -174,7 +235,8 @@ export async function generateComparatifExcel(
   const comparaison = ajouterFeuille(wb, {
     nom: 'Comparaison', settings, logo,
     title: 'Comparatif des offres',
-    subtitle: projectName,
+    // Quand une entreprise a changé des quantités, le classeur dit sur quelle base les montants sont calculés.
+    subtitle: ecarts.length ? `${projectName} - Base de comparaison : ${LIBELLE_BASE[base]}` : projectName,
     colonnes,
   });
   const vides = entreprises.map((): Cellule => '');
@@ -211,6 +273,8 @@ export async function generateComparatifExcel(
     }
     noms.add(nom.toLowerCase());
 
+    // Une entreprise qui a changé des quantités voit s'ajouter la quantité du document et la sienne.
+    const avecQuantites = ecarts.some(x => x.entrepriseId === e.id);
     const f = ajouterFeuille(wb, {
       nom, settings, logo,
       title: e.nom,
@@ -219,6 +283,10 @@ export async function generateComparatifExcel(
       colonnes: [
         { header: 'Code', width: 12 },
         { header: 'Désignation', width: 45 },
+        ...(avecQuantites ? [
+          { header: 'Qté document', width: 14, align: 'right' as const, numFmt: FORMAT_QUANTITE },
+          { header: 'Qté entreprise', width: 14, align: 'right' as const, numFmt: FORMAT_QUANTITE },
+        ] : []),
         { header: 'Estimatif HT', width: 16, align: 'right', numFmt: FORMAT_EURO },
         { header: 'Offre HT', width: 18, align: 'right', numFmt: FORMAT_EURO },
       ],
@@ -228,12 +296,44 @@ export async function generateComparatifExcel(
       f.ligne([`Lot ${lot.lot_number} - ${lot.lot_title}`], { gras: true, fond: 'groupe', fusionner: true });
       for (const article of cl?.articles ?? []) {
         if (article.is_section_header || article.is_subtotal) continue;
-        f.ligne([article.code || '', titreArticle(article), cellule(article.estimatif), cellule(article.prix[e.id])]);
+        f.ligne([
+          article.code || '', titreArticle(article),
+          ...(avecQuantites ? [cellule(article.quantite), cellule(article.ecartsQuantites?.[e.id]?.quantite)] : []),
+          cellule(article.estimatif), cellule(article.prix[e.id]),
+        ]);
       }
       const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === e.id);
-      f.ligne(['', 'Total lot HT', '', offre?.montant_base ?? ''], { gras: true });
+      f.ligne(['', 'Total lot HT', ...(avecQuantites ? ['', ''] : []), '', offre?.montant_base ?? ''], { gras: true });
       f.vide();
     }
+  }
+
+  // ── Quantités modifiées par les entreprises ────────────────────────────────
+  if (ecarts.length) {
+    const q = ajouterFeuille(wb, {
+      nom: 'Quantités modifiées', settings, logo,
+      title: 'Quantités modifiées par les entreprises',
+      subtitle: `${projectName} - Base de comparaison : ${LIBELLE_BASE[base]}`,
+      colonnes: [
+        { header: 'Entreprise', width: 28 },
+        { header: 'Code', width: 12 },
+        { header: 'Désignation', width: 45 },
+        { header: 'U', width: 7 },
+        { header: 'Qté document', width: 14, align: 'right', numFmt: FORMAT_QUANTITE },
+        { header: 'Qté entreprise', width: 14, align: 'right', numFmt: FORMAT_QUANTITE },
+        { header: 'Écart', width: 12, align: 'right', numFmt: FORMAT_QUANTITE },
+        { header: 'P.U. HT (€)', width: 14, align: 'right', numFmt: FORMAT_EURO },
+        { header: 'Effet HT (€)', width: 16, align: 'right', numFmt: FORMAT_EURO },
+        { header: 'Acceptée', width: 11 },
+      ],
+    });
+    let lotCourant = '';
+    for (const l of ecarts) {
+      if (l.lot !== lotCourant) { lotCourant = l.lot; q.ligne([l.lot, '', '', '', '', '', '', '', '', ''], { gras: true, fond: 'groupe' }); }
+      q.ligne([l.entreprise, l.code, l.titre, l.unite, l.quantiteDocument, l.quantiteEntreprise, l.ecart, cellule(l.prixUnitaire), cellule(l.effet), l.acceptee ? 'Oui' : 'Non']);
+    }
+    q.vide();
+    q.ligne(['Le DPGF (ou DQE) n\'est jamais modifié : une quantité acceptée ne change que l\'offre de l\'entreprise.'], { fusionner: true });
   }
 
   await enregistrerClasseur(wb, `Comparatif_${nomFichier(projectName)}.xlsx`);
