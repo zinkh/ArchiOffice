@@ -10,6 +10,7 @@ import type { PieceMarcheGeneree } from './marchePieces';
 import { formaterDateHeure } from './depotAffichage';
 import type { DonneesMessageDce } from './dceEnvoiMessage';
 import type { EntrepriseSuivi } from './actEntreprises';
+import { visitePourMessage, type CreneauVisite, type VisiteSite } from './actVisites';
 import type { ProjectLot } from '../types';
 
 /** Pièce du DCE telle que la reçoit la préparation (même forme que PieceDce du tableau). */
@@ -32,6 +33,8 @@ export interface ContexteEnvoiDce {
   depotActif: boolean;
   depotIndisponible?: string;
   deadlineAt?: string | null;
+  /** Créneaux de visite, lieu et consignes : le message annonce la visite quand un créneau est citable. */
+  visite?: { creneaux: CreneauVisite[]; site?: VisiteSite };
 }
 
 export interface PreparationEntreprise {
@@ -48,6 +51,7 @@ export function donneesSansReseau(ctx: ContexteEnvoiDce, entreprise: EntrepriseS
     lots: ctx.lots.filter(l => entreprise.lots_ids.includes(l.id)),
     piecesMarche: [],
     lignesIndices: lignesIndices(piecesEntreprise, ctx.documents),
+    visite: ctx.visite ? visitePourMessage(entreprise, ctx.visite.creneaux, ctx.visite.site) : undefined,
     dateLimite: ctx.deadlineAt ? formaterDateHeure(ctx.deadlineAt) : undefined,
     depotNonPropose: !ctx.depotActif ? ctx.depotIndisponible : undefined,
     echecsPieces: [],

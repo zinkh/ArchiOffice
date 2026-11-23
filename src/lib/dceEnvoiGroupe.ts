@@ -1,40 +1,50 @@
-// ── Envoi groupé du DCE : qui reçoit quoi ────────────────────────────────────
+// ── Envoi groupé du DCE et convocations à la visite : qui reçoit quoi ───────
 // L'envoi groupé reste un mail INDIVIDUEL par entreprise (chacune ne voit que son propre
 // message). Ce module décide, sans rien envoyer, quelles entreprises peuvent recevoir le
-// DCE et pourquoi les autres sont écartées.
+// message et pourquoi les autres sont écartées, puis ce qu'il faut enregistrer après l'envoi.
 import { destinatairesEntreprise, type EntrepriseSuivi } from './actEntreprises';
+import { visiteNotifiee } from './actVisites';
 
-export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot';
+/** `dce` : envoi du dossier de consultation ; `visite` : convocation à la visite de site. */
+export type ModeEnvoi = 'dce' | 'visite';
+
+export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot' | 'sans_creneau';
 
 export const LIBELLE_MOTIF: Record<MotifExclusion, string> = {
   ne_repond_pas: 'Marquée « ne répond pas »',
   sans_adresse: 'Aucune adresse e-mail',
   sans_lot: 'Aucun lot assigné',
+  sans_creneau: 'Aucun créneau de visite affecté',
 };
 
 export interface LigneEnvoiGroupe {
   entreprise: EntrepriseSuivi;
   destinataires: string[];
-  /** Renseigné quand l'entreprise ne peut pas recevoir le DCE : la ligne n'est pas cochable. */
+  /** Renseigné quand l'entreprise ne peut pas recevoir le message : la ligne n'est pas cochable. */
   motif?: MotifExclusion;
-  /** Le DCE lui a déjà été transmis : décochée d'office, un nouvel envoi révoque son lien de dépôt. */
-  dejaTransmis: boolean;
+  /** Elle a déjà reçu ce message : décochée d'office (pour le DCE, un renvoi révoque son lien de dépôt). */
+  dejaEnvoye: boolean;
+  /** Date du dernier envoi, quand elle est connue. */
+  dejaLe?: string;
 }
 
-export function planEnvoiGroupe(entreprises: EntrepriseSuivi[]): LigneEnvoiGroupe[] {
+export function planEnvoiGroupe(entreprises: EntrepriseSuivi[], mode: ModeEnvoi = 'dce'): LigneEnvoiGroupe[] {
   return entreprises.map(entreprise => {
     const destinataires = destinatairesEntreprise(entreprise);
     const motif: MotifExclusion | undefined = entreprise.ne_repond_pas ? 'ne_repond_pas'
       : destinataires.length === 0 ? 'sans_adresse'
-      : entreprise.lots_ids.length === 0 ? 'sans_lot'
+      : mode === 'dce' && entreprise.lots_ids.length === 0 ? 'sans_lot'
+      : mode === 'visite' && !entreprise.visite_creneau_id ? 'sans_creneau'
       : undefined;
-    return { entreprise, destinataires, motif, dejaTransmis: !!entreprise.dce_transmis_le };
+    const dejaEnvoye = mode === 'dce' ? !!entreprise.dce_transmis_le : visiteNotifiee(entreprise);
+    const dejaLe = mode === 'dce' ? entreprise.dce_transmis_le : entreprise.visite_convoquee_le;
+    return { entreprise, destinataires, motif, dejaEnvoye, dejaLe };
   });
 }
 
-/** Entreprises cochées par défaut : celles qui peuvent recevoir le DCE et ne l'ont pas encore reçu. */
+/** Entreprises cochées par défaut : celles qui peuvent recevoir le message et ne l'ont pas encore reçu. */
 export function lignesCochees(plan: LigneEnvoiGroupe[]): Set<string> {
-  return new Set(plan.filter(l => !l.motif && !l.dejaTransmis).map(l => l.entreprise.id));
+  return new Set(plan.filter(l => !l.motif && !l.dejaEnvoye).map(l => l.entreprise.id));
 }
 
 /**
@@ -43,4 +53,21 @@ export function lignesCochees(plan: LigneEnvoiGroupe[]): Set<string> {
  */
 export function entreprisesDceAEnvoyer<E extends EntrepriseSuivi>(entreprises: E[]): E[] {
   return entreprises.filter(e => e.envoyer_dce && !e.dce_transmis_le && !e.ne_repond_pas && !e.offre_recue_le);
+}
+
+/** Entreprises à convoquer : un créneau leur est affecté et elles n'en ont pas encore été prévenues. */
+export function entreprisesAConvoquer<E extends EntrepriseSuivi>(entreprises: E[]): E[] {
+  return entreprises.filter(e => !!e.visite_creneau_id && !e.ne_repond_pas && !visiteNotifiee(e));
+}
+
+/**
+ * Ce qu'il faut enregistrer sur l'entreprise après un envoi RÉUSSI. Un mail du DCE qui citait son
+ * créneau (`creneauCite`) vaut convocation ; sans créneau cité, la convocation n'est pas posée.
+ */
+export function marquageEnvoi(e: EntrepriseSuivi, mode: ModeEnvoi, aujourdhui: string, creneauCite: boolean): Partial<EntrepriseSuivi> {
+  const convocation: Partial<EntrepriseSuivi> = e.visite_creneau_id && creneauCite
+    ? { visite_convoquee_creneau_id: e.visite_creneau_id, visite_convoquee_le: aujourdhui }
+    : {};
+  if (mode === 'visite') return convocation;
+  return { dce_transmis_le: e.dce_transmis_le || aujourdhui, envoyer_dce: true, ne_repond_pas: false, ...convocation };
 }

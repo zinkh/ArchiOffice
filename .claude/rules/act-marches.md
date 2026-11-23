@@ -76,6 +76,17 @@ migration).
   marché sont générées une fois pour tout l'envoi. Plafond de 25 Mo par message : une entreprise trop
   lourde échoue seule, avec le motif. Pas de bloc « dossier partagé » dans le message groupé : ces
   pièces restent sur la page de dépôt.
+- **Visite de site dans les messages** : `consultation.visite_site { lieu, consignes }` (jsonb, saisi sous
+  « Créneaux de visites ») et, par entreprise, `visite_convoquee_creneau_id` / `visite_convoquee_le`
+  (jsonb, aucune migration). Le jeton `{{visite}}` du mail du DCE (individuel et groupé) cite le créneau
+  affecté à l'entreprise, à défaut les créneaux À VENIR à choisir (`visitePourMessage`, `actVisites.ts`) ;
+  sans créneau citable, rien n'est annoncé (un lieu seul ne suffit pas). Un mail du DCE qui cite le
+  créneau affecté vaut convocation (`marquageEnvoi` : seulement si le texte envoyé contient bien le bloc,
+  l'architecte pouvant l'avoir retiré du modèle). **Convocation dédiée** : bouton « Convoquer à la
+  visite » (mode `visite` de `DceEnvoiGroupeDialog`, modèle `MODELE_CORPS_VISITE`, aucune pièce jointe ni
+  lien de dépôt). Un créneau modifié depuis la dernière convocation affiche « à renotifier »
+  (`aRenotifier`) et l'entreprise redevient cochée ; une entreprise déjà convoquée pour son créneau
+  actuel est décochée d'office. La page de dépôt n'affiche pas encore la visite (livraison suivante).
 - **Ajout d'une entreprise** (`EntrepriseAddForm.tsx`, bouton « Ajouter » de l'en-tête) : un mini
   formulaire au-dessus du tableau (entreprise choisie dans les contacts ou créée sur place, email,
   corps d'état, lots, dates, DCE à envoyer) remplace l'ancienne ligne vide ajoutée tout en bas. À

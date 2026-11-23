@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MODELE_CORPS, MODELE_SUJET, blocsMessageDce, jetonsInconnus, remplirModele, type DonneesMessageDce,
+  MODELE_CORPS, MODELE_CORPS_VISITE, MODELE_SUJET, blocsMessageDce, jetonsInconnus, remplirModele, type DonneesMessageDce,
 } from '../dceEnvoiMessage';
-import { entreprisesDceAEnvoyer, lignesCochees, planEnvoiGroupe } from '../dceEnvoiGroupe';
+import { entreprisesAConvoquer, entreprisesDceAEnvoyer, lignesCochees, marquageEnvoi, planEnvoiGroupe } from '../dceEnvoiGroupe';
+import { aRenotifier, visiteNotifiee, visitePourMessage } from '../actVisites';
 import type { EntrepriseSuivi } from '../actEntreprises';
 
 const base: DonneesMessageDce = {
@@ -114,7 +115,7 @@ describe('plan d\'envoi groupé', () => {
 
   it('décoche d\'office une entreprise qui a déjà reçu le DCE', () => {
     const plan = planEnvoiGroupe([ent('a'), ent('b', { dce_transmis_le: '2026-11-01' })]);
-    expect(plan[1].dejaTransmis).toBe(true);
+    expect(plan[1].dejaEnvoye).toBe(true);
     expect([...lignesCochees(plan)]).toEqual(['a']);
   });
 
@@ -132,5 +133,113 @@ describe('plan d\'envoi groupé', () => {
       ent('e', { offre_recue_le: '2026-11-05' }),
     ];
     expect(entreprisesDceAEnvoyer(liste).map(e => e.id)).toEqual(['a']);
+  });
+});
+
+const creneaux = [
+  { id: 'c2', date_heure: '2030-06-12T14:00' },
+  { id: 'c1', date_heure: '2030-06-10T09:30' },
+  { id: 'passe', date_heure: '2020-01-01T09:00' },
+];
+
+describe('visite de site dans le message', () => {
+  it('cite le créneau affecté, le lieu et les consignes', () => {
+    const visite = visitePourMessage({ visite_creneau_id: 'c1' }, creneaux, { lieu: ' 12 rue du Chantier ', consignes: 'Casque obligatoire' });
+    expect(visite).toMatchObject({ assigne: true, lieu: '12 rue du Chantier', consignes: 'Casque obligatoire' });
+    expect(visite?.creneaux).toHaveLength(1);
+    const corps = remplirModele(MODELE_CORPS, blocsMessageDce({ ...base, visite }));
+    expect(corps).toContain('Visite de site :\n- ');
+    expect(corps).toContain('Lieu : 12 rue du Chantier');
+    expect(corps).toContain('Consignes : Casque obligatoire');
+    expect(corps).not.toContain('créneaux proposés');
+  });
+
+  it('sans créneau affecté, propose les créneaux à venir dans l\'ordre et ignore les passés', () => {
+    const visite = visitePourMessage({}, creneaux, undefined, new Date('2030-01-01T00:00'));
+    expect(visite?.assigne).toBe(false);
+    expect(visite?.creneaux).toHaveLength(2);
+    const corps = remplirModele(MODELE_CORPS, blocsMessageDce({ ...base, visite }));
+    expect(corps).toContain('Visite de site, créneaux proposés :');
+    expect(corps).toContain('Merci de nous indiquer le créneau que vous retenez.');
+  });
+
+  it('un créneau supprimé n\'est pas cité : on propose les autres', () => {
+    expect(visitePourMessage({ visite_creneau_id: 'disparu' }, creneaux, undefined, new Date('2030-01-01'))?.assigne).toBe(false);
+  });
+
+  it('n\'annonce aucune visite sans créneau à citer, même avec un lieu', () => {
+    expect(visitePourMessage({}, [], { lieu: 'Chantier' })).toBeUndefined();
+    expect(visitePourMessage({}, [creneaux[2]], { lieu: 'Chantier' }, new Date('2030-01-01'))).toBeUndefined();
+    const corps = remplirModele(MODELE_CORPS, blocsMessageDce(base));
+    expect(corps).not.toContain('Visite de site');
+  });
+
+  it('la convocation seule reprend le bloc visite', () => {
+    const visite = visitePourMessage({ visite_creneau_id: 'c2' }, creneaux, { lieu: 'Parking nord' });
+    const corps = remplirModele(MODELE_CORPS_VISITE, blocsMessageDce({ ...base, visite }));
+    expect(corps).toContain('« Résidence Les Tilleuls »');
+    expect(corps).toContain('Lieu : Parking nord');
+    expect(corps).toContain('confirmer votre présence');
+    expect(corps).not.toMatch(/\n{3,}/);
+  });
+});
+
+describe('convocation à la visite', () => {
+  it('écarte une entreprise sans créneau, sans adresse ou qui ne répond pas', () => {
+    const plan = planEnvoiGroupe([
+      ent('a', { visite_creneau_id: 'c1' }),
+      ent('b'),
+      ent('c', { visite_creneau_id: 'c1', email: '' }),
+      ent('d', { visite_creneau_id: 'c1', ne_repond_pas: true }),
+      ent('e', { visite_creneau_id: 'c1', lots_ids: [] }),
+    ], 'visite');
+    expect(plan.map(l => l.motif)).toEqual([undefined, 'sans_creneau', 'sans_adresse', 'ne_repond_pas', undefined]);
+  });
+
+  it('décoche une entreprise déjà convoquée pour son créneau actuel, pas pour un autre', () => {
+    const a = ent('a', { visite_creneau_id: 'c1', visite_convoquee_creneau_id: 'c1', visite_convoquee_le: '2026-11-20' });
+    const b = ent('b', { visite_creneau_id: 'c2', visite_convoquee_creneau_id: 'c1', visite_convoquee_le: '2026-11-20' });
+    const plan = planEnvoiGroupe([a, b], 'visite');
+    expect([...lignesCochees(plan)]).toEqual(['b']);
+    expect(plan[0].dejaLe).toBe('2026-11-20');
+  });
+
+  it('détecte le créneau modifié depuis la dernière convocation', () => {
+    expect(aRenotifier({ visite_creneau_id: 'c2', visite_convoquee_creneau_id: 'c1', visite_convoquee_le: '2026-11-20' })).toBe(true);
+    expect(aRenotifier({ visite_creneau_id: 'c1', visite_convoquee_creneau_id: 'c1', visite_convoquee_le: '2026-11-20' })).toBe(false);
+    expect(aRenotifier({ visite_creneau_id: 'c1' })).toBe(false);
+    expect(visiteNotifiee({ visite_creneau_id: 'c1', visite_convoquee_creneau_id: 'c1' })).toBe(true);
+  });
+
+  it('« à convoquer » : créneau affecté, pas déjà prévenue, pas « ne répond pas »', () => {
+    const liste = [
+      ent('a', { visite_creneau_id: 'c1' }),
+      ent('b'),
+      ent('c', { visite_creneau_id: 'c1', visite_convoquee_creneau_id: 'c1' }),
+      ent('d', { visite_creneau_id: 'c1', ne_repond_pas: true }),
+      ent('e', { visite_creneau_id: 'c2', visite_convoquee_creneau_id: 'c1' }),
+    ];
+    expect(entreprisesAConvoquer(liste).map(e => e.id)).toEqual(['a', 'e']);
+  });
+});
+
+describe('ce qui est enregistré après un envoi réussi', () => {
+  it('DCE : pose la transmission, et la convocation si le créneau a été cité', () => {
+    const e = ent('a', { visite_creneau_id: 'c1', envoyer_dce: false, ne_repond_pas: true });
+    expect(marquageEnvoi(e, 'dce', '2026-11-23', true)).toEqual({
+      dce_transmis_le: '2026-11-23', envoyer_dce: true, ne_repond_pas: false,
+      visite_convoquee_creneau_id: 'c1', visite_convoquee_le: '2026-11-23',
+    });
+    expect(marquageEnvoi(e, 'dce', '2026-11-23', false)).not.toHaveProperty('visite_convoquee_le');
+  });
+
+  it('DCE : garde la date de première transmission', () => {
+    expect(marquageEnvoi(ent('a', { dce_transmis_le: '2026-11-01' }), 'dce', '2026-11-23', false).dce_transmis_le).toBe('2026-11-01');
+  });
+
+  it('convocation : ne touche ni au DCE ni au statut', () => {
+    const m = marquageEnvoi(ent('a', { visite_creneau_id: 'c1' }), 'visite', '2026-11-23', true);
+    expect(m).toEqual({ visite_convoquee_creneau_id: 'c1', visite_convoquee_le: '2026-11-23' });
+    expect(marquageEnvoi(ent('a', { visite_creneau_id: 'c1' }), 'visite', '2026-11-23', false)).toEqual({});
   });
 });
