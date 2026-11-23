@@ -59,3 +59,31 @@ export function questionsAReprendre(deja: Array<{ id: string }>, recues: Questio
     ...(r.objet ? { objet: r.objet } : {}), ...(r.lot_id ? { lot_id: r.lot_id } : {}),
   }));
 }
+
+/** Ce qu'il faut savoir d'une question de la consultation pour en diffuser la réponse. */
+export interface QuestionDiffusable {
+  id: string; question: string; objet?: string; lot_id?: string; reponse?: string; publique: boolean;
+  /** Entreprises déjà destinataires de la diffusion de cette réponse, et date du dernier envoi. */
+  diffusee_a?: string[]; diffusee_le?: string;
+}
+
+/** Seule une réponse rendue publique et réellement saisie peut être diffusée. */
+export function reponseDiffusable(q: Pick<QuestionDiffusable, 'publique' | 'reponse'>): boolean {
+  return q.publique === true && !!q.reponse?.trim();
+}
+
+/**
+ * Entreprises qui reçoivent la réponse : celles du lot visé, ou toutes les entreprises consultées pour une
+ * question générale. L'entreprise qui avait posé la question en fait partie (elle reçoit la même réponse).
+ */
+export function entreprisesDeLaReponse<E extends { lots_ids: string[] }>(
+  entreprises: E[], q: Pick<QuestionDiffusable, 'lot_id'>,
+): E[] {
+  return q.lot_id ? entreprises.filter(e => e.lots_ids.includes(q.lot_id as string)) : entreprises;
+}
+
+/** Marque l'entreprise comme destinataire de la réponse, sans doublon ; garde la date du dernier envoi. */
+export function marquerDiffusee<Q extends QuestionDiffusable>(q: Q, entrepriseId: string, aujourdhui: string): Q {
+  const deja = q.diffusee_a ?? [];
+  return { ...q, diffusee_a: deja.includes(entrepriseId) ? deja : [...deja, entrepriseId], diffusee_le: aujourdhui };
+}

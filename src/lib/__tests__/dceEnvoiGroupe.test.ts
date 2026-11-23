@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MODELE_CORPS, MODELE_CORPS_VISITE, MODELE_SUJET, blocsMessageDce, jetonsInconnus, remplirModele, type DonneesMessageDce,
+  MODELE_CORPS, MODELE_CORPS_REPONSE, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_REPONSE, blocsMessageDce, jetonsInconnus, remplirModele, type DonneesMessageDce,
 } from '../dceEnvoiMessage';
 import { entreprisesAConvoquer, entreprisesDceAEnvoyer, lignesCochees, marquageEnvoi, planEnvoiGroupe } from '../dceEnvoiGroupe';
 import { aRenotifier, visiteNotifiee, visitePourMessage } from '../actVisites';
+import { entreprisesDeLaReponse, marquerDiffusee, reponseDiffusable, type QuestionDiffusable } from '../depotQuestions';
 import type { EntrepriseSuivi } from '../actEntreprises';
 
 const base: DonneesMessageDce = {
@@ -241,5 +242,60 @@ describe('ce qui est enregistré après un envoi réussi', () => {
     const m = marquageEnvoi(ent('a', { visite_creneau_id: 'c1' }), 'visite', '2026-11-23', true);
     expect(m).toEqual({ visite_convoquee_creneau_id: 'c1', visite_convoquee_le: '2026-11-23' });
     expect(marquageEnvoi(ent('a', { visite_creneau_id: 'c1' }), 'visite', '2026-11-23', false)).toEqual({});
+  });
+});
+
+describe('diffusion d\'une réponse publique', () => {
+  const qr = { objet: 'Plancher', question: 'Quelle épaisseur de dalle ?', reponse: 'Vingt centimètres.' };
+
+  it('compose le message sans nom d\'auteur, avec la question et la réponse', () => {
+    const corps = remplirModele(MODELE_CORPS_REPONSE, blocsMessageDce({ ...base, questionReponse: qr }));
+    expect(corps).toContain('« Résidence Les Tilleuls »');
+    expect(corps).toContain('Objet : Plancher\nQuestion : Quelle épaisseur de dalle ?\n\nRéponse : Vingt centimètres.');
+    expect(corps).not.toContain('Maçonnerie Dupont');
+    expect(corps).not.toMatch(/\n{3,}/);
+    expect(remplirModele(MODELE_SUJET_REPONSE, blocsMessageDce(base))).toBe('Réponse à une question : Résidence Les Tilleuls');
+  });
+
+  it('omet la ligne d\'objet quand la question n\'en a pas', () => {
+    const corps = remplirModele(MODELE_CORPS_REPONSE, blocsMessageDce({ ...base, questionReponse: { question: 'Horaires ?', reponse: '8h-17h' } }));
+    expect(corps).not.toContain('Objet :');
+    expect(corps).toContain('Question : Horaires ?');
+  });
+
+  it('seule une réponse publique et saisie peut être diffusée', () => {
+    expect(reponseDiffusable({ publique: true, reponse: 'Oui.' })).toBe(true);
+    expect(reponseDiffusable({ publique: false, reponse: 'Oui.' })).toBe(false);
+    expect(reponseDiffusable({ publique: true, reponse: '   ' })).toBe(false);
+    expect(reponseDiffusable({ publique: true })).toBe(false);
+  });
+
+  it('destinataires : les entreprises du lot visé, ou toutes pour une question générale', () => {
+    const liste = [ent('a', { lots_ids: ['L1'] }), ent('b', { lots_ids: ['L2'] }), ent('c', { lots_ids: ['L1', 'L2'] })];
+    expect(entreprisesDeLaReponse(liste, { lot_id: 'L1' }).map(e => e.id)).toEqual(['a', 'c']);
+    expect(entreprisesDeLaReponse(liste, {}).map(e => e.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('plan : écarte sans adresse et « ne répond pas », décoche celles qui ont déjà reçu la réponse', () => {
+    const plan = planEnvoiGroupe([
+      ent('a'), ent('b', { ne_repond_pas: true }), ent('c', { email: '' }), ent('d', { lots_ids: [] }), ent('e'),
+    ], 'reponse', new Set(['e']));
+    expect(plan.map(l => l.motif)).toEqual([undefined, 'ne_repond_pas', 'sans_adresse', undefined, undefined]);
+    expect([...lignesCochees(plan)]).toEqual(['a', 'd']); // pas de contrainte de lot : le filtre se fait avant
+    expect(plan[4].dejaEnvoye).toBe(true);
+  });
+
+  it('marque chaque destinataire sans doublon et garde la date du dernier envoi', () => {
+    const q: QuestionDiffusable = { id: 'q1', question: 'x', publique: true, reponse: 'y' };
+    const a = marquerDiffusee(q, 'e1', '2026-11-23');
+    const b = marquerDiffusee(a, 'e2', '2026-11-24');
+    const c = marquerDiffusee(b, 'e1', '2026-11-25');
+    expect(c.diffusee_a).toEqual(['e1', 'e2']);
+    expect(c.diffusee_le).toBe('2026-11-25');
+    expect(q).not.toHaveProperty('diffusee_a'); // l'original n'est pas modifié
+  });
+
+  it('n\'enregistre rien sur l\'entreprise après une diffusion', () => {
+    expect(marquageEnvoi(ent('a'), 'reponse', '2026-11-23', false)).toEqual({});
   });
 });

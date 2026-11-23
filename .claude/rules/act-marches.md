@@ -355,7 +355,22 @@ restent lisibles par le cabinet.
 - **Visite de site sur la page** (`visite` du contexte, lue dans `consultation` : `creneaux_visite`, `visite_site`,
   `visite_creneau_id` de l'entreprise) : son créneau, à défaut les créneaux à venir à choisir, avec lieu et consignes.
   Les dates restent celles du chantier, sans fuseau. Une entreprise ne voit jamais les créneaux ni les noms des autres.
-  La page n'écrit rien : la confirmation de présence viendra avec les questions.
+  **Confirmer ma présence** (`POST /api/public/depot/:token/visite/confirmer`) pose `visite_confirmee_le` sur
+  l'INVITATION (`consultation_depot_invites`), jamais dans la consultation : l'architecte reste maître du pointage
+  (`visite_presence`). Une notification part au cabinet, la liste des liens l'expose.
+- **Questions des entreprises** (`POST /api/public/depot/:token/questions`, `src/lib/depotQuestions.ts`, testé ;
+  migration `supabase/migrate_consultation_depot_questions.sql`) : la question arrive dans la boîte de réception
+  `consultation_depot_questions` (jamais publiée d'office, jamais dans la consultation par la route), 2000 caractères
+  au plus, 20 par entreprise, lot contrôlé, refusée après `consultation.date_limite_questions` (jsonb, réglée sous
+  « Questions / Réponses »). `ACTModule` reprend chaque question dans `consultation.questions` à l'ouverture et au
+  retour sur l'onglet, par IDENTIFIANT (rejouable, `questionsAReprendre`) ; supprimer une question reprise la retire
+  aussi de la boîte (`DELETE /api/projects/:id/depot/questions/:id`), sinon elle serait reprise. La réponse, saisie
+  dans l'ACT, FAIT FOI et s'affiche sur la page de l'entreprise ; la case « Réponse communiquée à toutes les
+  entreprises du lot » la rend publique SANS le nom de l'auteur, aux seules entreprises du lot visé (à toutes si la
+  question est générale). **Diffusion par mail** : bouton « Diffuser par mail » d'une réponse publique, mode `reponse`
+  de `DceEnvoiGroupeDialog` (message unique, un mail par entreprise du lot, auteur de la question compris, aucune
+  pièce jointe) ; `diffusee_a` / `diffusee_le` sur la question évitent de renvoyer à qui l'a déjà reçue, une
+  entreprise ajoutée ensuite reste à prévenir (`entreprisesDeLaReponse`, `marquerDiffusee`).
 - **Dossier partagé** (bouton « Ajouter un dossier (zip, lien) » de la fenêtre d'envoi du DCE,
   `act/DossierPartageDialog.tsx`, logique pure `src/lib/dossierPartageMail.ts`, testée) : un zip ou autre
   fichier téléversé (`POST /api/documents`, 50 Mo au plus, catégorie DCE, rangé dans les documents de l'affaire),

@@ -5,8 +5,8 @@
 import { destinatairesEntreprise, type EntrepriseSuivi } from './actEntreprises';
 import { visiteNotifiee } from './actVisites';
 
-/** `dce` : envoi du dossier de consultation ; `visite` : convocation à la visite de site. */
-export type ModeEnvoi = 'dce' | 'visite';
+/** `dce` : envoi du dossier ; `visite` : convocation à la visite ; `reponse` : diffusion d'une réponse publique. */
+export type ModeEnvoi = 'dce' | 'visite' | 'reponse';
 
 export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot' | 'sans_creneau';
 
@@ -28,7 +28,11 @@ export interface LigneEnvoiGroupe {
   dejaLe?: string;
 }
 
-export function planEnvoiGroupe(entreprises: EntrepriseSuivi[], mode: ModeEnvoi = 'dce'): LigneEnvoiGroupe[] {
+export function planEnvoiGroupe(
+  entreprises: EntrepriseSuivi[], mode: ModeEnvoi = 'dce',
+  /** Mode `reponse` : entreprises déjà destinataires de cette réponse. */
+  dejaDiffusee: ReadonlySet<string> = new Set(),
+): LigneEnvoiGroupe[] {
   return entreprises.map(entreprise => {
     const destinataires = destinatairesEntreprise(entreprise);
     const motif: MotifExclusion | undefined = entreprise.ne_repond_pas ? 'ne_repond_pas'
@@ -36,8 +40,8 @@ export function planEnvoiGroupe(entreprises: EntrepriseSuivi[], mode: ModeEnvoi 
       : mode === 'dce' && entreprise.lots_ids.length === 0 ? 'sans_lot'
       : mode === 'visite' && !entreprise.visite_creneau_id ? 'sans_creneau'
       : undefined;
-    const dejaEnvoye = mode === 'dce' ? !!entreprise.dce_transmis_le : visiteNotifiee(entreprise);
-    const dejaLe = mode === 'dce' ? entreprise.dce_transmis_le : entreprise.visite_convoquee_le;
+    const dejaEnvoye = mode === 'dce' ? !!entreprise.dce_transmis_le : mode === 'visite' ? visiteNotifiee(entreprise) : dejaDiffusee.has(entreprise.id);
+    const dejaLe = mode === 'dce' ? entreprise.dce_transmis_le : mode === 'visite' ? entreprise.visite_convoquee_le : undefined;
     return { entreprise, destinataires, motif, dejaEnvoye, dejaLe };
   });
 }
@@ -68,6 +72,7 @@ export function marquageEnvoi(e: EntrepriseSuivi, mode: ModeEnvoi, aujourdhui: s
   const convocation: Partial<EntrepriseSuivi> = e.visite_creneau_id && creneauCite
     ? { visite_convoquee_creneau_id: e.visite_creneau_id, visite_convoquee_le: aujourdhui }
     : {};
+  if (mode === 'reponse') return {};
   if (mode === 'visite') return convocation;
   return { dce_transmis_le: e.dce_transmis_le || aujourdhui, envoyer_dce: true, ne_repond_pas: false, ...convocation };
 }

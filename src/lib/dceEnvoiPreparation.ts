@@ -35,6 +35,8 @@ export interface ContexteEnvoiDce {
   deadlineAt?: string | null;
   /** Créneaux de visite, lieu et consignes : le message annonce la visite quand un créneau est citable. */
   visite?: { creneaux: CreneauVisite[]; site?: VisiteSite };
+  /** Diffusion d'une réponse publique : la question (sans auteur) et sa réponse. */
+  questionReponse?: { objet?: string; question: string; reponse: string };
 }
 
 export interface PreparationEntreprise {
@@ -52,6 +54,7 @@ export function donneesSansReseau(ctx: ContexteEnvoiDce, entreprise: EntrepriseS
     piecesMarche: [],
     lignesIndices: lignesIndices(piecesEntreprise, ctx.documents),
     visite: ctx.visite ? visitePourMessage(entreprise, ctx.visite.creneaux, ctx.visite.site) : undefined,
+    questionReponse: ctx.questionReponse,
     dateLimite: ctx.deadlineAt ? formaterDateHeure(ctx.deadlineAt) : undefined,
     depotNonPropose: !ctx.depotActif ? ctx.depotIndisponible : undefined,
     echecsPieces: [],
