@@ -18,6 +18,8 @@ export interface DonneesMessageDce {
   lignesIndices: LigneIndiceMessage[];
   /** Visite de site : son créneau, ou les créneaux proposés. Absent : aucune visite annoncée. */
   visite?: BlocVisite;
+  /** Réponse publique à diffuser (question sans nom d'auteur). */
+  questionReponse?: { objet?: string; question: string; reponse: string };
   /** Lien de dépôt personnel de l'entreprise. */
   lienDepot?: string;
   /** Date limite de remise, déjà mise en forme. */
@@ -52,6 +54,21 @@ export const MODELE_CORPS = [
   'Cordialement,',
 ].join('\n');
 
+/** Réponse à une question, diffusée à toutes les entreprises concernées sans citer l'auteur de la question. */
+export const MODELE_SUJET_REPONSE = 'Réponse à une question : {{operation}}';
+
+export const MODELE_CORPS_REPONSE = [
+  'Bonjour,',
+  '',
+  'Dans le cadre de la consultation des entreprises pour l\'opération « {{operation}} », nous portons à la connaissance de toutes les entreprises consultées la réponse suivante.',
+  '',
+  '{{question_reponse}}',
+  '',
+  'Cette réponse fait partie du dossier de consultation.',
+  '',
+  'Cordialement,',
+].join('\n');
+
 /** Convocation à la visite de site, envoyée seule (après l'envoi du DCE ou lors d'un changement de créneau). */
 export const MODELE_SUJET_VISITE = 'Visite de site — {{operation}}';
 
@@ -76,6 +93,7 @@ export const JETONS_MODELE: Array<{ jeton: string; aide: string }> = [
   { jeton: 'pieces_marche', aide: 'Pièces du marché jointes (RC, CCAP, acte d\'engagement)' },
   { jeton: 'pieces_dossier', aide: 'Pièces du dossier et indices de révision' },
   { jeton: 'visite', aide: 'Visite de site : créneau de l\'entreprise (ou créneaux proposés), lieu et consignes' },
+  { jeton: 'question_reponse', aide: 'Question et réponse à diffuser (modèle de réponse)' },
   { jeton: 'depot', aide: 'Lien de dépôt personnel et date limite' },
   { jeton: 'avertissements', aide: 'Pièces non jointes ou lien non créé' },
 ];
@@ -106,6 +124,10 @@ export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
         ...(v.consignes ? [`Consignes : ${v.consignes}`] : []),
       ].join('\n')
     : '';
+  const qr = d.questionReponse;
+  const questionReponse = qr
+    ? [...(qr.objet ? [`Objet : ${qr.objet}`] : []), `Question : ${qr.question}`, '', `Réponse : ${qr.reponse}`].join('\n')
+    : '';
   const depot = d.lienDepot
     ? ['Vous pouvez remettre votre offre en ligne sur votre espace de dépôt personnel (saisie de l\'offre ou dépôt de vos documents) :', d.lienDepot,
        ...(d.dateLimite ? [`Date limite de remise : ${d.dateLimite}.`] : []),
@@ -124,6 +146,7 @@ export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
     pieces_marche: piecesMarche,
     pieces_dossier: piecesDossier,
     visite,
+    question_reponse: questionReponse,
     depot,
     avertissements,
   };

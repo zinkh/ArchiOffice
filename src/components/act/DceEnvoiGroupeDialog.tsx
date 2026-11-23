@@ -14,22 +14,43 @@ import type { EntrepriseSuivi } from '../../lib/actEntreprises';
 import type { PieceMarcheGeneree } from '../../lib/marchePieces';
 import { LIBELLE_MOTIF, lignesCochees, planEnvoiGroupe, type ModeEnvoi } from '../../lib/dceEnvoiGroupe';
 import {
-  JETONS_MODELE, MODELE_CORPS, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_VISITE, blocsMessageDce, jetonsInconnus, remplirModele,
+  JETONS_MODELE, MODELE_CORPS, MODELE_CORPS_REPONSE, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_REPONSE, MODELE_SUJET_VISITE, blocsMessageDce, jetonsInconnus, remplirModele,
 } from '../../lib/dceEnvoiMessage';
 import { donneesSansReseau, preparerEnvoiEntreprise, type ContexteEnvoiDce } from '../../lib/dceEnvoiPreparation';
 
 type Etat = 'attente' | 'encours' | 'envoye' | 'echec';
 interface Statut { etat: Etat; message?: string }
 
+/** Ce qui change d'un usage à l'autre : modèles de message et libellés. */
+const TEXTES: Record<ModeEnvoi, { sujet: string; corps: string; objet: string; verbe: string; description: string; pied: string }> = {
+  dce: {
+    sujet: MODELE_SUJET, corps: MODELE_CORPS, objet: 'le DCE', verbe: 'Envoyer le DCE à',
+    description: 'Chaque entreprise reçoit son propre message, avec ses lots, ses pièces et son lien de dépôt personnel. Les entreprises sans adresse, sans lot ou marquées « ne répond pas » ne peuvent pas être cochées.',
+    pied: 'Les fichiers du DCE, le tableau d\'indices et les pièces du marché sont joints à chaque message, et un lien de dépôt personnel est créé à l\'envoi.',
+  },
+  visite: {
+    sujet: MODELE_SUJET_VISITE, corps: MODELE_CORPS_VISITE, objet: 'la convocation à la visite', verbe: 'Convoquer',
+    description: 'Chaque entreprise reçoit son propre message, avec le créneau qui lui est affecté. Les entreprises sans créneau affecté, sans adresse ou marquées « ne répond pas » ne peuvent pas être cochées.',
+    pied: 'Aucune pièce n\'est jointe à la convocation.',
+  },
+  reponse: {
+    sujet: MODELE_SUJET_REPONSE, corps: MODELE_CORPS_REPONSE, objet: 'la réponse', verbe: 'Envoyer la réponse à',
+    description: 'La réponse part à chaque entreprise concernée, sans citer l\'auteur de la question. Les entreprises sans adresse ou marquées « ne répond pas » ne peuvent pas être cochées.',
+    pied: 'Aucune pièce n\'est jointe. Relisez la question : elle est envoyée telle quelle à toutes les entreprises.',
+  },
+};
+
 const CHAMP = 'w-full text-sm border border-[var(--tblr-border)] rounded-lg px-2.5 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500';
 const LIEN_APERCU = '[lien de dépôt personnel de l\'entreprise]';
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('fr-FR');
 const mo = (octets: number) => (octets / (1024 * 1024)).toFixed(1).replace('.', ',');
 
-export default function DceEnvoiGroupeDialog({ titre, mode, entreprises, contexte, onEnvoye, onClose }: {
+export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entreprises, contexte, onEnvoye, onClose }: {
   titre: string;
-  /** `dce` : envoi du dossier ; `visite` : convocation à la visite de site (sans pièces ni lien de dépôt). */
+  /** `dce` : envoi du dossier ; `visite` : convocation à la visite ; `reponse` : diffusion d'une réponse publique (ni pièces ni lien de dépôt). */
   mode: ModeEnvoi;
+  /** Mode `reponse` : entreprises qui ont déjà reçu cette réponse (décochées d'office). */
+  dejaDiffusee?: ReadonlySet<string>;
   entreprises: EntrepriseSuivi[];
   contexte: ContexteEnvoiDce;
   /** Appelé pour chaque envoi réussi ; `creneauCite` : le message citait le créneau de visite de l'entreprise. */
@@ -46,10 +67,10 @@ export default function DceEnvoiGroupeDialog({ titre, mode, entreprises, context
   }, [comptes, compteId]);
   const compte = comptes.find(a => a.id === compteId) ?? null;
 
-  const plan = useMemo(() => planEnvoiGroupe(entreprises, mode), [entreprises, mode]);
+  const plan = useMemo(() => planEnvoiGroupe(entreprises, mode, dejaDiffusee), [entreprises, mode, dejaDiffusee]);
   const [coches, setCoches] = useState<Set<string>>(() => lignesCochees(plan));
-  const [sujet, setSujet] = useState(mode === 'visite' ? MODELE_SUJET_VISITE : MODELE_SUJET);
-  const [corps, setCorps] = useState(mode === 'visite' ? MODELE_CORPS_VISITE : MODELE_CORPS);
+  const [sujet, setSujet] = useState(TEXTES[mode].sujet);
+  const [corps, setCorps] = useState(TEXTES[mode].corps);
   const [apercuId, setApercuId] = useState<string>(() => plan.find(l => !l.motif)?.entreprise.id ?? plan[0]?.entreprise.id ?? '');
   const [statuts, setStatuts] = useState<Record<string, Statut>>({});
   const [phase, setPhase] = useState<'composition' | 'envoi' | 'termine'>('composition');
@@ -92,9 +113,9 @@ export default function DceEnvoiGroupeDialog({ titre, mode, entreprises, context
       maj(id, { etat: 'encours' });
       try {
         // Une convocation ne joint rien et ne crée aucun lien de dépôt : pas de préparation réseau.
-        const prep = mode === 'visite'
-          ? { fichiers: [] as File[], donnees: donneesSansReseau(contexte, ligne.entreprise) }
-          : await preparerEnvoiEntreprise(ctx, ligne.entreprise);
+        const prep = mode === 'dce'
+          ? await preparerEnvoiEntreprise(ctx, ligne.entreprise)
+          : { fichiers: [] as File[], donnees: donneesSansReseau(contexte, ligne.entreprise) };
         const total = prep.fichiers.reduce((s, f) => s + f.size, 0);
         if (total > MAX_EMAIL_TOTAL_BYTES) {
           throw new Error(`Pièces jointes trop volumineuses (${mo(total)} Mo pour ${mo(MAX_EMAIL_TOTAL_BYTES)} Mo au plus) : envoyez cette entreprise depuis sa ligne.`);
@@ -123,7 +144,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, entreprises, context
 
   const envoyer = () => {
     if (aEnvoyer.length === 0 || enCours) return;
-    const objet = mode === 'visite' ? 'la convocation à la visite' : 'le DCE';
+    const objet = TEXTES[mode].objet;
     const message = `Envoyer ${objet} à ${aEnvoyer.length} entreprise${aEnvoyer.length > 1 ? 's' : ''}, un message individuel chacune ?`
       + (dejaCoches ? `\n\n${dejaCoches} d'entre elles l'ont déjà reçu${mode === 'dce' ? ' : leur lien de dépôt précédent sera révoqué' : ''}.` : '');
     if (!window.confirm(message)) return;
@@ -152,7 +173,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, entreprises, context
         <div className="p-5 space-y-5">
           <section aria-label="Entreprises destinataires">
             <p className="text-xs text-[var(--tblr-muted)] mb-2">
-              {mode === 'visite' ? 'Chaque entreprise reçoit son propre message, avec le créneau qui lui est affecté. ' : 'Chaque entreprise reçoit son propre message, avec ses lots, ses pièces et son lien de dépôt personnel. '}{mode === 'visite' ? 'Les entreprises sans créneau affecté, sans adresse ou marquées « ne répond pas » ne peuvent pas être cochées.' : 'Les entreprises sans adresse, sans lot ou marquées « ne répond pas » ne peuvent pas être cochées.'}
+              {TEXTES[mode].description}
             </p>
             <ul className="divide-y divide-[var(--tblr-border)] border border-[var(--tblr-border)] rounded-lg">
               {plan.map(l => {
@@ -161,7 +182,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, entreprises, context
                   <li key={id} className="flex items-start gap-3 px-3 py-2 text-sm">
                     <input type="checkbox" className="mt-1 w-4 h-4 accent-blue-600" disabled={!!l.motif || lecture}
                       checked={!l.motif && coches.has(id)} onChange={() => basculer(id)}
-                      aria-label={`${mode === 'visite' ? 'Convoquer' : 'Envoyer le DCE à'} ${l.entreprise.nom || 'cette entreprise'}`} />
+                      aria-label={`${TEXTES[mode].verbe} ${l.entreprise.nom || 'cette entreprise'}`} />
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold truncate">{l.entreprise.nom || 'Entreprise sans nom'}</p>
                       <p className="text-xs text-[var(--tblr-muted)] truncate">
@@ -229,7 +250,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, entreprises, context
                 <pre className="whitespace-pre-wrap font-sans text-xs">{apercu.corps}</pre>
               </div>
             )}
-            <p className="text-xs text-[var(--tblr-muted)] mt-1">{mode === 'visite' ? 'Aucune pièce n\'est jointe à la convocation.' : 'Les fichiers du DCE, le tableau d\'indices et les pièces du marché sont joints à chaque message, et un lien de dépôt personnel est créé à l\'envoi.'}</p>
+            <p className="text-xs text-[var(--tblr-muted)] mt-1">{TEXTES[mode].pied}</p>
           </section>
         </div>
 

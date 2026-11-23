@@ -20,7 +20,7 @@ import {
 } from '../lib/actExport';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
 import ACTEntreprisesTable from './ACTEntreprisesTable';
-import { completerEmailsContact, completerTelephoneContact, destinatairesEntreprise } from '../lib/actEntreprises';
+import { completerEmailsContact, completerTelephoneContact, destinatairesEntreprise, todayIso } from '../lib/actEntreprises';
 import { EntrepriseSearchDialog, type EntrepriseChoisie } from './EntrepriseSearchDialog';
 import { EntrepriseAddForm, type NouvelleEntreprise } from './EntrepriseAddForm';
 import { useQualifications } from '../hooks/useQualifications';
@@ -39,7 +39,8 @@ import AttributionDirecte from './act/AttributionDirecte';
 import { attribuerSansOffre, estAttributionDirecte, retirerAttribution } from '../lib/attributionDirecte';
 import type { ParametresMarche } from '../lib/actMarche';
 import { useConsultationDepot } from '../hooks/useConsultationDepot';
-import { questionsAReprendre, type QuestionRecue } from '../lib/depotQuestions';
+import { entreprisesDeLaReponse, marquerDiffusee, questionsAReprendre, reponseDiffusable, type QuestionRecue } from '../lib/depotQuestions';
+import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
@@ -123,6 +124,9 @@ interface QuestionReponse {
   objet?: string;
   lot_id?: string;
   source?: 'depot';
+  /** Diffusion par mail d'une réponse publique : entreprises déjà destinataires et date du dernier envoi. */
+  diffusee_a?: string[];
+  diffusee_le?: string;
 }
 
 interface Offre {
@@ -279,6 +283,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   // (une saisie arrivée trop tôt écraserait la consultation enregistrée par
   // une consultation vide), et un échec relance une tentative plus tard.
   const [loaded, setLoaded] = useState(false);
+  /** Question dont la réponse publique est en cours de diffusion par mail. */
+  const [diffusionPour, setDiffusionPour] = useState<string | null>(null);
   const [saveError, setSaveError] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
   const editVersion = useRef(0);
@@ -1340,6 +1346,19 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                         <div className="mt-2 ml-4 pl-3 border-l-2 border-blue-300">
                           <p className="text-xs text-[var(--tblr-muted)] mb-0.5">Réponse — {q.date_reponse && new Date(q.date_reponse).toLocaleDateString('fr-FR')}</p>
                           <p className="text-sm text-blue-700 dark:text-blue-300">{q.reponse}</p>
+                          {reponseDiffusable(q) && (
+                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                              <button type="button" onClick={() => setDiffusionPour(q.id)}
+                                className="text-xs px-2.5 py-1 rounded-lg font-bold border border-[var(--tblr-border)] hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-1">
+                                <IconSend size={11} /> Diffuser par mail
+                              </button>
+                              {q.diffusee_le && (
+                                <span className="text-[0.6875rem] text-[var(--tblr-muted)]">
+                                  Diffusée le {new Date(q.diffusee_le).toLocaleDateString('fr-FR')} à {(q.diffusee_a ?? []).length} entreprise{(q.diffusee_a ?? []).length > 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         repondreId === q.id ? (
@@ -1380,6 +1399,32 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               ))}
               {consultation.questions.length === 0 && <div className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune question enregistrée.</div>}
             </div>
+            {(() => {
+              const q = consultation.questions.find(x => x.id === diffusionPour);
+              if (!q || !reponseDiffusable(q)) return null;
+              return (
+                <DceEnvoiGroupeDialog
+                  titre="Diffuser la réponse par mail"
+                  mode="reponse"
+                  dejaDiffusee={new Set(q.diffusee_a ?? [])}
+                  entreprises={entreprisesDeLaReponse(consultation.entreprises, q)}
+                  contexte={{
+                    projectId, projectName, lots, pieces: [], documents: [], depotActif: false,
+                    questionReponse: { objet: q.objet, question: q.question, reponse: q.reponse as string },
+                  }}
+                  // Mise à jour fonctionnelle : la fenêtre reste ouverte pendant plusieurs envois et plusieurs rendus.
+                  onEnvoye={entrepriseId => {
+                    editVersion.current += 1;
+                    setDirty(true);
+                    setConsultation(prev => ({
+                      ...prev,
+                      questions: prev.questions.map(x => (x.id === q.id ? marquerDiffusee(x, entrepriseId, todayIso()) : x)),
+                    }));
+                  }}
+                  onClose={() => setDiffusionPour(null)}
+                />
+              );
+            })()}
           </div>
         </div>
       )}
