@@ -17,12 +17,12 @@ import { MultiSelectDropdown, type MultiSelectOption } from './MultiSelectDropdo
 import { QualificationBadge } from './QualificationBadge';
 import { resumeQualifications, type Qualification } from '../lib/qualifications';
 import MailComposeModal from './MailComposeModal';
-import { documentToFile } from '../lib/emailAttachments';
-import { apiFetch } from '../lib/api';
 import type { PieceMarcheGeneree } from '../lib/marchePieces';
-import { formaterDateHeure } from '../lib/depotAffichage';
-import { documentsAJoindre, lignesIndices, piecesDeEntreprise, type DocumentDce } from '../lib/dceIndices';
-import { genererTableauIndicesPdf } from '../lib/dceIndicesPdf';
+import type { DocumentDce } from '../lib/dceIndices';
+import { MODELE_CORPS, MODELE_SUJET, blocsMessageDce, remplirModele } from '../lib/dceEnvoiMessage';
+import { preparerEnvoiEntreprise, type ContexteEnvoiDce, type PreparationEntreprise } from '../lib/dceEnvoiPreparation';
+import { entreprisesDceAEnvoyer } from '../lib/dceEnvoiGroupe';
+import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
 import DossierPartageDialog, { type NouveauPartage } from './act/DossierPartageDialog';
 import { ENTETE_DOSSIER_PARTAGE, ENTETE_DOSSIER_PARTAGE_LIENS, type ElementDossierPartage } from '../lib/dossierPartageMail';
 import { bilanVisite, libelleVisite, type CreneauVisite, type PresenceVisite } from '../lib/actVisites';
@@ -165,11 +165,6 @@ function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPieces
   onClose: () => void;
 }) {
   const { accounts, loading } = useMailAccounts();
-  const lotsEntreprise = lots.filter(l => entreprise.lots_ids.includes(l.id));
-  const piecesEntreprise = piecesDeEntreprise(pieces, entreprise.lots_ids);
-  const lignes = lignesIndices(piecesEntreprise, documents);
-  const aJoindre = documentsAJoindre(piecesEntreprise, documents);
-  const lotsCourts = lotsEntreprise.map(l => `Lot ${l.lot_number}`).join(', ');
 
   // Dossier partagé : seuls les éléments ajoutés pendant CE message sont cités et retirables ici ;
   // les dossiers partagés plus tôt restent visibles sur la page de dépôt sans être redits.
@@ -181,84 +176,20 @@ function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPieces
 
   // Les fichiers du DCE et le tableau d'indices sont joints d'office ; la personne
   // peut en retirer. Un document illisible n'empêche pas le message : il est signalé.
-  const [pretes, setPretes] = useState<{ fichiers: File[]; echecs: string[]; piecesMarche: string[]; lienDepot?: string; echecDepot?: boolean } | null>(null);
+  const [prep, setPrep] = useState<PreparationEntreprise | null>(null);
   useEffect(() => {
     let vivant = true;
-    (async () => {
-      const resultats = await Promise.allSettled(aJoindre.map(documentToFile));
-      const fichiers: File[] = [];
-      const echecs: string[] = [];
-      resultats.forEach((r, i) => { if (r.status === 'fulfilled') fichiers.push(r.value); else echecs.push(aJoindre[i].name); });
-      if (lignes.length > 0) {
-        try { fichiers.unshift(await genererTableauIndicesPdf({ projectName, lignes, lots: lotsCourts || undefined })); }
-        catch { echecs.push('Tableau d\'indices'); }
-      }
-      // Pièces du marché (RC, CCAP, acte d'engagement), générées à l'envoi d'après les réglages
-      // actuels. Une pièce déjà versée au DCE part avec le DCE : on ne la joint pas deux fois.
-      const piecesMarche: string[] = [];
-      if (genererPiecesMarche) {
-        const versees = new Set<string>();
-        for (const p of piecesEntreprise) {
-          if (!(p.document_ids ?? []).some(id => documents.some(d => d.id === id))) continue;
-          if (p.type_doc === 'RC') versees.add('RC');
-          else if (p.type_doc === 'CCAP') versees.add('CCAP');
-          else if (/acte d.engagement/i.test(p.libelle)) versees.add('ACTE');
-        }
-        try {
-          const generees = (await genererPiecesMarche()).filter(g => !versees.has(g.type));
-          fichiers.unshift(...generees.map(g => g.fichier));
-          piecesMarche.push(...generees.map(g => g.libelle));
-        } catch { echecs.push('Pièces du marché (RC, CCAP, acte d\'engagement)'); }
-      }
-      // Lien de dépôt personnel : créé à l'ouverture du message (un lien précédent de
-      // cette entreprise est alors révoqué, le jeton n'étant jamais conservé en clair).
-      let lienDepot: string | undefined; let echecDepot = false;
-      if (depotActif && projectId) {
-        try {
-          const r = await apiFetch<{ url: string }>(`/api/projects/${projectId}/depot/invites`, {
-            method: 'POST',
-            body: JSON.stringify({
-              entreprise_id: entreprise.id, entreprise_nom: entreprise.nom, email: entreprise.email || undefined,
-              contact_id: entreprise.contact_id || undefined, lots_ids: entreprise.lots_ids,
-            }),
-          });
-          lienDepot = r.url;
-        } catch { echecDepot = true; }
-      }
-      if (vivant) setPretes({ fichiers, echecs, piecesMarche, lienDepot, echecDepot });
-    })();
+    const contexte: ContexteEnvoiDce = { projectId, projectName, lots, pieces, documents, genererPiecesMarche, depotActif, depotIndisponible, deadlineAt };
+    preparerEnvoiEntreprise(contexte, entreprise).then(p => { if (vivant) setPrep(p); });
     return () => { vivant = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  if (loading || !pretes) return null;
+  if (loading || !prep) return null;
 
-  const libelleLots = lotsEntreprise.map(l => `Lot ${l.lot_number} — ${l.lot_title}`);
-  const body = [
-    'Bonjour,',
-    '',
-    `Dans le cadre de la consultation des entreprises pour l'opération « ${projectName} », nous vous transmettons le dossier de consultation (DCE)${libelleLots.length ? ` relatif à :\n${libelleLots.map(l => `- ${l}`).join('\n')}` : '.'}`,
-    ...(pretes.piecesMarche.length
-      ? ['', 'Pièces du marché jointes :', ...pretes.piecesMarche.map(l => `- ${l}`),
-         ...(pretes.piecesMarche.some(l => /acte/i.test(l)) ? ['L\'acte d\'engagement est à compléter, signer et remettre avec votre offre.'] : [])]
-      : []),
-    ...(lignes.length
-      ? ['', 'Pièces du dossier (indice de révision) :', ...lignes.map(l => `- ${l.designation}${l.fichier ? ` : ${l.fichier}` : ''}${l.indice ? ` (indice ${l.indice})` : ''}`),
-         '', 'Le tableau des indices est joint à ce message.']
-      : []),
-    ...(pretes.lienDepot
-      ? ['', 'Vous pouvez remettre votre offre en ligne sur votre espace de dépôt personnel (saisie de l\'offre ou dépôt de vos documents) :', pretes.lienDepot,
-         ...(deadlineAt ? [`Date limite de remise : ${formaterDateHeure(deadlineAt)}.`] : []),
-         'Ce lien vous est personnel : merci de ne pas le transmettre.']
-      : []),
-    ...(!depotActif && depotIndisponible ? ['', `[Lien de dépôt non proposé : ${depotIndisponible}]`] : []),
-    ...(pretes.echecDepot ? ['', '[Lien de dépôt non créé : à créer depuis la ligne de l\'entreprise (icône lien)]'] : []),
-    ...(pretes.echecs.length ? ['', `[À joindre manuellement, téléchargement impossible : ${pretes.echecs.join(', ')}]`] : []),
-    '',
-    'Nous restons à votre disposition pour toute précision.',
-    '',
-    'Cordialement,',
-  ].join('\n');
-  const depotDisponible = !!pretes.lienDepot;
+  // Même modèle que l'envoi groupé (src/lib/dceEnvoiMessage.ts) : le texte ne se tient qu'à un endroit.
+  const blocs = blocsMessageDce(prep.donnees);
+  const body = remplirModele(MODELE_CORPS, blocs);
+  const depotDisponible = !!prep.donnees.lienDepot;
   const ajouterPartage = (p: NouveauPartage) => {
     if (!onAjouterPartage) return;
     const id = onAjouterPartage(p, entreprise.lots_ids);
@@ -269,10 +200,10 @@ function DceMailDialog({ projectId, depotActif, depotIndisponible, genererPieces
     <>
       <MailComposeModal
         accounts={accounts}
-        initialFiles={pretes.fichiers}
+        initialFiles={prep.fichiers}
         initial={{
           to: destinatairesEntreprise(entreprise).join(', '),
-          subject: `Consultation des entreprises — ${projectName}${lotsCourts ? ` — ${lotsCourts}` : ''}`,
+          subject: remplirModele(MODELE_SUJET, blocs),
           body,
         }}
         dossierPartage={onAjouterPartage && projectId ? {
@@ -319,6 +250,7 @@ export default function ACTEntreprisesTable({
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [suggestLotId, setSuggestLotId] = useState<string | null>(null);
   const [mailPour, setMailPour] = useState<string | null>(null);
+  const [groupe, setGroupe] = useState<{ titre: string; ids: string[] } | null>(null);
   const [visitePour, setVisitePour] = useState<string | null>(null);
   const boutonVisiteActif = useRef<HTMLButtonElement | null>(null);
   const fermerVisite = () => { setVisitePour(null); requestAnimationFrame(() => boutonVisiteActif.current?.focus()); };
@@ -356,6 +288,18 @@ export default function ACTEntreprisesTable({
     onChange(entreprises.map(e => (e.id === id ? { ...e, ...p } : e)));
   const patchMany = (ids: Set<string>, p: (e: EntrepriseRow) => Partial<EntrepriseRow>) =>
     onChange(entreprises.map(e => (ids.has(e.id) ? { ...e, ...p(e) } : e)));
+
+  // L'envoi groupé marque chaque entreprise au fil des envois, depuis une fenêtre qui reste
+  // ouverte pendant plusieurs rendus : on repart toujours de la dernière liste connue.
+  const derniereListe = useRef(entreprises);
+  derniereListe.current = entreprises;
+  const marquerDceEnvoye = (id: string) => {
+    const suite = derniereListe.current.map(e => (e.id === id
+      ? { ...e, dce_transmis_le: e.dce_transmis_le || today, envoyer_dce: true, ne_repond_pas: false } : e));
+    derniereListe.current = suite;
+    onChange(suite);
+  };
+  const dceAEnvoyer = useMemo(() => entreprisesDceAEnvoyer(entreprises), [entreprises]);
 
   // Lecture seule : la date d'une remise à traiter nourrit le statut affiché,
   // mais `patch` et `onChange` repartent de `entreprises`, jamais de cette vue,
@@ -741,6 +685,20 @@ export default function ACTEntreprisesTable({
         </div>
       )}
 
+      {/* DCE à envoyer : un seul geste pour toutes les entreprises dont la case « DCE à envoyer » est cochée */}
+      {dceAEnvoyer.length > 0 && (
+        <div className="px-5 py-2.5 border-b border-[var(--tblr-border)] flex items-center gap-3 flex-wrap">
+          <p className="text-xs text-[var(--tblr-text)]">
+            <span className="font-bold">{dceAEnvoyer.length} entreprise{dceAEnvoyer.length > 1 ? 's' : ''}</span>
+            {' '}{dceAEnvoyer.length > 1 ? 'attendent' : 'attend'} le DCE.
+          </p>
+          <button type="button" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700"
+            onClick={() => setGroupe({ titre: 'Envoyer le DCE aux entreprises « DCE à envoyer »', ids: dceAEnvoyer.map(e => e.id) })}>
+            <IconSend size={12} /> Envoyer le DCE aux entreprises « DCE à envoyer »
+          </button>
+        </div>
+      )}
+
       {/* Filtres */}
       {!aucuneEntreprise && (
         <div className="px-5 py-3 border-b border-[var(--tblr-border)] flex items-center gap-2 flex-wrap">
@@ -797,6 +755,10 @@ export default function ACTEntreprisesTable({
           <button type="button" className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] hover:bg-zinc-50"
             onClick={() => patchMany(selectionActive, e => ({ dce_transmis_le: e.dce_transmis_le || today, envoyer_dce: true, ne_repond_pas: false }))}>
             DCE transmis aujourd'hui
+          </button>
+          <button type="button" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700"
+            onClick={() => setGroupe({ titre: 'Envoyer le DCE aux entreprises sélectionnées', ids: [...selectionActive] })}>
+            <IconSend size={12} /> Envoyer le DCE…
           </button>
           <label className="flex items-center gap-1.5 text-xs font-bold text-blue-800 dark:text-blue-200">
             Relance le
@@ -933,6 +895,18 @@ export default function ACTEntreprisesTable({
           </div>
         </div>;
       })()}
+      {groupe && (
+        <DceEnvoiGroupeDialog
+          titre={groupe.titre}
+          entreprises={entreprises.filter(e => groupe.ids.includes(e.id))}
+          contexte={{
+            projectId, projectName, lots, pieces: dcePieces, documents: documentsAffaire, genererPiecesMarche,
+            depotActif: !!depot?.actif, depotIndisponible: depot?.indisponible, deadlineAt: depotDeadlineAt,
+          }}
+          onEnvoye={marquerDceEnvoye}
+          onClose={() => setGroupe(null)}
+        />
+      )}
       {entrepriseMail && (
         <DceMailDialog
           projectId={projectId} depotActif={!!depot?.actif} depotIndisponible={depot?.indisponible} genererPiecesMarche={genererPiecesMarche} deadlineAt={depotDeadlineAt}
