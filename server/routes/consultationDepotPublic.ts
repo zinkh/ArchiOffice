@@ -38,6 +38,8 @@ import { loadSuspendedTenants } from '../tenantSuspension';
 import { piecesDeEntreprise } from '../../src/lib/dceIndices';
 import { assainirLiensExternes } from '../../src/lib/dossierPartageMail';
 import { MAX_QUESTIONS_PAR_ENTREPRISE, questionsOuvertes, validerQuestion } from '../../src/lib/depotQuestions';
+import { additifsDeLentreprise, type DceRevision } from '../../src/lib/dceRevisions';
+import { echapperHtml, lireAccuse, type AccusePayload } from '../consultationDepot/accuseAdditif';
 import {
   DEPOT_EXTENSIONS, DEPOT_FORMAT_LABELS, DEPOT_KINDS_FICHIER, DEPOT_TABLEURS,
   MAX_DEPOT_OCTETS, MAX_FICHIER_OCTETS, MAX_FICHIERS_PAR_DEPOT,
@@ -235,6 +237,32 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
   };
 
 
+  /**
+   * Additifs au DCE qui concernent cette entreprise (du plus récent au plus ancien), avec la date de son
+   * accusé de réception. Les pièces modifiées sont déjà celles que la page propose au téléchargement.
+   */
+  const additifsDeLinvitation = async (inv: InvitationDepot) => {
+    const { data: act } = await supabaseAdmin
+      .from('act_data').select('consultation')
+      .eq('tenant_id', inv.tenant_id).eq('project_id', inv.project_id).maybeSingle();
+    const consultation = (act as any)?.consultation;
+    const revisions: DceRevision[] = (Array.isArray(consultation?.dce_revisions) ? consultation.dce_revisions : [])
+      .filter((r: any) => r && typeof r.id === 'string' && Array.isArray(r.pieces));
+    if (revisions.length === 0) return [];
+    const piecesDce = (Array.isArray(consultation?.dce_documents) ? consultation.dce_documents : [])
+      .filter((p: any) => p && typeof p === 'object')
+      .map((p: any) => ({ id: String(p.id), tous_lots: !!p.tous_lots, lots_ids: Array.isArray(p.lots_ids) ? p.lots_ids.map(String) : [] }));
+    const { data: accuses } = await supabaseAdmin
+      .from('consultation_additif_accuses').select('revision_id, accuse_le')
+      .eq('project_id', inv.project_id).eq('entreprise_id', inv.entreprise_id);
+    const accuseDe = (id: string) => ((accuses as any[]) || []).find(a => a.revision_id === id)?.accuse_le || null;
+    return additifsDeLentreprise(revisions, piecesDce, inv.lots_ids).map(({ revision, numero }) => ({
+      id: revision.id, numero, date: revision.cree_le, motif: String(revision.motif || ''),
+      pieces: revision.pieces.map(p => ({ libelle: String(p.libelle || ''), indice: p.indice ? String(p.indice) : null })),
+      accuse_le: accuseDe(revision.id),
+    }));
+  };
+
   // ── Contexte du portail ────────────────────────────────────────────────────
   app.get('/api/public/depot/:token', depotReadLimiter, garde, async (req: any, res: any) => {
     try {
@@ -253,6 +281,7 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
       const dce = await dceDeLinvitation(inv, lots).catch(() => []);
       const visite = await visiteDeLinvitation(inv).catch(() => null);
       const questions = await questionsDeLinvitation(inv).catch(() => null);
+      const additifs = await additifsDeLinvitation(inv).catch(() => []);
       // Fichiers que l'archive « tout le dossier » contiendrait (sans doublon entre pièces du DCE et documents publiés).
       const fichiersDossier = new Map<string, number | null>();
       for (const p of dce) for (const f of p.fichiers) fichiersDossier.set(f.id, f.taille);
@@ -291,6 +320,7 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
         dce,
         visite,
         questions,
+        additifs,
         // Lien « tout le dossier en une archive » : absent s'il n'y a aucun fichier à rassembler.
         dossier_zip: fichiersDossier.size > 0
           ? { fichiers: fichiersDossier.size, taille: [...fichiersDossier.values()].reduce<number>((s, t) => s + (t ?? 0), 0) || null }
@@ -412,6 +442,85 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
       res.status(500).json({ error: "L'archive n'a pas pu être préparée. Téléchargez les pièces une par une." });
     } finally {
       liberer?.();
+    }
+  });
+
+  // ── « J'ai bien reçu » : confirmation de réception d'un additif ────────────
+  // Page HTML minimale servie par le serveur (aucun script) : le lien du mail ne fait qu'AFFICHER la page,
+  // la confirmation est un POST. Un anti-virus de messagerie qui ouvre le lien ne confirme donc rien.
+  // Le ticket (HMAC, accuseAdditif.ts) est la seule barrière ; il ne donne accès à rien d'autre.
+  const pageAccuse = (res: any, statut: number, titre: string, corps: string, formulaire?: string) => {
+    res.status(statut);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+    res.send(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>${echapperHtml(titre)}</title>`
+      + '<style>body{font-family:system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;color:#18181b;line-height:1.5}h1{font-size:1.25rem}button{font-size:1rem;font-weight:700;padding:.75rem 1.25rem;border:0;border-radius:.5rem;background:#18181b;color:#fff;cursor:pointer}.muted{color:#52525b;font-size:.875rem}</style></head>'
+      + `<body><h1>${echapperHtml(titre)}</h1><p>${corps}</p>${formulaire || ''}</body></html>`);
+  };
+
+  /** Ce que la page de confirmation annonce : opération, entreprise, numéro de l'additif, accusé déjà posé. */
+  async function contexteAccuse(p: AccusePayload) {
+    const suspendus = await loadSuspendedTenants(supabaseAdmin);
+    if (suspendus.has(p.t)) return null;
+    const { data: projet } = await supabaseAdmin.from('projects').select('id, name').eq('id', p.p).eq('tenant_id', p.t).maybeSingle();
+    if (!projet) return null;
+    const { data: act } = await supabaseAdmin.from('act_data').select('consultation').eq('tenant_id', p.t).eq('project_id', p.p).maybeSingle();
+    const consultation = (act as any)?.consultation;
+    const revisions: any[] = Array.isArray(consultation?.dce_revisions) ? consultation.dce_revisions : [];
+    const index = revisions.findIndex(r => r?.id === p.r);
+    const entreprise = (Array.isArray(consultation?.entreprises) ? consultation.entreprises : []).find((e: any) => e?.id === p.e);
+    const { data: deja } = await supabaseAdmin.from('consultation_additif_accuses').select('accuse_le')
+      .eq('project_id', p.p).eq('revision_id', p.r).eq('entreprise_id', p.e).maybeSingle();
+    return {
+      operation: (projet as any).name || 'la consultation',
+      entreprise: String(entreprise?.nom || 'votre entreprise'),
+      numero: index >= 0 ? index + 1 : null,
+      accuseLe: ((deja as any)?.accuse_le as string | undefined) || null,
+    };
+  }
+
+  const libelleAdditif = (numero: number | null) => (numero ? `l'additif n° ${numero}` : 'cet additif');
+
+  app.get('/api/public/additif/accuse/:ticket', depotReadLimiter, async (req: any, res: any) => {
+    try {
+      const p = lireAccuse(req.params.ticket);
+      const c = p ? await contexteAccuse(p) : null;
+      if (!p || !c) return pageAccuse(res, 404, 'Lien invalide', 'Ce lien est invalide ou a expiré. Contactez le cabinet pour confirmer la réception de l\'additif.');
+      const intro = `Consultation « ${echapperHtml(c.operation)} » : modification du dossier de consultation pour <strong>${echapperHtml(c.entreprise)}</strong>.`;
+      if (c.accuseLe) {
+        return pageAccuse(res, 200, 'Réception déjà confirmée', `${intro}<br>Vous avez confirmé la réception de ${libelleAdditif(c.numero)} le ${echapperHtml(new Date(c.accuseLe).toLocaleDateString('fr-FR'))}. Merci.`);
+      }
+      pageAccuse(res, 200, 'Confirmer la réception', `${intro}<br>Confirmez-vous avoir bien reçu ${libelleAdditif(c.numero)} et ses pièces ?`,
+        `<form method="post" action="${echapperHtml(`/api/public/additif/accuse/${req.params.ticket}`)}"><button type="submit">J'ai bien reçu</button></form><p class="muted">Aucune autre information n'est collectée.</p>`);
+    } catch (e: any) {
+      console.error('[GET /api/public/additif/accuse]', e?.message);
+      pageAccuse(res, 500, 'Indisponible', 'La page est momentanément indisponible. Merci de réessayer dans quelques instants.');
+    }
+  });
+
+  app.post('/api/public/additif/accuse/:ticket', depotWriteLimiter, async (req: any, res: any) => {
+    try {
+      const p = lireAccuse(req.params.ticket);
+      const c = p ? await contexteAccuse(p) : null;
+      if (!p || !c) return pageAccuse(res, 404, 'Lien invalide', 'Ce lien est invalide ou a expiré. Contactez le cabinet pour confirmer la réception de l\'additif.');
+      if (!c.accuseLe) {
+        const { error } = await supabaseAdmin.from('consultation_additif_accuses').insert({
+          tenant_id: p.t, project_id: p.p, revision_id: p.r, entreprise_id: p.e, entreprise_nom: c.entreprise, accuse_le: new Date().toISOString(),
+        });
+        // Un doublon (double clic, deux requêtes) est sans conséquence : le premier accusé fait foi.
+        if (error && (error as any).code !== '23505') throw error;
+        if (!error) {
+          await notifierDepot(supabaseAdmin, p.t, p.p, {
+            titre: 'Additif reçu', corps: `${c.entreprise} confirme avoir reçu ${libelleAdditif(c.numero)} pour ${c.operation}.`,
+          }).catch(() => {});
+        }
+      }
+      pageAccuse(res, 200, 'Réception confirmée', `Merci, la réception de ${libelleAdditif(c.numero)} pour la consultation « ${echapperHtml(c.operation)} » est confirmée.`);
+    } catch (e: any) {
+      console.error('[POST /api/public/additif/accuse]', e?.message);
+      pageAccuse(res, 500, 'Indisponible', 'La confirmation n\'a pas pu être enregistrée. Merci de réessayer dans quelques instants.');
     }
   });
 

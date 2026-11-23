@@ -4,7 +4,8 @@
 // l'envoi groupé. Un document illisible n'empêche jamais le message : il est signalé.
 import { apiFetch } from './api';
 import { documentToFile } from './emailAttachments';
-import { documentsAJoindre, lignesIndices, piecesDeEntreprise, type DocumentDce } from './dceIndices';
+import { dateFr, documentsAJoindre, lignesIndices, piecesDeEntreprise, type DocumentDce } from './dceIndices';
+import { blocAdditif, type DceRevision } from './dceRevisions';
 import { genererTableauIndicesPdf } from './dceIndicesPdf';
 import type { PieceMarcheGeneree } from './marchePieces';
 import { formaterDateHeure } from './depotAffichage';
@@ -15,6 +16,8 @@ import type { ProjectLot } from '../types';
 
 /** Pièce du DCE telle que la reçoit la préparation (même forme que PieceDce du tableau). */
 export interface PieceDcePreparation {
+  /** Identifiant dans consultation.dce_documents (nécessaire pour un additif). */
+  id?: string;
   libelle: string;
   tous_lots: boolean;
   lots_ids: string[];
@@ -37,6 +40,11 @@ export interface ContexteEnvoiDce {
   visite?: { creneaux: CreneauVisite[]; site?: VisiteSite };
   /** Diffusion d'une réponse publique : la question (sans auteur) et sa réponse. */
   questionReponse?: { objet?: string; question: string; reponse: string };
+  /**
+   * Additif au DCE : seuls les fichiers des pièces modifiées sont joints (le tableau d'indices reste complet),
+   * sans pièces du marché ni nouveau lien de dépôt (un nouveau lien révoquerait celui que l'entreprise a déjà).
+   */
+  additif?: { revision: DceRevision; numero: number };
 }
 
 export interface PreparationEntreprise {
@@ -55,6 +63,7 @@ export function donneesSansReseau(ctx: ContexteEnvoiDce, entreprise: EntrepriseS
     lignesIndices: lignesIndices(piecesEntreprise, ctx.documents),
     visite: ctx.visite ? visitePourMessage(entreprise, ctx.visite.creneaux, ctx.visite.site) : undefined,
     questionReponse: ctx.questionReponse,
+    additif: ctx.additif ? blocAdditif(ctx.additif.revision, ctx.additif.numero, dateFr(ctx.additif.revision.cree_le)) : undefined,
     dateLimite: ctx.deadlineAt ? formaterDateHeure(ctx.deadlineAt) : undefined,
     depotNonPropose: !ctx.depotActif ? ctx.depotIndisponible : undefined,
     echecsPieces: [],
@@ -64,7 +73,8 @@ export function donneesSansReseau(ctx: ContexteEnvoiDce, entreprise: EntrepriseS
 export async function preparerEnvoiEntreprise(ctx: ContexteEnvoiDce, entreprise: EntrepriseSuivi): Promise<PreparationEntreprise> {
   const piecesEntreprise = piecesDeEntreprise(ctx.pieces, entreprise.lots_ids);
   const lignes = lignesIndices(piecesEntreprise, ctx.documents);
-  const aJoindre = documentsAJoindre(piecesEntreprise, ctx.documents);
+  const revisees = ctx.additif ? new Set(ctx.additif.revision.pieces.map(p => p.id)) : null;
+  const aJoindre = documentsAJoindre(revisees ? piecesEntreprise.filter(p => !!p.id && revisees.has(p.id)) : piecesEntreprise, ctx.documents);
   const lotsEntreprise = ctx.lots.filter(l => entreprise.lots_ids.includes(l.id));
   const lotsCourts = lotsEntreprise.map(l => `Lot ${l.lot_number}`).join(', ');
 
@@ -80,7 +90,7 @@ export async function preparerEnvoiEntreprise(ctx: ContexteEnvoiDce, entreprise:
   // Pièces du marché (RC, CCAP, acte d'engagement), générées d'après les réglages actuels. Une
   // pièce déjà versée au DCE part avec le DCE : on ne la joint pas deux fois.
   const piecesMarche: string[] = [];
-  if (ctx.genererPiecesMarche) {
+  if (ctx.genererPiecesMarche && !ctx.additif) {
     const versees = new Set<string>();
     for (const p of piecesEntreprise) {
       if (!(p.document_ids ?? []).some(id => ctx.documents.some(d => d.id === id))) continue;
@@ -98,7 +108,7 @@ export async function preparerEnvoiEntreprise(ctx: ContexteEnvoiDce, entreprise:
   // Lien de dépôt personnel : un lien précédent de cette entreprise est alors révoqué (le jeton
   // n'est jamais conservé en clair).
   let lienDepot: string | undefined; let echecLienDepot = false;
-  if (ctx.depotActif && ctx.projectId) {
+  if (ctx.depotActif && ctx.projectId && !ctx.additif) {
     try {
       const r = await apiFetch<{ url: string }>(`/api/projects/${ctx.projectId}/depot/invites`, {
         method: 'POST',

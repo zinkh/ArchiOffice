@@ -44,6 +44,8 @@ interface Contexte {
     mes_questions: Array<{ id: string; objet: string | null; question: string; lot_id: string | null; envoyee_le: string; reponse: string | null; reponse_le: string | null }>;
     reponses_publiques: Array<{ id: string; objet: string | null; question: string; reponse: string; reponse_le: string | null }>;
   } | null;
+  /** Additifs au DCE qui concernent cette entreprise (du plus récent au plus ancien) et date de son accusé de réception. */
+  additifs?: Array<{ id: string; numero: number; date: string; motif: string; pieces: Array<{ libelle: string; indice: string | null }>; accuse_le: string | null }>;
   /** Tout le dossier en une archive : nombre de fichiers et taille connue ; absent s'il n'y a rien à rassembler. */
   dossier_zip?: { fichiers: number; taille: number | null } | null;
 }
@@ -319,6 +321,23 @@ export default function DepotOffres() {
             <p style={{ color: 'var(--tblr-muted)' }}>Lots qui vous sont confiés : {ctx.lots.map(l => `Lot ${l.lot_number} ${l.lot_title}`).join(' ; ')}.</p>
           )}
         </section>
+
+        {(ctx.additifs?.length ?? 0) > 0 && (
+          <section aria-label="Modifications du dossier de consultation" className="space-y-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider">Modifications du dossier</h2>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Les pièces ci-dessous ont été modifiées : les versions proposées plus bas sont les dernières.</p>
+            <ul className="rounded-lg divide-y" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+              {ctx.additifs!.map(a => (
+                <li key={a.id} className="px-3 py-2.5 text-sm space-y-1">
+                  <p className="font-semibold">Additif n° {a.numero} du {formaterDate(a.date)}</p>
+                  <p className="whitespace-pre-line break-words">{a.motif}</p>
+                  <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{a.pieces.map(p => `${p.libelle}${p.indice ? ` (indice ${p.indice})` : ''}`).join(' ; ')}</p>
+                  {a.accuse_le && <p className="text-xs flex items-center gap-1.5 text-emerald-800 dark:text-emerald-200"><IconCheck size={13} aria-hidden /> Réception confirmée le {formaterDate(a.accuse_le)}</p>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {ctx.visite && <VisiteDeSite visite={ctx.visite} base={base} onChange={() => void charger()} />}
 

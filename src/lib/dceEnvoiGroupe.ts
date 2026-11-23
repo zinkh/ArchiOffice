@@ -5,8 +5,8 @@
 import { destinatairesEntreprise, type EntrepriseSuivi } from './actEntreprises';
 import { visiteNotifiee } from './actVisites';
 
-/** `dce` : envoi du dossier ; `visite` : convocation à la visite ; `reponse` : diffusion d'une réponse publique. */
-export type ModeEnvoi = 'dce' | 'visite' | 'reponse';
+/** `dce` : envoi du dossier ; `visite` : convocation à la visite ; `reponse` : diffusion d'une réponse publique ; `additif` : modification du DCE. */
+export type ModeEnvoi = 'dce' | 'visite' | 'reponse' | 'additif';
 
 export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot' | 'sans_creneau';
 
@@ -30,7 +30,7 @@ export interface LigneEnvoiGroupe {
 
 export function planEnvoiGroupe(
   entreprises: EntrepriseSuivi[], mode: ModeEnvoi = 'dce',
-  /** Mode `reponse` : entreprises déjà destinataires de cette réponse. */
+  /** Modes `reponse` et `additif` : entreprises déjà destinataires de ce message. */
   dejaDiffusee: ReadonlySet<string> = new Set(),
 ): LigneEnvoiGroupe[] {
   return entreprises.map(entreprise => {
@@ -72,7 +72,7 @@ export function marquageEnvoi(e: EntrepriseSuivi, mode: ModeEnvoi, aujourdhui: s
   const convocation: Partial<EntrepriseSuivi> = e.visite_creneau_id && creneauCite
     ? { visite_convoquee_creneau_id: e.visite_creneau_id, visite_convoquee_le: aujourdhui }
     : {};
-  if (mode === 'reponse') return {};
+  if (mode === 'reponse' || mode === 'additif') return {};
   if (mode === 'visite') return convocation;
   return { dce_transmis_le: e.dce_transmis_le || aujourdhui, envoyer_dce: true, ne_repond_pas: false, ...convocation };
 }

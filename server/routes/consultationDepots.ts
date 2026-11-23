@@ -18,6 +18,7 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { evaluerEligibilite, type DepsEligibilite } from '../consultationDepot/eligibility';
 import { genererJeton, hacherJeton, lienDepot } from '../consultationDepot/tokens';
+import { lienAccuse, signerAccuse } from '../consultationDepot/accuseAdditif';
 import { parseExternalRef } from '../externalStorage/externalRef';
 import { getConnectionById } from '../externalStorage/externalConnection';
 import { signExternalTicket } from '../externalStorage/externalTicket';
@@ -255,6 +256,43 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
     } catch (err: any) {
       console.error('[DELETE depot/invites]', err?.message);
       res.status(500).json({ error: "Le lien n'a pas pu être révoqué." });
+    }
+  });
+
+  // ── Additifs au DCE : liens « j'ai bien reçu » et accusés reçus ────────────
+  // Un lien signé par entreprise (sans état, voir accuseAdditif.ts) : il ne vaut que pour confirmer la
+  // réception de CET additif, et ne touche pas au lien de dépôt de l'entreprise. L'additif n'est pas
+  // vérifié dans la consultation : l'écran l'enregistre avec un léger délai (enregistrement automatique).
+  app.post('/api/projects/:projectId/depot/additifs/:revisionId/liens', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId, revisionId } = req.params;
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(revisionId)) return res.status(400).json({ error: 'Additif invalide.' });
+      if (!(await projetDuCabinet(tenantId, projectId))) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const entreprises: Array<{ id: unknown }> = Array.isArray(req.body?.entreprises) ? req.body.entreprises : [];
+      if (entreprises.length === 0 || entreprises.length > 200) return res.status(400).json({ error: 'Indiquez entre 1 et 200 entreprises.' });
+      const liens: Record<string, string> = {};
+      for (const e of entreprises) {
+        if (typeof e?.id !== 'string' || !e.id || e.id.length > 100) return res.status(400).json({ error: 'Entreprise invalide.' });
+        liens[e.id] = lienAccuse(signerAccuse({ t: tenantId, p: projectId, e: e.id, r: revisionId }));
+      }
+      res.json({ liens });
+    } catch (err: any) {
+      console.error('[POST depot/additifs/liens]', err?.message);
+      res.status(500).json({ error: 'Les liens de confirmation n\'ont pas pu être créés.' });
+    }
+  });
+
+  app.get('/api/projects/:projectId/depot/additifs/accuses', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await projetDuCabinet(tenantId, req.params.projectId))) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_additif_accuses')
+        .select('revision_id, entreprise_id, accuse_le').eq('project_id', req.params.projectId);
+      res.json(((data as any[]) || []).map(a => ({ revision_id: a.revision_id, entreprise_id: a.entreprise_id, accuse_le: a.accuse_le })));
+    } catch (err: any) {
+      console.error('[GET depot/additifs/accuses]', err?.message);
+      res.status(500).json({ error: 'Lecture des accusés impossible.' });
     }
   });
 

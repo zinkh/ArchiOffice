@@ -358,6 +358,22 @@ restent lisibles par le cabinet.
   **Confirmer ma présence** (`POST /api/public/depot/:token/visite/confirmer`) pose `visite_confirmee_le` sur
   l'INVITATION (`consultation_depot_invites`), jamais dans la consultation : l'architecte reste maître du pointage
   (`visite_presence`). Une notification part au cabinet, la liste des liens l'expose.
+- **Additifs au DCE** (`consultation.dce_revisions`, jsonb ; `src/lib/dceRevisions.ts`, testé ; `act/DceAdditifPanel.tsx`
+  sous les pièces du DCE) : « Publier une modification » consigne QUELLES pièces ont changé (indice lu sur la fiche du
+  document, modifiable) et le motif ; elle ne touche à aucun fichier (mettre d'abord le document de l'affaire à jour).
+  Sont à prévenir (`entreprisesConcernees`) les seules entreprises qui ONT REÇU le DCE (`dce_transmis_le`, les autres le
+  recevront à jour), qui répondent, et dont un lot (ou tous) est touché. Envoi = mode `additif` de `DceEnvoiGroupeDialog`
+  (message unique, un mail par entreprise) : seuls les fichiers des pièces modifiées sont joints, le tableau d'indices
+  reste complet, ni pièces du marché ni NOUVEAU lien de dépôt (créer un lien révoquerait celui que l'entreprise a déjà).
+  `notifiee_a` / `notifiee_le` évitent les renvois ; l'écran suit « prévenues / confirmées ». **Lien « j'ai bien reçu »** :
+  `POST /api/projects/:id/depot/additifs/:revisionId/liens` rend un lien SIGNÉ par entreprise (HMAC sans état,
+  `server/consultationDepot/accuseAdditif.ts`, clé `MAIL_ENCRYPTION_KEY` avec séparation de domaine, 180 jours) vers
+  `GET /api/public/additif/accuse/:ticket` : page HTML sans script où le lien ne fait qu'AFFICHER, la confirmation est un
+  POST (un anti-virus de messagerie qui ouvre le lien ne confirme donc rien). L'accusé est écrit dans
+  `consultation_additif_accuses` (migration `supabase/migrate_consultation_additif_accuses.sql`, index unique : le premier
+  accusé fait foi), PAS dans la consultation, pour ne pas être écrasé par l'enregistrement automatique de l'écran. Le
+  ticket ne vaut que pour la consultation de SON cabinet (l'affaire est relue avec `tenant_id`). La page de dépôt liste
+  les additifs de l'entreprise (`additifs` du contexte) avec la date de son accusé, sans ceux des autres lots.
 - **Questions des entreprises** (`POST /api/public/depot/:token/questions`, `src/lib/depotQuestions.ts`, testé ;
   migration `supabase/migrate_consultation_depot_questions.sql`) : la question arrive dans la boîte de réception
   `consultation_depot_questions` (jamais publiée d'office, jamais dans la consultation par la route), 2000 caractères

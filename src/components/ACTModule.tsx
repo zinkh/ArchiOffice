@@ -41,6 +41,8 @@ import type { ParametresMarche } from '../lib/actMarche';
 import { useConsultationDepot } from '../hooks/useConsultationDepot';
 import { entreprisesDeLaReponse, marquerDiffusee, questionsAReprendre, reponseDiffusable, type QuestionRecue } from '../lib/depotQuestions';
 import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
+import DceAdditifPanel from './act/DceAdditifPanel';
+import { marquerRevisionNotifiee, type DceRevision } from '../lib/dceRevisions';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
@@ -178,6 +180,8 @@ interface ComparatifLot {
 
 interface Consultation extends DonneesNegociation {
   dce_documents: DCEDocument[];
+  /** Additifs au DCE : pièces modifiées, motif, entreprises prévenues (jsonb). */
+  dce_revisions?: DceRevision[];
   entreprises: EntrepriseConsultee[];
   creneaux_visite?: import('../lib/actVisites').CreneauVisite[];
   /** Lieu et consignes de la visite de site, cités dans le mail d'envoi du DCE. */
@@ -656,6 +660,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   // Les dossiers partagés (zip, liens) n'entrent ni dans les pièces jointes du mail ni dans le tableau d'indices.
   const dcePieces = useMemo(
     () => consultation.dce_documents.filter(d => !d.partage).map(d => ({
+      id: d.id,
       libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
       tous_lots: d.tous_lots,
       lots_ids: d.lots_ids,
@@ -1021,6 +1026,27 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                 }}
               />
             </div>
+            <DceAdditifPanel
+              projectId={projectId}
+              pieces={consultation.dce_documents.map(d => ({
+                id: d.id, nom: d.nom, libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
+                tous_lots: d.tous_lots, lots_ids: d.lots_ids, document_ids: d.document_ids, partage: d.partage,
+              }))}
+              documents={documentsAffaire}
+              revisions={consultation.dce_revisions ?? []}
+              entreprises={consultation.entreprises}
+              contexte={{ projectId, projectName, lots, pieces: dcePieces, documents: documentsAffaire, depotActif: false }}
+              onChangeRevisions={dce_revisions => update({ ...consultation, dce_revisions })}
+              // Mise à jour fonctionnelle : la fenêtre d'envoi reste ouverte pendant plusieurs envois et plusieurs rendus.
+              onNotifiee={(revisionId, entrepriseId) => {
+                editVersion.current += 1;
+                setDirty(true);
+                setConsultation(prev => ({
+                  ...prev,
+                  dce_revisions: (prev.dce_revisions ?? []).map(r => (r.id === revisionId ? marquerRevisionNotifiee(r, entrepriseId, todayIso()) : r)),
+                }));
+              }}
+            />
           </div>
 
           {/* Entreprises consultées */}
