@@ -31,6 +31,8 @@ export type EntrepriseRow = EntrepriseSuivi & { corps_etat_codes?: string[] };
 
 /** Une pièce du DCE, déjà libellée, avec les lots qu'elle concerne. */
 export interface PieceDce {
+  /** Identifiant dans consultation.dce_documents (nécessaire pour un additif). */
+  id?: string;
   libelle: string;
   tous_lots: boolean;
   lots_ids: string[];

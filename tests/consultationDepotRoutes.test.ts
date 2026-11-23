@@ -12,6 +12,7 @@ import { invalidateConnectionCache } from '../server/externalStorage/externalCon
 import { hacherJeton } from '../server/consultationDepot/tokens';
 import { faussePdf, fausseDocx, fausseOds } from './fixtures/zipBuilder';
 import JSZip from 'jszip';
+import { lireAccuse, signerAccuse } from '../server/consultationDepot/accuseAdditif';
 
 // Les limiteurs du portail sont réglés pour traverser tout le scénario ; leur
 // coupure est vérifiée dans consultationDepotLimiter.test.ts.
@@ -964,5 +965,134 @@ describe('portail public : questions et confirmation de présence', () => {
     await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`).expect(200);
     const liens = await request(app).get(`/api/projects/${c.projectId}/depot/invites`).set(authHeader(c.token));
     expect(liens.body[0].visite_confirmee_le).toBeTruthy();
+  });
+});
+
+
+describe('additifs au DCE : accusé de réception et page de l\'entreprise', () => {
+  const seedConsultation = (c: Cabinet, extra: Record<string, any> = {}) => fakeSupabaseAdmin.seed('act_data', [{
+    id: uid('act'), tenant_id: c.tenantId, project_id: c.projectId,
+    consultation: {
+      entreprises: [{ id: 'e1', nom: 'SARL Dupont', lots_ids: [c.lotA] }],
+      dce_documents: [
+        { id: 'p1', nom: 'CCTP Charpente', type_doc: 'CCTP', tous_lots: false, lots_ids: [c.lotA], document_ids: [] },
+        { id: 'p2', nom: 'CCTP Couverture', type_doc: 'CCTP', tous_lots: false, lots_ids: [c.lotB], document_ids: [] },
+      ],
+      dce_revisions: [
+        { id: 'r1', cree_le: '2026-11-20', motif: 'Cotes modifiées', pieces: [{ id: 'p1', libelle: 'CCTP Charpente', indice: 'C' }] },
+        { id: 'r2', cree_le: '2026-11-22', motif: 'Autre lot', pieces: [{ id: 'p2', libelle: 'CCTP Couverture' }] },
+      ],
+      ...extra,
+    },
+  }]);
+  const accusesEn = (projectId: string) => fakeSupabaseAdmin.getTable('consultation_additif_accuses').filter(a => a.project_id === projectId);
+  const chemin = (ticket: string) => `/api/public/additif/accuse/${ticket}`;
+  const ticket = (c: Cabinet, e = 'e1', r = 'r1') => signerAccuse({ t: c.tenantId, p: c.projectId, e, r });
+
+  it('crée un lien signé par entreprise, valable pour ce seul additif', async () => {
+    const c = cabinet();
+    const res = await request(app).post(`/api/projects/${c.projectId}/depot/additifs/r1/liens`).set(authHeader(c.token))
+      .send({ entreprises: [{ id: 'e1', nom: 'SARL Dupont' }, { id: 'e2' }] });
+    expect(res.status).toBe(200);
+    const [t1, t2] = ['e1', 'e2'].map(id => res.body.liens[id].split('/api/public/additif/accuse/')[1]);
+    expect(lireAccuse(t1)).toMatchObject({ t: c.tenantId, p: c.projectId, e: 'e1', r: 'r1' });
+    expect(lireAccuse(t2)).toMatchObject({ e: 'e2' });
+    expect(t1).not.toBe(t2);
+  });
+
+  it('refuse sans authentification, pour une affaire d\'un autre cabinet, ou avec des données invalides', async () => {
+    const c = cabinet();
+    const autre = cabinet();
+    const url = (p: string, r = 'r1') => `/api/projects/${p}/depot/additifs/${r}/liens`;
+    expect((await request(app).post(url(c.projectId)).send({ entreprises: [{ id: 'e1' }] })).status).toBe(401);
+    expect((await request(app).post(url(autre.projectId)).set(authHeader(c.token)).send({ entreprises: [{ id: 'e1' }] })).status).toBe(404);
+    expect((await request(app).post(url(c.projectId)).set(authHeader(c.token)).send({ entreprises: [] })).status).toBe(400);
+    expect((await request(app).post(url(c.projectId)).set(authHeader(c.token)).send({ entreprises: [{ id: 42 }] })).status).toBe(400);
+    expect((await request(app).post(url(c.projectId, 'a b')).set(authHeader(c.token)).send({ entreprises: [{ id: 'e1' }] })).status).toBe(400);
+  });
+
+  it('le lien du mail n\'AFFICHE que la page : il ne confirme rien (un anti-virus de messagerie l\'ouvre)', async () => {
+    const c = cabinet();
+    seedConsultation(c);
+    const page = await request(app).get(chemin(ticket(c)));
+    expect(page.status).toBe(200);
+    expect(page.headers['content-type']).toContain('text/html');
+    expect(page.headers['content-security-policy']).toContain("default-src 'none'");
+    expect(page.headers['x-frame-options']).toBe('DENY');
+    expect(page.text).toContain('Confirmer la réception');
+    expect(page.text).toContain('J\'ai bien reçu');
+    expect(page.text).toContain("l'additif n° 1");
+    expect(page.text).toContain('Villa Martin');
+    expect(accusesEn(c.projectId)).toHaveLength(0);
+  });
+
+  it('enregistre l\'accusé au POST, une seule fois, et le montre au cabinet', async () => {
+    const c = cabinet();
+    seedConsultation(c);
+    const t = ticket(c);
+    const premier = await request(app).post(chemin(t));
+    expect(premier.status).toBe(200);
+    expect(premier.text).toContain('Réception confirmée');
+    const [accuse] = accusesEn(c.projectId);
+    expect(accuse).toMatchObject({ tenant_id: c.tenantId, revision_id: 'r1', entreprise_id: 'e1', entreprise_nom: 'SARL Dupont' });
+    await request(app).post(chemin(t)).expect(200); // double clic
+    expect(accusesEn(c.projectId)).toHaveLength(1);
+    expect(accusesEn(c.projectId)[0].accuse_le).toBe(accuse.accuse_le); // le premier accusé fait foi
+    expect((await request(app).get(chemin(t))).text).toContain('Réception déjà confirmée');
+    const liste = await request(app).get(`/api/projects/${c.projectId}/depot/additifs/accuses`).set(authHeader(c.token));
+    expect(liste.body).toEqual([{ revision_id: 'r1', entreprise_id: 'e1', accuse_le: accuse.accuse_le }]);
+  });
+
+  it('refuse un ticket altéré, expiré, mal formé ou visant une affaire qui n\'est pas celle du cabinet signataire', async () => {
+    const c = cabinet();
+    const autre = cabinet();
+    seedConsultation(c);
+    const t = ticket(c);
+    expect((await request(app).post(chemin(`${t.slice(0, -2)}xx`))).status).toBe(404);
+    expect((await request(app).post(chemin('nimporte.quoi'))).status).toBe(404);
+    expect((await request(app).post(chemin(signerAccuse({ t: c.tenantId, p: c.projectId, e: 'e1', r: 'r1' }, -10)))).status).toBe(404);
+    // Un ticket signé pour le cabinet A mais l'affaire du cabinet B : aucune ligne n'est écrite.
+    expect((await request(app).post(chemin(signerAccuse({ t: c.tenantId, p: autre.projectId, e: 'e1', r: 'r1' })))).status).toBe(404);
+    expect(accusesEn(c.projectId)).toHaveLength(0);
+    expect(accusesEn(autre.projectId)).toHaveLength(0);
+  });
+
+  it('échappe le nom de l\'entreprise dans la page (aucune injection de HTML)', async () => {
+    const c = cabinet();
+    seedConsultation(c, { entreprises: [{ id: 'e1', nom: '<img src=x onerror=alert(1)>', lots_ids: [c.lotA] }] });
+    const page = await request(app).get(chemin(ticket(c)));
+    expect(page.text).not.toContain('<img src=x');
+    expect(page.text).toContain('&lt;img src=x onerror=alert(1)&gt;');
+  });
+
+  it('page de l\'entreprise : ses additifs seulement, avec la date de son accusé', async () => {
+    const c = cabinet();
+    seedConsultation(c);
+    const { jeton } = await inviter(c); // entreprise e1, lot A
+    let ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.additifs).toHaveLength(1); // r2 vise le lot B : jamais montré
+    expect(ctx.additifs[0]).toMatchObject({ id: 'r1', numero: 1, date: '2026-11-20', motif: 'Cotes modifiées', accuse_le: null });
+    expect(ctx.additifs[0].pieces).toEqual([{ libelle: 'CCTP Charpente', indice: 'C' }]);
+    expect(JSON.stringify(ctx.additifs)).not.toContain('Autre lot');
+    await request(app).post(chemin(ticket(c))).expect(200);
+    ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.additifs[0].accuse_le).toBeTruthy();
+  });
+
+  it('page de l\'entreprise : aucun additif quand il n\'y en a pas', async () => {
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    expect((await request(app).get(`/api/public/depot/${jeton}`)).body.additifs).toEqual([]);
+  });
+
+  it('côté cabinet : les accusés d\'un autre cabinet ne sont jamais listés', async () => {
+    const c = cabinet();
+    const autre = cabinet();
+    seedConsultation(c);
+    seedConsultation(autre);
+    await request(app).post(chemin(ticket(autre))).expect(200);
+    const liste = await request(app).get(`/api/projects/${c.projectId}/depot/additifs/accuses`).set(authHeader(c.token));
+    expect(liste.body).toEqual([]);
+    expect((await request(app).get(`/api/projects/${autre.projectId}/depot/additifs/accuses`).set(authHeader(c.token))).status).toBe(404);
   });
 });

@@ -145,7 +145,7 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
       "list_offres (filtres facultatifs lot, entreprise) ; set_offre : offres = [{lot, entreprise (nom) ou contact_id, montant_base_ht (euros HT, total du lot), conforme?, motif_non_conformite?, note_technique? (0 à 100)}] ; saisir une offre AJOUTE d'office l'entreprise aux entreprises consultées (sans DCE à envoyer) et le lot à ses lots, inutile d'appeler add avant ; la date de réception offre_recue_le est posée à aujourd'hui si elle est vide (ou à la date donnée), jamais écrasée d'office ; " +
       "un devis qui ne couvre qu'une partie du lot se marque partielle: true avec perimetre (« Chape uniquement ») : il reste visible mais n'est jamais classé, noté ni pris pour moins-disant ; " +
       "un lot saisi poste par poste n'est écrasé qu'avec confirmation ; remove_offre : [{lot, entreprise}] avec confirmation en deux temps. " +
-      "set_postes : saisie du DÉTAIL d'un devis dans le DPGF de référence, offres = [{lot, entreprise, postes: [{numero, prix_unitaire | pour_memoire: true}], postes_ajoutes?: [{numero?, designation, unite?, quantite?, prix_unitaire}]}] : " +
+      "set_postes : saisie du DÉTAIL d'un devis dans le DPGF de référence, offres = [{lot, entreprise, postes: [{numero, prix_unitaire | pour_memoire: true, quantite?: quantité proposée par l'entreprise si elle diffère du DPGF}], postes_ajoutes?: [{numero?, designation, unite?, quantite?, prix_unitaire}]}] : " +
       "le total du lot est CALCULÉ d'après les prix (jamais saisi) et le lot passe en mode postes ; remplacer un total déjà saisi demande confirmation ; " +
       "une ligne de devis qui regroupe plusieurs postes ou n'en a aucun se saisit en postes_ajoutes (jamais répartie entre postes) ; un numéro inconnu refuse le lot entier ; le DPGF (estimation) n'est jamais modifié ; rejouer est sans risque. " +
       "Attention : l'écran ACT enregistre seul la consultation qu'il affiche ; modifie-la de préférence quand personne ne l'a ouverte.",
@@ -170,6 +170,7 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
                   properties: {
                     numero: { type: 'string', description: 'Numéro du poste dans le lot (« 3.1 », ou « 02.3.1 »)' }, id: { type: 'string', description: 'Identifiant du poste (read_dpgf), si le numéro est ambigu' },
                     prix_unitaire: { type: 'number', description: 'P.U. HT en euros ; absent si pour_memoire' },
+                    quantite: { type: 'number', description: "Quantité proposée par l'entreprise, seulement si elle diffère de celle du DPGF (gardée dans son offre, le DPGF n'est jamais modifié)" },
                     pour_memoire: { type: 'boolean', description: 'Poste non chiffré par l\'entreprise (pour mémoire, en consultation) : jamais un prix de 0' },
                   },
                 },

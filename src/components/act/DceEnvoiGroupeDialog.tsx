@@ -9,12 +9,13 @@ import { useSettings } from '../../hooks/useSettings';
 import { useUser } from '../../UserContext';
 import { signatureEffective } from '../../lib/mailSignatureCabinet';
 import { MAX_EMAIL_TOTAL_BYTES } from '../../lib/emailAttachments';
+import { apiFetch } from '../../lib/api';
 import { envoyerMessageDirect, peutEnvoyer } from '../../lib/mailEnvoiDirect';
 import type { EntrepriseSuivi } from '../../lib/actEntreprises';
 import type { PieceMarcheGeneree } from '../../lib/marchePieces';
 import { LIBELLE_MOTIF, lignesCochees, planEnvoiGroupe, type ModeEnvoi } from '../../lib/dceEnvoiGroupe';
 import {
-  JETONS_MODELE, MODELE_CORPS, MODELE_CORPS_REPONSE, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_REPONSE, MODELE_SUJET_VISITE, blocsMessageDce, jetonsInconnus, remplirModele,
+  JETONS_MODELE, MODELE_CORPS, MODELE_CORPS_ADDITIF, MODELE_SUJET_ADDITIF, MODELE_CORPS_REPONSE, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_REPONSE, MODELE_SUJET_VISITE, blocsMessageDce, jetonsInconnus, remplirModele,
 } from '../../lib/dceEnvoiMessage';
 import { donneesSansReseau, preparerEnvoiEntreprise, type ContexteEnvoiDce } from '../../lib/dceEnvoiPreparation';
 
@@ -33,6 +34,11 @@ const TEXTES: Record<ModeEnvoi, { sujet: string; corps: string; objet: string; v
     description: 'Chaque entreprise reçoit son propre message, avec le créneau qui lui est affecté. Les entreprises sans créneau affecté, sans adresse ou marquées « ne répond pas » ne peuvent pas être cochées.',
     pied: 'Aucune pièce n\'est jointe à la convocation.',
   },
+  additif: {
+    sujet: MODELE_SUJET_ADDITIF, corps: MODELE_CORPS_ADDITIF, objet: 'l\'additif', verbe: 'Envoyer l\'additif à',
+    description: 'Seules les entreprises qui ont déjà reçu le DCE et que les pièces modifiées concernent sont proposées. Chacune reçoit son propre message, avec un lien « j\'ai bien reçu » qui lui est personnel.',
+    pied: 'Les fichiers des pièces modifiées et le tableau des indices sont joints à chaque message. Aucun nouveau lien de dépôt n\'est créé : celui de l\'entreprise reste valable.',
+  },
   reponse: {
     sujet: MODELE_SUJET_REPONSE, corps: MODELE_CORPS_REPONSE, objet: 'la réponse', verbe: 'Envoyer la réponse à',
     description: 'La réponse part à chaque entreprise concernée, sans citer l\'auteur de la question. Les entreprises sans adresse ou marquées « ne répond pas » ne peuvent pas être cochées.',
@@ -41,6 +47,7 @@ const TEXTES: Record<ModeEnvoi, { sujet: string; corps: string; objet: string; v
 };
 
 const CHAMP = 'w-full text-sm border border-[var(--tblr-border)] rounded-lg px-2.5 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500';
+const LIEN_ACCUSE_APERCU = '[lien de confirmation de réception propre à l\'entreprise]';
 const LIEN_APERCU = '[lien de dépôt personnel de l\'entreprise]';
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString('fr-FR');
 const mo = (octets: number) => (octets / (1024 * 1024)).toFixed(1).replace('.', ',');
@@ -88,7 +95,11 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
   const apercu = useMemo(() => {
     const ligne = plan.find(l => l.entreprise.id === apercuId);
     if (!ligne) return null;
-    const donnees = { ...donneesSansReseau(contexte, ligne.entreprise), lienDepot: mode === 'dce' && contexte.depotActif ? LIEN_APERCU : undefined };
+    const base = donneesSansReseau(contexte, ligne.entreprise);
+    const donnees = {
+      ...base, lienDepot: mode === 'dce' && contexte.depotActif ? LIEN_APERCU : undefined,
+      additif: base.additif ? { ...base.additif, lienAccuse: LIEN_ACCUSE_APERCU } : undefined,
+    };
     const blocs = blocsMessageDce(donnees);
     return { sujet: remplirModele(sujet, blocs), corps: remplirModele(corps, blocs) };
   }, [plan, apercuId, contexte, sujet, corps, mode]);
@@ -108,14 +119,33 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
     const generer = contexte.genererPiecesMarche;
     const ctx: ContexteEnvoiDce = { ...contexte, genererPiecesMarche: generer ? () => (piecesMarche ??= generer()) : undefined };
     cibles.forEach(l => maj(l.entreprise.id, { etat: 'attente' }));
+    // Additif : un lien « j'ai bien reçu » signé par entreprise, demandé en une fois avant les envois.
+    let liensAccuse: Record<string, string> = {};
+    if (mode === 'additif' && contexte.additif) {
+      try {
+        const r = await apiFetch<{ liens: Record<string, string> }>(
+          `/api/projects/${encodeURIComponent(contexte.projectId || '')}/depot/additifs/${encodeURIComponent(contexte.additif.revision.id)}/liens`,
+          { method: 'POST', body: JSON.stringify({ entreprises: cibles.map(l => ({ id: l.entreprise.id, nom: l.entreprise.nom })) }) },
+        );
+        liensAccuse = r.liens || {};
+      } catch (err) {
+        const message = `Les liens de confirmation n'ont pas pu être créés : ${(err as Error)?.message || 'erreur inconnue'}. Rien n'a été envoyé.`;
+        cibles.forEach(l => maj(l.entreprise.id, { etat: 'echec', message }));
+        setPhase('termine');
+        return;
+      }
+    }
     for (const ligne of cibles) {
       const id = ligne.entreprise.id;
       maj(id, { etat: 'encours' });
       try {
         // Une convocation ne joint rien et ne crée aucun lien de dépôt : pas de préparation réseau.
-        const prep = mode === 'dce'
+        const prepBrute = mode === 'dce' || mode === 'additif'
           ? await preparerEnvoiEntreprise(ctx, ligne.entreprise)
           : { fichiers: [] as File[], donnees: donneesSansReseau(contexte, ligne.entreprise) };
+        const prep = mode === 'additif' && prepBrute.donnees.additif
+          ? { ...prepBrute, donnees: { ...prepBrute.donnees, additif: { ...prepBrute.donnees.additif, lienAccuse: liensAccuse[id] } } }
+          : prepBrute;
         const total = prep.fichiers.reduce((s, f) => s + f.size, 0);
         if (total > MAX_EMAIL_TOTAL_BYTES) {
           throw new Error(`Pièces jointes trop volumineuses (${mo(total)} Mo pour ${mo(MAX_EMAIL_TOTAL_BYTES)} Mo au plus) : envoyez cette entreprise depuis sa ligne.`);

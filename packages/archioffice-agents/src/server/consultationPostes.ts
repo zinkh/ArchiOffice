@@ -85,19 +85,47 @@ export function ajoutsEntreprise(offres: Json[], entrepriseId: string, lotId: st
 const montantPoste = (p: PosteAjoute) => (p.prixUnitaire != null ? p.prixUnitaire * (p.quantite ?? 1) : 0);
 
 /** Total HT d'un lot d'après les P.U. (base seulement, options comptées à part) + postes ajoutés ; null sans aucun prix. */
-export function totalLotPostes(articles: Article[], prix: Prix, ajouts: PosteAjoute[]): number | null {
+export function totalLotPostes(articles: Article[], prix: Prix, ajouts: PosteAjoute[], quantiteDe: (a: Article) => number = a => a.quantite): number | null {
   let total = 0; let chiffres = 0;
   for (const a of articles) {
     const pu = prix[a.id];
     if (typeof pu !== 'number') continue;
     chiffres++;
-    if (!a.horsBase) total += pu * a.quantite;
+    if (!a.horsBase) total += pu * quantiteDe(a);
   }
   for (const p of ajouts) if (p.prixUnitaire != null) { chiffres++; total += montantPoste(p); }
   return chiffres > 0 ? total : null;
 }
 
-export interface MiseAJourOffre { id: string | null; prix: Prix; postesAjoutes: PosteAjoute[] }
+// ── Quantités de l'entreprise (reprise de quantitesEntreprise.ts) ────────────
+// Une quantité n'est gardée que si elle DIFFÈRE de celle du DPGF (absence = même quantité) ; le DPGF n'est jamais modifié.
+
+export type Quantites = Record<string, number>;
+/** Comparaison à la virgule près : seul le bruit des nombres flottants est écarté. */
+export const quantitesDifferent = (a: number, b: number) => Math.abs(a - b) > 1e-9;
+
+export function quantitesEntreprise(offres: Json[], entrepriseId: string): Quantites {
+  const out: Quantites = {};
+  const docs = offres.filter(o => retenue(o, entrepriseId)).sort((a, b) => String(a.importedAt || '').localeCompare(String(b.importedAt || '')));
+  for (const o of docs) for (const [id, q] of Object.entries((o.quantites ?? {}) as Quantites)) if (typeof q === 'number' && Number.isFinite(q)) out[id] = q;
+  return out;
+}
+
+export function quantitesAcceptees(offres: Json[], entrepriseId: string): Set<string> {
+  const docs = offres.filter(o => retenue(o, entrepriseId)).sort((a, b) => String(a.importedAt || '').localeCompare(String(b.importedAt || '')));
+  const acceptees = new Set<string>();
+  for (const o of docs) {
+    for (const id of Object.keys(o.quantites ?? {})) acceptees.delete(id);
+    for (const id of (o.quantitesAcceptees ?? []) as string[]) acceptees.add(id);
+  }
+  return acceptees;
+}
+
+/** Quantité utilisée pour un article : base `moe` (celle du DPGF, sauf quantité acceptée) ou `entreprise` (toujours la sienne). */
+export const quantiteRetenue = (base: 'moe' | 'entreprise', a: Article, q: Quantites, acceptees: ReadonlySet<string>) =>
+  typeof q[a.id] === 'number' && (base === 'entreprise' || acceptees.has(a.id)) ? q[a.id] : a.quantite;
+
+export interface MiseAJourOffre { id: string | null; prix: Prix; postesAjoutes: PosteAjoute[]; quantites?: Quantites; quantitesAcceptees?: string[] }
 
 /**
  * Répartit l'état voulu d'un lot (prix et postes ajoutés d'UNE entreprise) entre ses offres : un prix corrigé est
@@ -106,6 +134,8 @@ export interface MiseAJourOffre { id: string | null; prix: Prix; postesAjoutes: 
  */
 export function repartirSaisie(
   offres: Json[], entrepriseId: string, lotId: string, idsLot: string[], prixLot: Prix, ajoutsLot: PosteAjoute[],
+  /** Quantités voulues (article -> quantité, undefined : celle du DPGF) et articles acceptés ; omis : quantités enregistrées non touchées. */
+  quantitesLot?: Record<string, number | undefined>, accepteesLot?: ReadonlySet<string>,
 ): MiseAJourOffre[] {
   const miennes = offres.filter(o => retenue(o, entrepriseId)).sort((a, b) => String(b.importedAt || '').localeCompare(String(a.importedAt || '')));
   const manuelle = miennes.find(o => o.fichierNom === FICHIER_SAISIE_MANUELLE) ?? null;
@@ -125,6 +155,27 @@ export function repartirSaisie(
     else etat(porteuses[0] ?? manuelle).prix[id] = voulu;
   }
 
+  if (quantitesLot) {
+    const qEtat = (o: Json | null) => {
+      const e = etat(o);
+      e.quantites ??= { ...(o?.quantites ?? {}) };
+      e.quantitesAcceptees ??= [...(o?.quantitesAcceptees ?? [])];
+      return e as MiseAJourOffre & { quantites: Quantites; quantitesAcceptees: string[] };
+    };
+    for (const id of idsLot) {
+      const voulue = quantitesLot[id];
+      const porteuses = miennes.filter(o => Object.prototype.hasOwnProperty.call(o.prix ?? {}, id));
+      for (const o of miennes) {
+        if (Object.prototype.hasOwnProperty.call(o.quantites ?? {}, id)) delete qEtat(o).quantites[id];
+        if (((o.quantitesAcceptees ?? []) as string[]).includes(id)) qEtat(o).quantitesAcceptees = qEtat(o).quantitesAcceptees.filter(x => x !== id);
+      }
+      if (typeof voulue !== 'number') continue;
+      const porteuse = qEtat(porteuses[0] ?? manuelle);
+      porteuse.quantites[id] = voulue;
+      if (accepteesLot?.has(id)) porteuse.quantitesAcceptees.push(id);
+    }
+  }
+
   const voulus = new Map(ajoutsLot.map(p => [p.id, p]));
   const places = new Set<string>();
   for (const o of miennes) {
@@ -138,8 +189,10 @@ export function repartirSaisie(
   const originaux = new Map(miennes.map(o => [o.id, o]));
   return [...etats.values()].filter(e => {
     const o = e.id ? originaux.get(e.id) : null;
-    if (!o) return Object.keys(e.prix).length > 0 || e.postesAjoutes.length > 0;
-    return JSON.stringify(e.prix) !== JSON.stringify(o.prix ?? {}) || JSON.stringify(e.postesAjoutes) !== JSON.stringify(o.postesAjoutes ?? []);
+    if (!o) return Object.keys(e.prix).length > 0 || e.postesAjoutes.length > 0 || Object.keys(e.quantites ?? {}).length > 0;
+    return JSON.stringify(e.prix) !== JSON.stringify(o.prix ?? {}) || JSON.stringify(e.postesAjoutes) !== JSON.stringify(o.postesAjoutes ?? [])
+      || (e.quantites !== undefined && JSON.stringify(e.quantites) !== JSON.stringify(o.quantites ?? {}))
+      || (e.quantitesAcceptees !== undefined && JSON.stringify([...e.quantitesAcceptees].sort()) !== JSON.stringify([...(o.quantitesAcceptees ?? [])].sort()));
   });
 }
 
@@ -164,6 +217,8 @@ const puSaisi = (v: unknown): number | null | undefined => {
 interface Plan {
   label: string; item: Json; lot: Json; docLot: Json; articles: Article[]; entId: string | null; entNom: string;
   prixLot: Prix; ajouts: PosteAjoute[]; total: number; nbChiffres: number; nbMemoire: number; nbAjoutes: number; ancien?: Json;
+  /** Quantités de l'entreprise à écrire (seulement quand l'appel en donne) et articles acceptés ; écarts constatés avec le DPGF. */
+  quantitesLot?: Record<string, number | undefined>; accepteesLot?: Set<string>; ecartsQuantites: Json[];
 }
 
 export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
@@ -198,6 +253,7 @@ export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
     if (postes.length + ajoutes.length > MAX_POSTES) { non_traites.push({ element: label, raison: `${MAX_POSTES} lignes au plus par lot et par appel` }); continue; }
 
     const erreurs: Json[] = []; const nouveaux: Prix = {}; const articlesVus = new Set<string>();
+    const quantitesDonnees: Record<string, number | undefined> = {}; let quantitesFournies = false;
     for (const p of postes) {
       const { article, erreur } = trouverArticle(articles, p, text(docLot.numero));
       if (!article) { erreurs.push({ poste: text(p.numero ?? p.id), raison: erreur }); continue; }
@@ -207,6 +263,13 @@ export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
       if (pu === undefined) { erreurs.push({ poste: article.numero, raison: 'prix_unitaire requis (ou pour_memoire: true)' }); continue; }
       if (typeof pu === 'number' && Number.isNaN(pu)) { erreurs.push({ poste: article.numero, raison: 'prix_unitaire : nombre positif ou nul, en euros HT' }); continue; }
       nouveaux[article.id] = pu;
+      if (p.quantite !== undefined && p.quantite !== null && p.quantite !== '') {
+        const q = nombre(p.quantite);
+        if (!Number.isFinite(q) || q < 0) { erreurs.push({ poste: article.numero, raison: 'quantite : nombre positif ou nul (la quantité proposée par l\'entreprise)' }); continue; }
+        quantitesFournies = true;
+        // Une quantité qui reprend celle du DPGF (ou un poste sans quantité) n'est pas gardée : absence = même quantité.
+        quantitesDonnees[article.id] = article.quantite > 0 && quantitesDifferent(q, article.quantite) ? q : undefined;
+      }
     }
     const entId = ent ? String(ent.id) : null;
     let ajouts: PosteAjoute[] = entId ? ajoutsEntreprise(offres, entId, String(docLot.id)) : [];
@@ -234,13 +297,27 @@ export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
     const prixLot: Prix = {};
     for (const a of articles) if (Object.prototype.hasOwnProperty.call(actuel, a.id)) prixLot[a.id] = actuel[a.id];
     Object.assign(prixLot, nouveaux);
-    const total = totalLotPostes(articles, prixLot, ajouts) ?? 0;
+    // Quantités de l'entreprise : celles déjà enregistrées, complétées par celles de cet appel. Le total suit la base du lot.
+    const dejaQ = entId ? quantitesEntreprise(offres, entId) : {};
+    const accepteesLot = new Set(entId ? quantitesAcceptees(offres, entId) : []);
+    const quantitesLot: Record<string, number | undefined> = {};
+    for (const a of articles) if (typeof dejaQ[a.id] === 'number') quantitesLot[a.id] = dejaQ[a.id];
+    Object.assign(quantitesLot, quantitesDonnees);
+    for (const a of articles) if (quantitesLot[a.id] === undefined) accepteesLot.delete(a.id);
+    const qActuelles: Quantites = {};
+    for (const a of articles) if (typeof quantitesLot[a.id] === 'number') qActuelles[a.id] = quantitesLot[a.id] as number;
+    const baseQ: 'moe' | 'entreprise' = consultation.base_quantites === 'entreprise' ? 'entreprise' : 'moe';
+    const total = totalLotPostes(articles, prixLot, ajouts, a => quantiteRetenue(baseQ, a, qActuelles, accepteesLot)) ?? 0;
+    const ecartsQuantites = articles.filter(a => typeof qActuelles[a.id] === 'number').map(a => ({
+      poste: a.numero, quantite_dpgf: a.quantite, quantite_entreprise: qActuelles[a.id], acceptee: accepteesLot.has(a.id),
+    }));
     const valeurs = articles.map(a => prixLot[a.id]);
     plans.push({
       label, item: it, lot, docLot, articles, entId, entNom: ent ? String(ent.nom) : text(it.entreprise), prixLot, ajouts, total: Math.round(total * 100) / 100,
       nbChiffres: valeurs.filter(v => typeof v === 'number').length + ajouts.filter(p => p.prixUnitaire != null).length,
       nbMemoire: valeurs.filter(v => v === null).length + ajouts.filter(p => p.prixUnitaire == null).length,
       nbAjoutes: ajouts.length,
+      ...(quantitesFournies ? { quantitesLot, accepteesLot } : {}), ecartsQuantites,
       ancien: ent ? (Array.isArray(consultation.offres) ? consultation.offres : []).find((o: Json) => o.lot_id === lot.id && o.entreprise_id === ent.id) : undefined,
     });
   }
@@ -284,10 +361,13 @@ export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
       continue;
     }
     const idsLot = p.articles.map(a => a.id);
-    const mises = repartirSaisie(offres, String(ent.id), String(p.docLot.id), idsLot, p.prixLot, p.ajouts);
+    const mises = repartirSaisie(offres, String(ent.id), String(p.docLot.id), idsLot, p.prixLot, p.ajouts, p.quantitesLot, p.accepteesLot);
     for (const m of mises) {
       if (m.id) {
-        const { res, json } = await request(`${base}/offres/${encodeURIComponent(m.id)}`, 'PUT', { prix: m.prix, postesAjoutes: m.postesAjoutes });
+        const { res, json } = await request(`${base}/offres/${encodeURIComponent(m.id)}`, 'PUT', {
+          prix: m.prix, postesAjoutes: m.postesAjoutes,
+          ...(m.quantites ? { quantites: m.quantites, quantitesAcceptees: m.quantitesAcceptees ?? [] } : {}),
+        });
         if (!res.ok) return failure(`${json?.error || `Enregistrement des prix impossible (HTTP ${res.status})`}. La consultation est déjà à jour : rejouer l'appel est sans risque.`, { faits });
         offres = offres.map(o => (o.id === m.id ? { ...o, ...json } : o));
       } else {
@@ -295,6 +375,7 @@ export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
           offre: {
             entrepriseId: String(ent.id), entrepriseNom: String(ent.nom), dateReception: today(), fichierNom: FICHIER_SAISIE_MANUELLE,
             documentVersion: doc.version ?? '', prix: m.prix, anomalies: [], postesAjoutes: m.postesAjoutes, statut: 'validee',
+            ...(m.quantites ? { quantites: m.quantites, quantitesAcceptees: m.quantitesAcceptees ?? [] } : {}),
           },
         });
         if (!res.ok) return failure(`${json?.error || `Enregistrement des prix impossible (HTTP ${res.status})`}. La consultation est déjà à jour : rejouer l'appel est sans risque.`, { faits });
@@ -305,6 +386,7 @@ export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
       lot: lotNum(String(p.lot.id)), entreprise: String(ent.nom), postes_chiffres: p.nbChiffres, postes_pour_memoire: p.nbMemoire, postes_ajoutes_par_l_entreprise: p.nbAjoutes,
       total_ht: p.total, ...(p.ancien?.montant_base ? { ancien_montant_ht: p.ancien.montant_base } : {}),
       articles_du_dpgf_non_chiffres: p.articles.filter(a => p.prixLot[a.id] === undefined).length,
+      ...(p.ecartsQuantites.length ? { quantites_differentes_du_dpgf: p.ecartsQuantites } : {}),
     });
   }
   if (!faits.length) return failure("Aucune saisie n'a pu être faite.", { non_traites });
@@ -312,7 +394,7 @@ export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
   return {
     response: {
       success: true, project_id: pid, saisies: faits, ...(non_traites.length ? { non_traites } : {}),
-      rappel: "Le DPGF n'est pas modifié : ces prix sont rangés par entreprise, à côté de l'estimation. Le total du lot est calculé d'après les prix.",
+      rappel: "Le DPGF n'est pas modifié : ces prix (et les quantités proposées par l'entreprise, si elles diffèrent) sont rangés par entreprise, à côté de l'estimation. Le total du lot est calculé d'après les prix, sur les quantités du maître d'œuvre sauf quantités acceptées (ou sur celles de l'entreprise si la base de la consultation l'indique) ; accepter une quantité se fait à l'écran.",
       record_url: recordUrl,
     },
     summary: `${plural(faits.length, 'lot saisi')} poste par poste (consultation)`,

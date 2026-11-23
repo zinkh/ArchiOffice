@@ -5,6 +5,7 @@
 // vides en trop sont resserrées.
 
 import type { BlocVisite } from './actVisites';
+import type { BlocAdditif } from './dceRevisions';
 
 export interface LotMessage { lot_number: string; lot_title: string }
 export interface LigneIndiceMessage { designation: string; fichier: string; indice: string }
@@ -18,6 +19,8 @@ export interface DonneesMessageDce {
   lignesIndices: LigneIndiceMessage[];
   /** Visite de site : son créneau, ou les créneaux proposés. Absent : aucune visite annoncée. */
   visite?: BlocVisite;
+  /** Additif au DCE : numéro, motif, pièces modifiées et lien « j'ai bien reçu » de l'entreprise. */
+  additif?: BlocAdditif;
   /** Réponse publique à diffuser (question sans nom d'auteur). */
   questionReponse?: { objet?: string; question: string; reponse: string };
   /** Lien de dépôt personnel de l'entreprise. */
@@ -50,6 +53,27 @@ export const MODELE_CORPS = [
   '{{avertissements}}',
   '',
   'Nous restons à votre disposition pour toute précision.',
+  '',
+  'Cordialement,',
+].join('\n');
+
+/** Additif au DCE : les pièces modifiées sont jointes et remplacent les versions précédentes. */
+export const MODELE_SUJET_ADDITIF = 'Additif n°{{numero_additif}} au DCE : {{operation}}';
+
+export const MODELE_CORPS_ADDITIF = [
+  'Bonjour,',
+  '',
+  'Dans le cadre de la consultation des entreprises pour l\'opération « {{operation}} », le dossier de consultation a été modifié.',
+  '',
+  '{{additif}}',
+  '',
+  'Les pièces modifiées sont jointes à ce message et remplacent les versions précédentes. Merci d\'en tenir compte pour votre offre.',
+  '',
+  '{{pieces_dossier}}',
+  '',
+  '{{accuse}}',
+  '',
+  '{{avertissements}}',
   '',
   'Cordialement,',
 ].join('\n');
@@ -93,6 +117,9 @@ export const JETONS_MODELE: Array<{ jeton: string; aide: string }> = [
   { jeton: 'pieces_marche', aide: 'Pièces du marché jointes (RC, CCAP, acte d\'engagement)' },
   { jeton: 'pieces_dossier', aide: 'Pièces du dossier et indices de révision' },
   { jeton: 'visite', aide: 'Visite de site : créneau de l\'entreprise (ou créneaux proposés), lieu et consignes' },
+  { jeton: 'additif', aide: 'Additif au DCE : numéro, motif et pièces modifiées (modèle d\'additif)' },
+  { jeton: 'numero_additif', aide: 'Numéro de l\'additif' },
+  { jeton: 'accuse', aide: 'Lien « j\'ai bien reçu » propre à l\'entreprise (modèle d\'additif)' },
   { jeton: 'question_reponse', aide: 'Question et réponse à diffuser (modèle de réponse)' },
   { jeton: 'depot', aide: 'Lien de dépôt personnel et date limite' },
   { jeton: 'avertissements', aide: 'Pièces non jointes ou lien non créé' },
@@ -124,6 +151,13 @@ export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
         ...(v.consignes ? [`Consignes : ${v.consignes}`] : []),
       ].join('\n')
     : '';
+  const a = d.additif;
+  const additif = a
+    ? [`Additif n° ${a.numero} du ${a.date}`, `Motif : ${a.motif}`, '', 'Pièces modifiées :', ...a.pieces.map(p => `- ${p}`)].join('\n')
+    : '';
+  const accuse = a?.lienAccuse
+    ? ['Merci de confirmer la réception de cet additif en ouvrant le lien suivant :', a.lienAccuse].join('\n')
+    : '';
   const qr = d.questionReponse;
   const questionReponse = qr
     ? [...(qr.objet ? [`Objet : ${qr.objet}`] : []), `Question : ${qr.question}`, '', `Réponse : ${qr.reponse}`].join('\n')
@@ -147,6 +181,9 @@ export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
     pieces_dossier: piecesDossier,
     visite,
     question_reponse: questionReponse,
+    additif,
+    numero_additif: a ? String(a.numero) : '',
+    accuse,
     depot,
     avertissements,
   };
