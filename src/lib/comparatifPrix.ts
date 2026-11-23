@@ -12,6 +12,7 @@
 import type { Lot, Ligne, OffreDocument, PosteAjoute } from '../types/dpgf';
 import { versComparatif, type ComparatifLot } from './bpuToAct';
 import { montantPoste } from './postesAjoutes';
+import type { BaseQuantites } from './quantitesOffre';
 
 export type ModeSaisie = 'total' | 'postes';
 
@@ -369,6 +370,8 @@ export function comparatifDepuisOffres(
   /** Entreprises d'un lot du projet (project_lots.id), chacune avec son mode de saisie. */
   entreprisesDuLot: (projectLotId: string) => EntrepriseComparee[],
   existant: ComparatifLot[] = [],
+  /** Base de quantités des montants par article (voir quantitesOffre.ts). */
+  base: BaseQuantites = 'moe',
 ): ComparatifLot[] {
   const sortie: ComparatifLot[] = [];
   const faits = new Set<string>();
@@ -378,7 +381,7 @@ export function comparatifDepuisOffres(
     const entreprises = entreprisesDuLot(lot.projectLotId);
     // Une entreprise saisie au total n'a pas de détail : ses fichiers éventuels ne comptent pas.
     const enPostes = new Set(entreprises.filter(e => e.mode === 'postes').map(e => e.id));
-    const { comparatif } = versComparatif([lot], offres.filter(o => o.entrepriseId && enPostes.has(o.entrepriseId)));
+    const { comparatif } = versComparatif([lot], offres.filter(o => o.entrepriseId && enPostes.has(o.entrepriseId)), base);
     const c = comparatif[0];
     if (!c) continue;
     const articles = c.articles.map(a => (a.is_subtotal ? { ...a, prix: { ...a.prix } } : a));
