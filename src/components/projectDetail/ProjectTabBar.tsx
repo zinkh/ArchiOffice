@@ -164,13 +164,12 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <PillTabs
         ariaLabel={t('project_tab_bar_label')}
         activeId={activeGroup?.id ?? ''}
         onChange={selectGroup}
         tabs={groupItems}
-        variant="underline"
       />
       {activeVisibleGroup && activeVisibleGroup.tabs.length > 1 && (
         <div

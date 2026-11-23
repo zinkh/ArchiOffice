@@ -1924,7 +1924,7 @@ export default function ProjectDetail() {
   );
 
   return (
-    <div className="fiche-affaire flex flex-col lg:h-full">
+    <div className="flex flex-col lg:h-full">
       <Toast toast={toast} />
       {projectLoadState !== 'ready' && projectLoadState !== 'loading' && (
         <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
@@ -1943,8 +1943,8 @@ export default function ProjectDetail() {
           nommée par ses onglets, et suppression comme changement de phase se
           font au bureau ; l'état d'enregistrement passe dans la barre de section. */}
       <header
-        className="shrink-0 hidden md:grid grid-cols-[auto_minmax(0,1fr)_auto] border-b-2"
-        style={{ borderColor: 'var(--fiche-rule)', background: 'var(--tblr-surface)' }}
+        className="shrink-0 hidden md:grid grid-cols-[auto_minmax(0,1fr)_auto] border-b"
+        style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)', boxShadow: 'var(--tblr-shadow)' }}
       >
         {/* Cartouche : numéro d'affaire, intitulé, statut, comme le bloc-titre d'une planche. */}
         <div className="flex items-stretch min-w-0 col-span-2 divide-x" style={{ borderColor: 'var(--tblr-border)' }}>
@@ -1966,11 +1966,11 @@ export default function ProjectDetail() {
             </div>
           )}
           <div className="px-4 py-2 flex flex-col justify-center min-w-0 flex-1 border-l" style={{ borderColor: 'var(--tblr-border)' }}>
-            <h1 className="font-semibold text-xl leading-tight truncate tracking-tight" style={{ color: 'var(--tblr-text)' }} title={project.name}>
+            <h1 className="font-bold text-2xl leading-tight truncate tracking-[-0.02em]" style={{ color: 'var(--tblr-text)' }} title={project.name}>
               {project.name}
             </h1>
             <div className="flex items-center gap-3 mt-1 min-w-0">
-              <span className="text-[0.8125rem] font-medium shrink-0" style={{ color: 'var(--tblr-text)' }}>
+              <span className="px-2 py-0.5 rounded text-[0.6875rem] font-semibold shrink-0 whitespace-nowrap" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                 {project.is_chantier
                   ? t('projectdetail_header_chantier')
                   : (['Planning', 'In Progress', 'Completed', 'On Hold'].includes(project.status)
@@ -2007,8 +2007,7 @@ export default function ProjectDetail() {
               type="button"
               onClick={() => { void advancePhase(); }}
               title={t('project_phase_advance_title', { phase: upcomingPhase })}
-              className="shrink-0 h-8 px-3 inline-flex items-center gap-2 border text-[0.8125rem] font-semibold whitespace-nowrap transition-colors hover:bg-[var(--tblr-primary)] hover:text-[var(--tblr-surface)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
-              style={{ borderColor: 'var(--tblr-primary)', color: 'var(--tblr-primary)' }}
+              className="btn btn-secondary shrink-0 whitespace-nowrap"
             >
               {t('project_phase_advance', { phase: upcomingPhase })}
               <IconArrowRight size={14} aria-hidden />

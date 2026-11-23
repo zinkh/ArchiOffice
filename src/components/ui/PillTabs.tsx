@@ -22,12 +22,9 @@ interface PillTabsProps {
   className?: string;
   /** Nom de la barre d'onglets, annoncé par un lecteur d'écran. */
   ariaLabel?: string;
-  /** « underline » : onglets soulignés sur un filet, sans fond (fiche affaire). */
-  variant?: 'pill' | 'underline';
 }
 
-export function PillTabs({ tabs, activeId, onChange, className, ariaLabel, variant = 'pill' }: PillTabsProps) {
-  const underline = variant === 'underline';
+export function PillTabs({ tabs, activeId, onChange, className, ariaLabel }: PillTabsProps) {
   const scrollRef = useHorizontalScrollHints<HTMLDivElement>('[aria-selected="true"]', activeId);
   // Flèches gauche/droite, Début et Fin entre les onglets (motif ARIA « tabs »,
   // activation automatique) : seul l'onglet actif est dans l'ordre de tabulation.
@@ -40,12 +37,8 @@ export function PillTabs({ tabs, activeId, onChange, className, ariaLabel, varia
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={onKeyDown}
-      className={cn(
-        'scroll-fade-x flex items-center overflow-x-auto max-w-full',
-        underline ? 'gap-0 border-b' : 'inline-flex gap-1 p-1 rounded-lg',
-        className,
-      )}
-      style={underline ? { borderColor: 'var(--tblr-border)' } : { background: 'var(--tblr-surface-2)' }}
+      className={cn('scroll-fade-x inline-flex items-center gap-1 p-1 rounded-lg overflow-x-auto max-w-full', className)}
+      style={{ background: 'var(--tblr-surface-2)' }}
     >
       {tabs.map(tab => {
         const isActive = tab.id === activeId;
@@ -60,16 +53,13 @@ export function PillTabs({ tabs, activeId, onChange, className, ariaLabel, varia
             title={tab.title}
             onClick={() => onChange(tab.id)}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 text-sm whitespace-nowrap transition-colors shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--tblr-primary)]',
-              underline ? '-mb-px border-b-2' : 'rounded-md',
-              isActive ? 'font-semibold' : underline ? 'font-medium hover:text-[var(--tblr-text)]' : 'font-medium hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface)]'
+              'flex items-center gap-2 px-4 py-2 rounded-md text-sm whitespace-nowrap transition-colors shrink-0',
+              isActive ? 'font-semibold' : 'font-medium hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface)]'
             )}
             style={
-              underline
-                ? { borderColor: isActive ? 'var(--tblr-primary)' : 'transparent', color: isActive ? 'var(--tblr-text)' : 'var(--tblr-muted)' }
-                : isActive
-                  ? { background: 'var(--tblr-surface)', color: 'var(--tblr-text)', boxShadow: 'var(--tblr-shadow)' }
-                  : { color: 'var(--tblr-muted)' }
+              isActive
+                ? { background: 'var(--tblr-surface)', color: 'var(--tblr-text)', boxShadow: 'var(--tblr-shadow)' }
+                : { color: 'var(--tblr-muted)' }
             }
           >
             {Icon && <Icon size={16} aria-hidden />}
