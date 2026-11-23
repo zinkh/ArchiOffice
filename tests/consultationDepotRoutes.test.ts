@@ -784,7 +784,7 @@ describe('portail public : tout le dossier en une archive et visite de site', ()
     });
     const { jeton } = await inviter(c);
     const { body } = await request(app).get(`/api/public/depot/${jeton}`);
-    expect(body.visite).toEqual({ creneau: '2030-06-12T14:00', propositions: [], lieu: '12 rue du Chantier', consignes: 'Casque obligatoire' });
+    expect(body.visite).toEqual({ creneau: '2030-06-12T14:00', propositions: [], lieu: '12 rue du Chantier', consignes: 'Casque obligatoire', confirmee_le: null });
   });
 
   it('propose les créneaux à venir sans créneau affecté, jamais ceux du passé, et ne montre pas les autres entreprises', async () => {
@@ -805,5 +805,164 @@ describe('portail public : tout le dossier en une archive et visite de site', ()
     await dossier(c, { visite_site: { lieu: 'Chantier' }, creneaux_visite: [] });
     const { jeton } = await inviter(c);
     expect((await request(app).get(`/api/public/depot/${jeton}`)).body.visite).toBeNull();
+  });
+});
+
+
+describe('portail public : questions et confirmation de présence', () => {
+  const consultation = (c: Cabinet, extra: Record<string, any> = {}) => fakeSupabaseAdmin.seed('act_data', [{
+    id: uid('act'), tenant_id: c.tenantId, project_id: c.projectId, consultation: extra,
+  }]);
+  const poser = (jeton: string, corps: Record<string, any>) => request(app).post(`/api/public/depot/${jeton}/questions`).send(corps);
+  const questionsEn = (projectId: string) => fakeSupabaseAdmin.getTable('consultation_depot_questions').filter(q => q.project_id === projectId);
+
+  it('enregistre la question dans la boîte de réception, jamais dans la consultation', async () => {
+    const c = cabinet();
+    consultation(c, { questions: [] });
+    const { jeton } = await inviter(c);
+    const r = await poser(jeton, { objet: ' Cotes ', question: 'Quelle est la cote du linteau ?', lot_id: c.lotA });
+    expect(r.status).toBe(201);
+    const [ligne] = questionsEn(c.projectId);
+    expect(ligne).toMatchObject({ entreprise_id: 'e1', entreprise_nom: 'SARL Dupont', lot_id: c.lotA, objet: 'Cotes', question: 'Quelle est la cote du linteau ?' });
+    expect(fakeSupabaseAdmin.getTable('act_data').find(a => a.project_id === c.projectId)!.consultation.questions).toEqual([]);
+  });
+
+  it('rend la question à l\'entreprise, en attente puis avec la réponse saisie par l\'architecte', async () => {
+    const c = cabinet();
+    consultation(c, { questions: [] });
+    const { jeton } = await inviter(c);
+    const { body: { question } } = await poser(jeton, { question: 'Quelle est la cote du linteau ?' });
+    let ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.questions.mes_questions).toMatchObject([{ id: question.id, reponse: null }]);
+    // L'architecte répond dans la consultation (où la réponse fait foi).
+    fakeSupabaseAdmin.getTable('act_data').find(a => a.project_id === c.projectId)!.consultation.questions = [
+      { id: question.id, entreprise_id: 'e1', question: 'x', reponse: '  1,20 m  ', date_reponse: '2026-11-24', publique: false },
+    ];
+    ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.questions.mes_questions[0]).toMatchObject({ reponse: '1,20 m', reponse_le: '2026-11-24' });
+  });
+
+  it('refuse une question vide, trop longue ou visant un lot qui n\'est pas le sien', async () => {
+    const c = cabinet();
+    const { jeton } = await inviter(c); // lot A seulement
+    expect((await poser(jeton, { question: '   ' })).status).toBe(400);
+    expect((await poser(jeton, { question: 'x'.repeat(2001) })).status).toBe(400);
+    expect((await poser(jeton, { question: 'Une vraie question', lot_id: c.lotB })).status).toBe(400);
+    expect(questionsEn(c.projectId)).toHaveLength(0);
+  });
+
+  it('refuse après la date limite des questions, accepte avant', async () => {
+    const c = cabinet();
+    consultation(c, { date_limite_questions: '2020-01-01T10:00' });
+    const { jeton } = await inviter(c);
+    const r = await poser(jeton, { question: 'Une question tardive ?' });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toContain('date limite');
+    const ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.questions).toMatchObject({ ouvertes: false, date_limite: '2020-01-01T10:00' });
+    fakeSupabaseAdmin.getTable('act_data').find(a => a.project_id === c.projectId)!.consultation.date_limite_questions = '2099-01-01T10:00';
+    expect((await poser(jeton, { question: 'Une question dans les temps ?' })).status).toBe(201);
+  });
+
+  it('plafonne le nombre de questions par entreprise', async () => {
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    for (let i = 0; i < 20; i += 1) expect((await poser(jeton, { question: `Question numéro ${i} ?` })).status).toBe(201);
+    expect((await poser(jeton, { question: 'Une de trop ?' })).status).toBe(429);
+  });
+
+  it('une entreprise ne voit jamais les questions d\'une autre, mais lit les réponses publiques sans le nom de l\'auteur', async () => {
+    const c = cabinet();
+    const a = await inviter(c);
+    const b = await inviter(c, { entreprise_id: 'e2', entreprise_nom: 'SA Concurrent', email: 'c@example.test', lots_ids: [c.lotA] });
+    const q = (await poser(a.jeton, { question: 'Question secrète de Dupont ?' })).body.question;
+    consultation(c, { questions: [
+      { id: q.id, entreprise_id: 'e1', entreprise_nom: 'SARL Dupont', question: 'Question secrète de Dupont ?', reponse: 'Réponse privée', publique: false },
+      { id: 'pub', entreprise_id: 'e1', entreprise_nom: 'SARL Dupont', question: 'Épaisseur du plancher ?', objet: 'Plancher', reponse: 'Vingt centimètres', date_reponse: '2026-11-24', publique: true },
+    ] });
+    const ctxB = (await request(app).get(`/api/public/depot/${b.jeton}`)).body;
+    expect(ctxB.questions.mes_questions).toEqual([]);
+    expect(ctxB.questions.reponses_publiques).toEqual([{ id: 'pub', objet: 'Plancher', question: 'Épaisseur du plancher ?', reponse: 'Vingt centimètres', reponse_le: '2026-11-24' }]);
+    expect(JSON.stringify(ctxB)).not.toContain('Dupont');
+    expect(JSON.stringify(ctxB)).not.toContain('Réponse privée');
+  });
+
+  it('une réponse publique d\'un lot n\'est montrée qu\'aux entreprises de ce lot', async () => {
+    const c = cabinet();
+    consultation(c, { questions: [
+      { id: 'lotB', entreprise_id: 'x', question: 'Pente de toiture ?', reponse: 'Trente degrés', publique: true, lot_id: c.lotB },
+      { id: 'general', entreprise_id: 'x', question: 'Horaires de chantier ?', reponse: '8h-17h', publique: true },
+      { id: 'sansReponse', entreprise_id: 'x', question: 'Sans réponse ?', publique: true },
+    ] });
+    const { jeton } = await inviter(c); // lot A seulement
+    const ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.questions.reponses_publiques.map((r: any) => r.id)).toEqual(['general']);
+  });
+
+  it('ferme les questions comme le reste du portail quand le lien est invalide', async () => {
+    expect((await poser(`dpt_${'q'.repeat(43)}`, { question: 'Une question ?' })).status).toBe(404);
+  });
+
+  it('n\'a aucun créneau à confirmer sans créneau affecté', async () => {
+    const c = cabinet();
+    consultation(c, { creneaux_visite: [{ id: 'c1', date_heure: '2030-06-10T09:30' }], entreprises: [{ id: 'e1', lots_ids: [c.lotA] }] });
+    const { jeton } = await inviter(c);
+    expect((await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`)).status).toBe(409);
+  });
+
+  it('confirme la présence sur l\'invitation, une seule fois, sans toucher à la consultation', async () => {
+    const c = cabinet();
+    consultation(c, {
+      creneaux_visite: [{ id: 'c1', date_heure: '2030-06-10T09:30' }],
+      entreprises: [{ id: 'e1', lots_ids: [c.lotA], visite_creneau_id: 'c1', visite_presence: 'prevue' }],
+    });
+    const { jeton } = await inviter(c);
+    const premiere = await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`);
+    expect(premiere.status).toBe(200);
+    const seconde = await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`);
+    expect(seconde.body.confirmee_le).toBe(premiere.body.confirmee_le);
+    const ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.visite.confirmee_le).toBe(premiere.body.confirmee_le);
+    const act = fakeSupabaseAdmin.getTable('act_data').find(a => a.project_id === c.projectId)!;
+    expect(act.consultation.entreprises[0].visite_presence).toBe('prevue');
+  });
+
+  it('côté cabinet : liste les questions de l\'affaire, authentification exigée, jamais celles d\'un autre cabinet', async () => {
+    const c = cabinet();
+    const autre = cabinet();
+    const { jeton } = await inviter(c);
+    const { jeton: jetonAutre } = await inviter(autre);
+    await poser(jeton, { question: 'Question du cabinet A ?' });
+    await poser(jetonAutre, { question: 'Question du cabinet B ?' });
+    expect((await request(app).get(`/api/projects/${c.projectId}/depot/questions`)).status).toBe(401);
+    const liste = await request(app).get(`/api/projects/${c.projectId}/depot/questions`).set(authHeader(c.token));
+    expect(liste.status).toBe(200);
+    expect(liste.body.map((q: any) => q.question)).toEqual(['Question du cabinet A ?']);
+    expect(Object.keys(liste.body[0]).sort()).toEqual(['created_at', 'entreprise_id', 'entreprise_nom', 'id', 'lot_id', 'objet', 'question']);
+    const croise = await request(app).get(`/api/projects/${autre.projectId}/depot/questions`).set(authHeader(c.token));
+    expect(croise.status).toBe(404);
+  });
+
+  it('côté cabinet : supprimer une question la retire de la boîte de réception, pas celle d\'un autre cabinet', async () => {
+    const c = cabinet();
+    const autre = cabinet();
+    const { jeton } = await inviter(c);
+    const { jeton: jetonAutre } = await inviter(autre);
+    const q = (await poser(jeton, { question: 'À supprimer ?' })).body.question;
+    const qAutre = (await poser(jetonAutre, { question: 'À conserver ?' })).body.question;
+    await request(app).delete(`/api/projects/${autre.projectId}/depot/questions/${q.id}`).set(authHeader(autre.token)).expect(200);
+    expect(questionsEn(c.projectId)).toHaveLength(1); // le DELETE d'un autre cabinet n'a rien supprimé
+    await request(app).delete(`/api/projects/${c.projectId}/depot/questions/${q.id}`).set(authHeader(c.token)).expect(200);
+    expect(questionsEn(c.projectId)).toHaveLength(0);
+    expect(questionsEn(autre.projectId).map(x => x.id)).toEqual([qAutre.id]);
+  });
+
+  it('la liste des liens du cabinet expose la confirmation de présence', async () => {
+    const c = cabinet();
+    consultation(c, { creneaux_visite: [{ id: 'c1', date_heure: '2030-06-10T09:30' }], entreprises: [{ id: 'e1', lots_ids: [c.lotA], visite_creneau_id: 'c1' }] });
+    const { jeton } = await inviter(c);
+    await request(app).post(`/api/public/depot/${jeton}/visite/confirmer`).expect(200);
+    const liens = await request(app).get(`/api/projects/${c.projectId}/depot/invites`).set(authHeader(c.token));
+    expect(liens.body[0].visite_confirmee_le).toBeTruthy();
   });
 });

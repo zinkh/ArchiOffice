@@ -1662,6 +1662,8 @@ CREATE TABLE IF NOT EXISTS consultation_depot_invites (
   expires_at    TIMESTAMPTZ NOT NULL,
   revoked_at    TIMESTAMPTZ,
   last_opened_at TIMESTAMPTZ,
+  -- Présence à la visite de site confirmée par l'entreprise depuis sa page (jamais écrite dans la consultation).
+  visite_confirmee_le TIMESTAMPTZ,
   created_by    UUID,
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
@@ -1715,6 +1717,32 @@ CREATE INDEX IF NOT EXISTS idx_consultation_depots_invite
 ALTER TABLE consultation_depots ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON consultation_depots;
 CREATE POLICY tenant_isolation ON consultation_depots
+  USING (tenant_id = my_tenant_id());
+
+-- ------------------------------------------------------------
+-- 4. Questions des entreprises (boîte de réception ; la réponse vit dans consultation.questions)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS consultation_depot_questions (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  invite_id     UUID REFERENCES consultation_depot_invites(id) ON DELETE CASCADE NOT NULL,
+  entreprise_id TEXT NOT NULL,
+  entreprise_nom TEXT NOT NULL,
+  -- Lot visé (project_lots.id) ; NULL = question générale.
+  lot_id        TEXT,
+  objet         TEXT,
+  question      TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_consultation_depot_questions_project
+  ON consultation_depot_questions(tenant_id, project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consultation_depot_questions_invite
+  ON consultation_depot_questions(invite_id);
+
+ALTER TABLE consultation_depot_questions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON consultation_depot_questions;
+CREATE POLICY tenant_isolation ON consultation_depot_questions
   USING (tenant_id = my_tenant_id());
 
 -- ============================================================

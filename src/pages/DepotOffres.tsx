@@ -17,6 +17,7 @@ import {
 } from '../lib/consultationDepot';
 import { euros, formaterDate, formaterDateHeure } from '../lib/depotAffichage';
 import { libelleVisite } from '../lib/actVisites';
+import { MAX_OBJET_CARACTERES, MAX_QUESTION_CARACTERES, validerQuestion } from '../lib/depotQuestions';
 
 interface Contexte {
   operation: string | null;
@@ -36,7 +37,13 @@ interface Contexte {
   }>;
   depots: Array<{ id: string; lot_id: string | null; kind: DepotKind; version: number; nom: string | null; taille: number | null; hors_delai: boolean; recu_le: string }>;
   /** Visite de site : le créneau de l'entreprise, à défaut les créneaux proposés (dates du chantier, sans fuseau). */
-  visite?: { creneau: string | null; propositions: string[]; lieu: string | null; consignes: string | null } | null;
+  visite?: { creneau: string | null; propositions: string[]; lieu: string | null; consignes: string | null; confirmee_le?: string | null } | null;
+  /** Questions de l'entreprise (avec la réponse du cabinet quand elle existe) et réponses rendues publiques. */
+  questions?: {
+    date_limite: string | null; ouvertes: boolean;
+    mes_questions: Array<{ id: string; objet: string | null; question: string; lot_id: string | null; envoyee_le: string; reponse: string | null; reponse_le: string | null }>;
+    reponses_publiques: Array<{ id: string; objet: string | null; question: string; reponse: string; reponse_le: string | null }>;
+  } | null;
   /** Tout le dossier en une archive : nombre de fichiers et taille connue ; absent s'il n'y a rien à rassembler. */
   dossier_zip?: { fichiers: number; taille: number | null } | null;
 }
@@ -103,7 +110,15 @@ function TelechargerDossier({ base, zip }: { base: string; zip: NonNullable<Cont
   );
 }
 
-function VisiteDeSite({ visite }: { visite: NonNullable<Contexte['visite']> }) {
+function VisiteDeSite({ visite, base, onChange }: { visite: NonNullable<Contexte['visite']>; base: string; onChange: () => void }) {
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const confirmer = async () => {
+    setEnvoi(true); setErreur(null);
+    try { await lireReponse(await appelPublic(`${base}/visite/confirmer`, { method: 'POST' })); onChange(); }
+    catch (e: any) { setErreur(e?.message || 'La confirmation a échoué.'); }
+    finally { setEnvoi(false); }
+  };
   return (
     <section aria-label="Visite de site" className="space-y-2">
       <h2 className="text-sm font-bold uppercase tracking-wider">Visite de site</h2>
@@ -118,7 +133,112 @@ function VisiteDeSite({ visite }: { visite: NonNullable<Contexte['visite']> }) {
           )}
         {visite.lieu && <p>Lieu : {visite.lieu}</p>}
         {visite.consignes && <p className="whitespace-pre-line">Consignes : {visite.consignes}</p>}
+        {visite.creneau && (visite.confirmee_le
+          ? <p className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-200"><IconCheck size={15} aria-hidden /> Présence confirmée le {formaterDateHeure(visite.confirmee_le)}.</p>
+          : (
+            <button type="button" onClick={confirmer} disabled={envoi} className={`${BOUTON} border mt-1`} style={{ borderColor: 'var(--tblr-border)' }}>
+              {envoi ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : <IconCheck size={16} aria-hidden />} Confirmer ma présence
+            </button>
+          ))}
+        {erreur && <p role="alert" className="text-red-700 dark:text-red-300">{erreur}</p>}
       </div>
+    </section>
+  );
+}
+
+/** Poser une question au cabinet, suivre les réponses, lire les réponses publiées pour tous. */
+function QuestionsEntreprise({ base, ctx, onEnvoyee }: { base: string; ctx: Contexte; onEnvoyee: () => void }) {
+  const q = ctx.questions;
+  const [objet, setObjet] = useState('');
+  const [texte, setTexte] = useState('');
+  const [lotId, setLotId] = useState('');
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [envoyee, setEnvoyee] = useState(false);
+  if (!q) return null;
+  const lotLibelle = (id: string | null) => { const l = ctx.lots.find(x => x.id === id); return l ? `Lot ${l.lot_number} ${l.lot_title}` : null; };
+
+  const poser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const controle = validerQuestion({ objet, question: texte });
+    if (!controle.ok) { setErreur(controle.raison); return; }
+    setEnvoi(true); setErreur(null); setEnvoyee(false);
+    try {
+      await lireReponse(await appelPublic(`${base}/questions`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objet, question: texte, lot_id: lotId || null }),
+      }));
+      setObjet(''); setTexte(''); setLotId(''); setEnvoyee(true); onEnvoyee();
+    } catch (err: any) {
+      setErreur(err?.message || 'La question n’a pas pu être envoyée.');
+    } finally { setEnvoi(false); }
+  };
+
+  return (
+    <section aria-label="Questions" className="space-y-3">
+      <h2 className="text-sm font-bold uppercase tracking-wider">Questions au maître d’œuvre</h2>
+      {q.ouvertes ? (
+        <form onSubmit={poser} className="space-y-2 rounded-lg p-3" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+          <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+            {q.date_limite ? <>Questions possibles jusqu’au <strong>{formaterDateHeure(q.date_limite)}</strong>. </> : null}
+            Une réponse d’intérêt général peut être communiquée à toutes les entreprises consultées, sans citer votre nom.
+          </p>
+          <input className={CHAMP} style={CHAMP_STYLE} value={objet} maxLength={MAX_OBJET_CARACTERES} placeholder="Objet (facultatif)" aria-label="Objet de la question" onChange={e => setObjet(e.target.value)} />
+          {ctx.lots.length > 1 && (
+            <select className={CHAMP} style={CHAMP_STYLE} value={lotId} aria-label="Lot concerné" onChange={e => setLotId(e.target.value)}>
+              <option value="">Question générale</option>
+              {ctx.lots.map(l => <option key={l.id} value={l.id}>Lot {l.lot_number} : {l.lot_title}</option>)}
+            </select>
+          )}
+          <textarea className={CHAMP} style={CHAMP_STYLE} rows={4} value={texte} maxLength={MAX_QUESTION_CARACTERES} placeholder="Votre question" aria-label="Votre question" onChange={e => setTexte(e.target.value)} />
+          <div className="flex items-center gap-3">
+            <button type="submit" disabled={envoi || !texte.trim()} className={`${BOUTON} bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900`}>
+              {envoi ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : null} Envoyer la question
+            </button>
+            <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{texte.length} / {MAX_QUESTION_CARACTERES}</span>
+          </div>
+          {envoyee && <p role="status" className="text-sm text-emerald-800 dark:text-emerald-200 flex items-center gap-1.5"><IconCheck size={15} aria-hidden /> Question envoyée au cabinet.</p>}
+          {erreur && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erreur}</p>}
+        </form>
+      ) : (
+        <p role="status" className="rounded-lg px-3 py-2 text-sm" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+          La date limite des questions est passée{q.date_limite ? <> ({formaterDateHeure(q.date_limite)})</> : null}. Pour une question urgente, contactez directement le cabinet.
+        </p>
+      )}
+
+      {q.mes_questions.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Vos questions</h3>
+          <ul className="rounded-lg divide-y" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+            {q.mes_questions.map(m => (
+              <li key={m.id} className="px-3 py-2.5 text-sm space-y-1">
+                <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  {formaterDate(m.envoyee_le)}{lotLibelle(m.lot_id) ? ` · ${lotLibelle(m.lot_id)}` : ''}{m.objet ? ` · ${m.objet}` : ''}
+                </p>
+                <p className="whitespace-pre-line break-words">{m.question}</p>
+                {m.reponse
+                  ? <p className="whitespace-pre-line break-words rounded-md px-2.5 py-1.5 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-100"><strong>Réponse{m.reponse_le ? ` du ${formaterDate(m.reponse_le)}` : ''} :</strong> {m.reponse}</p>
+                  : <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>En attente de réponse.</p>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {q.reponses_publiques.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Réponses communiquées à toutes les entreprises</h3>
+          <ul className="rounded-lg divide-y" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+            {q.reponses_publiques.map(r => (
+              <li key={r.id} className="px-3 py-2.5 text-sm space-y-1">
+                {r.objet && <p className="font-semibold">{r.objet}</p>}
+                <p className="whitespace-pre-line break-words">{r.question}</p>
+                <p className="whitespace-pre-line break-words rounded-md px-2.5 py-1.5 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-100"><strong>Réponse{r.reponse_le ? ` du ${formaterDate(r.reponse_le)}` : ''} :</strong> {r.reponse}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
@@ -200,7 +320,7 @@ export default function DepotOffres() {
           )}
         </section>
 
-        {ctx.visite && <VisiteDeSite visite={ctx.visite} />}
+        {ctx.visite && <VisiteDeSite visite={ctx.visite} base={base} onChange={() => void charger()} />}
 
         {ctx.dossier_zip && <TelechargerDossier base={base} zip={ctx.dossier_zip} />}
 
@@ -265,6 +385,8 @@ export default function DepotOffres() {
             <p className="text-xs">{recu.accuse_envoye ? 'Un accusé de réception vous a été envoyé par e-mail.' : 'Conservez cette page comme preuve de votre remise : aucun accusé n’a pu être envoyé par e-mail.'}</p>
           </section>
         )}
+
+        <QuestionsEntreprise base={base} ctx={ctx} onEnvoyee={() => void charger()} />
 
         <SaisieEnLigne base={base} ctx={ctx} onRecu={r => { setRecu(r); void charger(); }} />
         <DepotFichiers base={base} ctx={ctx} onRecu={r => { setRecu(r); void charger(); }} />
