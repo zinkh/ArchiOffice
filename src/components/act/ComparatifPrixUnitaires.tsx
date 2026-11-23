@@ -11,6 +11,7 @@ import {
   type EntrepriseComparee, type LigneComparee,
 } from '../../lib/comparatifPrix';
 import { LIBELLE_BASE, construireLotQuantites, syntheseEcarts, type BaseQuantites } from '../../lib/quantitesEntreprise';
+import { LIBELLE_CHOIX, reponseAppliquee, type ReponseQuantite } from '../../lib/quantitesConfirmation';
 import { cn } from '../../lib/utils';
 
 interface Props {
@@ -26,6 +27,13 @@ interface Props {
   onChangeBase?: (base: BaseQuantites) => void;
   /** Accepte (ou retire l'acceptation de) la quantité d'une entreprise sur un poste : elle ne modifie que son offre. */
   onAccepterQuantite?: (lotId: string, entrepriseId: string, ligneId: string, accepte: boolean) => void;
+  /** Réponses des entreprises à la demande « quantités à confirmer » (page de dépôt). */
+  reponses?: Array<ReponseQuantite & { entrepriseId: string }>;
+  /** Applique à l'offre de l'entreprise les réponses qu'elle a données sur ce lot : jamais automatique. */
+  onAppliquerReponses?: (lotId: string, entrepriseId: string) => void;
+  /** Entreprises à qui demander une confirmation, et ouverture de la fenêtre d'envoi. */
+  nbADemander?: number;
+  onDemanderConfirmation?: () => void;
 }
 
 const HACHURE = { background: 'repeating-linear-gradient(135deg, var(--tblr-surface-2) 0 6px, transparent 6px 12px)' } as const;
@@ -42,7 +50,7 @@ function SousPrix({ ligne, pu, montrer }: { ligne: LigneComparee; pu: number; mo
   );
 }
 
-export default function ComparatifPrixUnitaires({ lots, documentLots, offres, entreprisesDuLot, documentLabel, onExport, base = 'moe', onChangeBase, onAccepterQuantite }: Props) {
+export default function ComparatifPrixUnitaires({ lots, documentLots, offres, entreprisesDuLot, documentLabel, onExport, base = 'moe', onChangeBase, onAccepterQuantite, reponses = [], onAppliquerReponses, nbADemander = 0, onDemanderConfirmation }: Props) {
   const lotsComparables = useMemo(
     () => lots.filter(l => documentLots.some(d => d.projectLotId === l.id)),
     [lots, documentLots],
@@ -295,9 +303,17 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
               <p className="text-[0.6875rem] text-[var(--tblr-muted)]">
                 Toute différence est signalée, à la virgule près. Le {documentLabel} n'est jamais modifié : accepter une quantité ne change que l'offre de l'entreprise (elle compte alors dans la base « {LIBELLE_BASE.moe} »).
               </p>
+              {onDemanderConfirmation && nbADemander > 0 && (
+                <button type="button" onClick={onDemanderConfirmation}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-[var(--tblr-border)] hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                  Demander confirmation aux entreprises ({nbADemander})
+                </button>
+              )}
               {enPostes.filter(e => (data.ecarts[e.id]?.length ?? 0) > 0).map(e => {
                 const liste = data.ecarts[e.id];
                 const synth = syntheseEcarts(liste);
+                const reponsesE = new Map(reponses.filter(r => r.entrepriseId === e.id).map(r => [r.ligneId, r]));
+                const aAppliquer = liste.filter(ec => { const r = reponsesE.get(ec.ligneId); return r && !reponseAppliquee(r, ec.quantiteEntreprise, ec.quantiteMoe); }).length;
                 return (
                   <details key={e.id} className="rounded-lg border border-[var(--tblr-border)]" open={liste.length <= 6}>
                     <summary className="cursor-pointer px-3 py-2 text-sm font-semibold flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -309,6 +325,15 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                         {synth.sansPrix > 0 ? ` (${synth.sansPrix} sans prix)` : ''}
                       </span>
                     </summary>
+                    {reponsesE.size > 0 && (
+                      <div className="px-3 py-2 flex flex-wrap items-center gap-3 text-xs border-t border-[var(--tblr-border)]">
+                        <span>{reponsesE.size} réponse{reponsesE.size > 1 ? 's' : ''} de l'entreprise depuis sa page de dépôt{aAppliquer > 0 ? `, ${aAppliquer} à appliquer à son offre` : ', toutes appliquées'}.</span>
+                        {aAppliquer > 0 && lotId && onAppliquerReponses && (
+                          <button type="button" onClick={() => onAppliquerReponses(lotId, e.id)}
+                            className="font-semibold px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Appliquer les réponses</button>
+                        )}
+                      </div>
+                    )}
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs">
                         <thead className="bg-[var(--tblr-surface-2)] text-[0.6875rem] uppercase tracking-wider text-[var(--tblr-muted)]">
@@ -318,6 +343,7 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                             <th className="px-3 py-1.5 text-right">Qté entreprise</th>
                             <th className="px-3 py-1.5 text-right">Écart</th>
                             <th className="px-3 py-1.5 text-right">Effet</th>
+                            {reponsesE.size > 0 && <th className="px-3 py-1.5 text-left">Réponse</th>}
                             <th className="px-3 py-1.5 text-center">Accepter</th>
                           </tr>
                         </thead>
@@ -329,6 +355,10 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                               <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{ec.quantiteEntreprise.toLocaleString('fr-FR')} {ec.unite}</td>
                               <td className="px-3 py-1.5 text-right tabular-nums">{ec.ecart > 0 ? '+' : ''}{ec.ecart.toLocaleString('fr-FR')}</td>
                               <td className="px-3 py-1.5 text-right tabular-nums">{ec.impact != null ? `${ec.impact > 0 ? '+' : ''}${eur2(ec.impact)} €` : <span className="text-[var(--tblr-muted)]">{ec.horsBase ? 'option' : 'sans prix'}</span>}</td>
+                              {reponsesE.size > 0 && (() => {
+                                const r = reponsesE.get(ec.ligneId);
+                                return <td className="px-3 py-1.5">{r ? `${LIBELLE_CHOIX[r.choix]}${r.choix === 'autre' && typeof r.quantite === 'number' ? ` : ${r.quantite.toLocaleString('fr-FR')} ${ec.unite}` : ''}` : <span className="text-[var(--tblr-muted)]">Sans réponse</span>}</td>;
+                              })()}
                               <td className="px-3 py-1.5 text-center">
                                 <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={ec.acceptee} disabled={!onAccepterQuantite}
                                   aria-label={`Accepter la quantité de ${e.nom} pour ${ec.code} ${ec.titre}`}

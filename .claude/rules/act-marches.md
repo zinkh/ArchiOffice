@@ -395,7 +395,19 @@ restent lisibles par le cabinet.
   (`generateComparatifExcel`) dit la base dans le sous-titre, ajoute « Qté document » et « Qté entreprise » à la feuille d'une
   entreprise qui a changé des quantités (les autres feuilles sont inchangées) et une feuille « Quantités modifiées » (écart, P.U., effet
   HT, acceptée, du plus lourd au plus léger : `lignesEcartsQuantites`) ; sans écart, le classeur est celui d'avant.
-  **Pas encore fait** : un message « quantités à confirmer » à l'entreprise ; la saisie de la quantité depuis la page de dépôt.
+  **Quantités à confirmer** (`src/lib/quantitesConfirmation.ts`, testé ; migration `supabase/migrate_consultation_quantites_reponses.sql`) :
+  le bouton « Demander confirmation aux entreprises » du panneau des écarts ouvre `DceEnvoiGroupeDialog` en mode `quantites`
+  (une entreprise par ligne, seulement celles qui ont des écarts NON acceptés ; `ContexteEnvoiDce.quantites`, jeton `{{quantites}}`,
+  modèle `MODELE_*_QUANTITES`, aucune pièce jointe, un nouveau lien de dépôt personnel qui remplace le précédent). Chaque envoi réussi
+  pose `quantites_demandees_le` sur l'entreprise (`marquageEnvoi`) : c'est ce drapeau qui ouvre la section « Quantités à confirmer » de
+  `/depot/:token` (`quantites` du contexte, calculé côté serveur par `server/consultationDepot/quantitesAConfirmer.ts` depuis le DPGF,
+  le BPU/DQE et SES offres : jamais les prix ni les quantités des autres). L'entreprise répond poste par poste (reprend le dossier,
+  maintient la sienne, propose une autre) par `POST /api/public/depot/:token/quantites` : la réponse est écrite dans
+  `consultation_quantites_reponses` (une ligne courante par `(invite_id, ligne_id)`, la dernière remplace la précédente, postes
+  validés contre ceux réellement à confirmer, quantité positive ou nulle) et le cabinet est notifié. Elle ne change JAMAIS l'offre :
+  `GET /api/projects/:id/depot/quantites/reponses` alimente la colonne « Réponse » du panneau et le bouton « Appliquer les réponses »
+  (`appliquerReponsesQuantites` dans `ACTModule`, via `quantitesApresReponses` puis `enregistrerSaisie` : seule l'offre bouge, les
+  acceptations sont conservées). « Maintient » n'a rien à appliquer.
 - **Questions des entreprises** (`POST /api/public/depot/:token/questions`, `src/lib/depotQuestions.ts`, testé ;
   migration `supabase/migrate_consultation_depot_questions.sql`) : la question arrive dans la boîte de réception
   `consultation_depot_questions` (jamais publiée d'office, jamais dans la consultation par la route), 2000 caractères

@@ -6,6 +6,7 @@
 
 import type { BlocVisite } from './actVisites';
 import type { BlocAdditif } from './dceRevisions';
+import { blocQuantitesAConfirmer, type LotQuantitesAConfirmer } from './quantitesConfirmation';
 
 export interface LotMessage { lot_number: string; lot_title: string }
 export interface LigneIndiceMessage { designation: string; fichier: string; indice: string }
@@ -23,6 +24,8 @@ export interface DonneesMessageDce {
   additif?: BlocAdditif;
   /** Réponse publique à diffuser (question sans nom d'auteur). */
   questionReponse?: { objet?: string; question: string; reponse: string };
+  /** Quantités à confirmer par l'entreprise (postes dont sa quantité diffère du dossier). */
+  quantites?: LotQuantitesAConfirmer[];
   /** Lien de dépôt personnel de l'entreprise. */
   lienDepot?: string;
   /** Date limite de remise, déjà mise en forme. */
@@ -108,6 +111,23 @@ export const MODELE_CORPS_VISITE = [
   'Cordialement,',
 ].join('\n');
 
+/** Demande de confirmation des quantités : l'entreprise répond poste par poste depuis sa page de dépôt. */
+export const MODELE_SUJET_QUANTITES = 'Quantités à confirmer : {{operation}}';
+
+export const MODELE_CORPS_QUANTITES = [
+  'Bonjour,',
+  '',
+  'Dans le cadre de la consultation des entreprises pour l\'opération « {{operation}} », votre offre est chiffrée sur des quantités qui diffèrent de celles du dossier. Merci de nous confirmer, pour chaque poste, la quantité à retenir.',
+  '',
+  '{{quantites}}',
+  '',
+  '{{depot}}',
+  '',
+  '{{avertissements}}',
+  '',
+  'Cordialement,',
+].join('\n');
+
 /** Jetons reconnus, avec ce qu'ils deviennent : sert d'aide dans la fenêtre d'envoi groupé. */
 export const JETONS_MODELE: Array<{ jeton: string; aide: string }> = [
   { jeton: 'operation', aide: 'Nom de l\'opération' },
@@ -120,6 +140,7 @@ export const JETONS_MODELE: Array<{ jeton: string; aide: string }> = [
   { jeton: 'additif', aide: 'Additif au DCE : numéro, motif et pièces modifiées (modèle d\'additif)' },
   { jeton: 'numero_additif', aide: 'Numéro de l\'additif' },
   { jeton: 'accuse', aide: 'Lien « j\'ai bien reçu » propre à l\'entreprise (modèle d\'additif)' },
+  { jeton: 'quantites', aide: 'Postes dont la quantité est à confirmer, par lot (modèle de quantités)' },
   { jeton: 'question_reponse', aide: 'Question et réponse à diffuser (modèle de réponse)' },
   { jeton: 'depot', aide: 'Lien de dépôt personnel et date limite' },
   { jeton: 'avertissements', aide: 'Pièces non jointes ou lien non créé' },
@@ -162,7 +183,10 @@ export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
   const questionReponse = qr
     ? [...(qr.objet ? [`Objet : ${qr.objet}`] : []), `Question : ${qr.question}`, '', `Réponse : ${qr.reponse}`].join('\n')
     : '';
-  const depot = d.lienDepot
+  const depot = d.lienDepot && d.quantites
+    ? ['Vous pouvez répondre en ligne, poste par poste, depuis votre espace personnel :', d.lienDepot,
+       'Ce lien vous est personnel : merci de ne pas le transmettre.'].join('\n')
+    : d.lienDepot
     ? ['Vous pouvez remettre votre offre en ligne sur votre espace de dépôt personnel (saisie de l\'offre ou dépôt de vos documents) :', d.lienDepot,
        ...(d.dateLimite ? [`Date limite de remise : ${d.dateLimite}.`] : []),
        'Ce lien vous est personnel : merci de ne pas le transmettre.'].join('\n')
@@ -181,6 +205,7 @@ export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
     pieces_dossier: piecesDossier,
     visite,
     question_reponse: questionReponse,
+    quantites: d.quantites ? blocQuantitesAConfirmer(d.quantites) : '',
     additif,
     numero_additif: a ? String(a.numero) : '',
     accuse,

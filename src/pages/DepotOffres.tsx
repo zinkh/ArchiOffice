@@ -17,6 +17,7 @@ import {
 } from '../lib/consultationDepot';
 import { euros, formaterDate, formaterDateHeure } from '../lib/depotAffichage';
 import { libelleVisite } from '../lib/actVisites';
+import type { ChoixQuantite } from '../lib/quantitesConfirmation';
 import { MAX_OBJET_CARACTERES, MAX_QUESTION_CARACTERES, validerQuestion } from '../lib/depotQuestions';
 
 interface Contexte {
@@ -46,6 +47,14 @@ interface Contexte {
   } | null;
   /** Additifs au DCE qui concernent cette entreprise (du plus récent au plus ancien) et date de son accusé de réception. */
   additifs?: Array<{ id: string; numero: number; date: string; motif: string; pieces: Array<{ libelle: string; indice: string | null }>; accuse_le: string | null }>;
+  /** Quantités que le cabinet demande de confirmer (présent seulement après sa demande), avec la réponse déjà donnée. */
+  quantites?: {
+    demandees_le: string;
+    lots: Array<{ lot: string; lignes: Array<{
+      ligne_id: string; code: string; titre: string; unite: string; quantite_dossier: number; quantite_entreprise: number;
+      reponse: { choix: ChoixQuantite; quantite: number | null } | null;
+    }> }>;
+  } | null;
   /** Tout le dossier en une archive : nombre de fichiers et taille connue ; absent s'il n'y a rien à rassembler. */
   dossier_zip?: { fichiers: number; taille: number | null } | null;
 }
@@ -144,6 +153,92 @@ function VisiteDeSite({ visite, base, onChange }: { visite: NonNullable<Contexte
           ))}
         {erreur && <p role="alert" className="text-red-700 dark:text-red-300">{erreur}</p>}
       </div>
+    </section>
+  );
+}
+
+
+const nombre = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 6 });
+
+/**
+ * Quantités à confirmer : pour chaque poste dont la quantité de l'entreprise diffère du dossier, elle reprend celle du
+ * dossier, maintient la sienne ou en propose une autre. Sa réponse est transmise au cabinet et ne modifie jamais son offre.
+ */
+function QuantitesAConfirmer({ base, quantites, onEnvoyee }: { base: string; quantites: NonNullable<Contexte['quantites']>; onEnvoyee: () => void }) {
+  type Choix = { choix: ChoixQuantite | ''; quantite: string };
+  const lignes = quantites.lots.flatMap(l => l.lignes);
+  const [saisies, setSaisies] = useState<Record<string, Choix>>(() => Object.fromEntries(lignes.map(l => [
+    l.ligne_id, l.reponse ? { choix: l.reponse.choix, quantite: l.reponse.quantite != null ? String(l.reponse.quantite).replace('.', ',') : '' } : { choix: '', quantite: '' },
+  ])));
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+  const maj = (id: string, c: Partial<Choix>) => { setOk(false); setSaisies(prev => ({ ...prev, [id]: { ...prev[id], ...c } })); };
+  const reste = lignes.filter(l => !saisies[l.ligne_id]?.choix).length;
+
+  const envoyer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (reste > 0) { setErreur(`Indiquez votre choix pour les ${reste} poste${reste > 1 ? 's' : ''} restant${reste > 1 ? 's' : ''}.`); return; }
+    const reponses = lignes.map(l => {
+      const c = saisies[l.ligne_id];
+      return c.choix === 'autre' ? { ligne_id: l.ligne_id, choix: 'autre', quantite: Number(c.quantite.replace(',', '.')) } : { ligne_id: l.ligne_id, choix: c.choix };
+    });
+    if (reponses.some(r => r.choix === 'autre' && (!Number.isFinite(r.quantite) || (r.quantite as number) < 0))) {
+      setErreur('Indiquez une quantité positive pour les postes où vous proposez une autre quantité.'); return;
+    }
+    setEnvoi(true); setErreur(null);
+    try {
+      await lireReponse(await appelPublic(`${base}/quantites`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reponses }),
+      }));
+      setOk(true); onEnvoyee();
+    } catch (err: any) {
+      setErreur(err?.message || 'Votre réponse n’a pas pu être envoyée.');
+    } finally { setEnvoi(false); }
+  };
+
+  return (
+    <section aria-label="Quantités à confirmer" className="space-y-3">
+      <h2 className="text-sm font-bold uppercase tracking-wider">Quantités à confirmer</h2>
+      <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
+        Votre offre est chiffrée sur des quantités différentes de celles du dossier. Pour chaque poste, indiquez la quantité à retenir. Votre réponse est transmise au cabinet, qui l’examine : elle ne modifie pas votre offre d’elle-même.
+      </p>
+      <form onSubmit={envoyer} className="space-y-4">
+        {quantites.lots.map(l => (
+          <div key={l.lot} className="space-y-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{l.lot}</h3>
+            <ul className="space-y-2">
+              {l.lignes.map(x => {
+                const c = saisies[x.ligne_id];
+                const nom = `quantite-${x.ligne_id}`;
+                return (
+                  <li key={x.ligne_id} className="rounded-lg px-3 py-2.5 text-sm space-y-1.5" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+                    <p><strong>{x.code}</strong> {x.titre}</p>
+                    <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                      Votre offre : {nombre(x.quantite_entreprise)} {x.unite} · Dossier : {nombre(x.quantite_dossier)} {x.unite}
+                    </p>
+                    <fieldset className="space-y-1">
+                      <legend className="sr-only">Quantité retenue pour {x.code} {x.titre}</legend>
+                      <label className="flex items-center gap-2"><input type="radio" name={nom} checked={c.choix === 'moe'} onChange={() => maj(x.ligne_id, { choix: 'moe' })} /> Je reprends la quantité du dossier ({nombre(x.quantite_dossier)} {x.unite})</label>
+                      <label className="flex items-center gap-2"><input type="radio" name={nom} checked={c.choix === 'maintenue'} onChange={() => maj(x.ligne_id, { choix: 'maintenue' })} /> Je maintiens ma quantité ({nombre(x.quantite_entreprise)} {x.unite})</label>
+                      <label className="flex items-center gap-2 flex-wrap"><input type="radio" name={nom} checked={c.choix === 'autre'} onChange={() => maj(x.ligne_id, { choix: 'autre' })} /> Je propose une autre quantité
+                        <input type="text" inputMode="decimal" aria-label={`Autre quantité pour ${x.code}`} disabled={c.choix !== 'autre'} value={c.quantite}
+                          onChange={ev => maj(x.ligne_id, { quantite: ev.target.value })}
+                          className="w-28 rounded-md px-2 py-1 text-sm" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }} /> {x.unite}
+                      </label>
+                    </fieldset>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+        <button type="submit" disabled={envoi} className={`${BOUTON} border`} style={{ borderColor: 'var(--tblr-border)' }}>
+          {envoi ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : <IconCheck size={16} aria-hidden />} Envoyer ma réponse
+        </button>
+        {ok && <p role="status" className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-200 text-sm"><IconCheck size={15} aria-hidden /> Votre réponse a été transmise au cabinet.</p>}
+        {erreur && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erreur}</p>}
+      </form>
     </section>
   );
 }
@@ -404,6 +499,8 @@ export default function DepotOffres() {
             <p className="text-xs">{recu.accuse_envoye ? 'Un accusé de réception vous a été envoyé par e-mail.' : 'Conservez cette page comme preuve de votre remise : aucun accusé n’a pu être envoyé par e-mail.'}</p>
           </section>
         )}
+
+        {ctx.quantites && <QuantitesAConfirmer base={base} quantites={ctx.quantites} onEnvoyee={() => void charger()} />}
 
         <QuestionsEntreprise base={base} ctx={ctx} onEnvoyee={() => void charger()} />
 

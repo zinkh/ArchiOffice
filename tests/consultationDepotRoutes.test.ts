@@ -1096,3 +1096,77 @@ describe('additifs au DCE : accusé de réception et page de l\'entreprise', () 
     expect((await request(app).get(`/api/projects/${autre.projectId}/depot/additifs/accuses`).set(authHeader(c.token))).status).toBe(404);
   });
 });
+
+describe('portail public : quantités à confirmer', () => {
+  const dpgf = (c: Cabinet) => ({
+    version: 'v1',
+    lots: [{
+      id: 'dl1', numero: '02', titre: 'Charpente', projectLotId: c.lotA,
+      chapitres: [{ id: 'c1', numero: '1', titre: 'Fouilles', lignes: [
+        { id: 'a1', numero: '1.1', designation: 'Fouille en rigole', unite: 'm3', quantite: 10 },
+        { id: 'a2', numero: '1.2', designation: 'Tranchée', unite: 'ml', quantite: 5 },
+      ] }],
+    }],
+  });
+  const monter = (c: Cabinet, demande: boolean) => {
+    fakeSupabaseAdmin.seed('act_data', [{
+      id: uid('act'), tenant_id: c.tenantId, project_id: c.projectId,
+      consultation: { entreprises: [{ id: 'e1', nom: 'SARL Dupont', lots_ids: [c.lotA], ...(demande ? { quantites_demandees_le: '2026-11-23' } : {}) }] },
+    }]);
+    fakeSupabaseAdmin.seed('dpgfs', [{
+      id: uid('dpgf'), tenant_id: c.tenantId, project_id: c.projectId, data: dpgf(c),
+      offres: [{ id: 'o1', entrepriseId: 'e1', entrepriseNom: 'SARL Dupont', importedAt: '2026-11-01', prix: { a1: 100, a2: 50 }, anomalies: [], quantites: { a1: 12, a2: 5 } }],
+    }]);
+  };
+  const reponses = (c: Cabinet) => fakeSupabaseAdmin.getTable('consultation_quantites_reponses').filter(r => r.project_id === c.projectId);
+
+  it('ne propose rien tant que le cabinet n\'a pas envoyé sa demande', async () => {
+    const c = cabinet(); monter(c, false);
+    const { jeton } = await inviter(c);
+    expect((await request(app).get(`/api/public/depot/${jeton}`)).body.quantites).toBeNull();
+    const r = await request(app).post(`/api/public/depot/${jeton}/quantites`).send({ reponses: [{ ligne_id: 'a1', choix: 'moe' }] });
+    expect(r.status).toBe(409);
+    expect(reponses(c)).toHaveLength(0);
+  });
+
+  it('liste les seuls postes dont la quantité diffère du dossier', async () => {
+    const c = cabinet(); monter(c, true);
+    const { jeton } = await inviter(c);
+    const q = (await request(app).get(`/api/public/depot/${jeton}`)).body.quantites;
+    expect(q.lots).toHaveLength(1);
+    expect(q.lots[0].lignes).toMatchObject([{ ligne_id: 'a1', quantite_dossier: 10, quantite_entreprise: 12, reponse: null }]);
+  });
+
+  it('enregistre la réponse sans toucher à l\'offre, la remplace à la deuxième et la rend à l\'entreprise', async () => {
+    const c = cabinet(); monter(c, true);
+    const { jeton } = await inviter(c);
+    const post = (corps: any) => request(app).post(`/api/public/depot/${jeton}/quantites`).send(corps);
+    expect((await post({ reponses: [{ ligne_id: 'a1', choix: 'autre', quantite: 11 }] })).status).toBe(201);
+    expect((await post({ reponses: [{ ligne_id: 'a1', choix: 'moe' }] })).status).toBe(201);
+    expect(reponses(c)).toHaveLength(1);
+    expect(reponses(c)[0]).toMatchObject({ ligne_id: 'a1', choix: 'moe', quantite: null, entreprise_id: 'e1' });
+    expect(fakeSupabaseAdmin.getTable('dpgfs').find(d => d.project_id === c.projectId)!.offres[0].quantites).toEqual({ a1: 12, a2: 5 });
+    const ctx = (await request(app).get(`/api/public/depot/${jeton}`)).body;
+    expect(ctx.quantites.lots[0].lignes[0].reponse).toEqual({ choix: 'moe', quantite: null });
+  });
+
+  it('refuse un poste étranger, un choix inconnu et une quantité négative', async () => {
+    const c = cabinet(); monter(c, true);
+    const { jeton } = await inviter(c);
+    const post = (corps: any) => request(app).post(`/api/public/depot/${jeton}/quantites`).send(corps);
+    expect((await post({ reponses: [{ ligne_id: 'a2', choix: 'moe' }] })).status).toBe(400);
+    expect((await post({ reponses: [{ ligne_id: 'a1', choix: 'x' }] })).status).toBe(400);
+    expect((await post({ reponses: [{ ligne_id: 'a1', choix: 'autre', quantite: -3 }] })).status).toBe(400);
+    expect(reponses(c)).toHaveLength(0);
+  });
+
+  it('les réponses sont lisibles par le cabinet seulement, de son affaire', async () => {
+    const c = cabinet(); monter(c, true);
+    const { jeton } = await inviter(c);
+    await request(app).post(`/api/public/depot/${jeton}/quantites`).send({ reponses: [{ ligne_id: 'a1', choix: 'autre', quantite: 11.5 }] });
+    const liste = await request(app).get(`/api/projects/${c.projectId}/depot/quantites/reponses`).set(authHeader(c.token));
+    expect(liste.body).toMatchObject([{ entreprise_id: 'e1', ligne_id: 'a1', choix: 'autre', quantite: 11.5 }]);
+    const autre = cabinet();
+    expect((await request(app).get(`/api/projects/${autre.projectId}/depot/quantites/reponses`).set(authHeader(c.token))).status).toBe(404);
+  });
+});

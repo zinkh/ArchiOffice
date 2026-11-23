@@ -39,13 +39,15 @@ import AttributionDirecte from './act/AttributionDirecte';
 import { attribuerSansOffre, estAttributionDirecte, retirerAttribution } from '../lib/attributionDirecte';
 import type { ParametresMarche } from '../lib/actMarche';
 import { useConsultationDepot } from '../hooks/useConsultationDepot';
+import { marquageEnvoi } from '../lib/dceEnvoiGroupe';
 import { entreprisesDeLaReponse, marquerDiffusee, questionsAReprendre, reponseDiffusable, type QuestionRecue } from '../lib/depotQuestions';
 import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
 import DceAdditifPanel from './act/DceAdditifPanel';
 import { marquerRevisionNotifiee, type DceRevision } from '../lib/dceRevisions';
 import {
-  quantitesAcceptees, quantitesEntreprise, totalLotQuantites, type BaseQuantites,
+  ecartsQuantites, quantitesAcceptees, quantitesEntreprise, totalLotQuantites, type BaseQuantites,
 } from '../lib/quantitesEntreprise';
+import { quantitesApresReponses, type LotQuantitesAConfirmer, type ReponseQuantite } from '../lib/quantitesConfirmation';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
@@ -102,6 +104,8 @@ interface EntrepriseConsultee {
   /** Créneau cité dans le dernier message de convocation (ou d'envoi du DCE) et date de ce message. */
   visite_convoquee_creneau_id?: string;
   visite_convoquee_le?: string;
+  /** Date du message « quantités à confirmer » (ouvre la confirmation sur la page de dépôt de l'entreprise). */
+  quantites_demandees_le?: string;
   observation?: string;
 }
 
@@ -294,6 +298,10 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   const [loaded, setLoaded] = useState(false);
   /** Question dont la réponse publique est en cours de diffusion par mail. */
   const [diffusionPour, setDiffusionPour] = useState<string | null>(null);
+  /** Fenêtre « demander la confirmation des quantités » ouverte. */
+  const [confirmationQuantites, setConfirmationQuantites] = useState(false);
+  /** Réponses des entreprises aux quantités à confirmer (page de dépôt). */
+  const [reponsesQuantites, setReponsesQuantites] = useState<Array<ReponseQuantite & { entrepriseId: string }>>([]);
   const [saveError, setSaveError] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
   const editVersion = useRef(0);
@@ -838,6 +846,60 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     const prix: Record<string, PrixSaisi> = {};
     for (const id of idsLot) prix[id] = prixTous[id];
     await enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id), quantites, acceptees);
+  };
+
+
+  /** Par entreprise, ses postes dont la quantité diffère du dossier et n'est pas déjà acceptée (à lui faire confirmer). */
+  const quantitesAConfirmerParEntreprise = useMemo(() => {
+    const out: Record<string, LotQuantitesAConfirmer[]> = {};
+    for (const e of consultation.entreprises) {
+      const quantites = quantitesEntreprise(docs.offres, e.id);
+      if (Object.keys(quantites).length === 0) continue;
+      const acceptees = quantitesAcceptees(docs.offres, e.id);
+      const prix = prixEntreprise(docs.offres, e.id);
+      const groupes: LotQuantitesAConfirmer[] = [];
+      for (const lotDoc of lotsDocument) {
+        if (!lotDoc.projectLotId || !e.lots_ids.includes(lotDoc.projectLotId)) continue;
+        const lignes = ecartsQuantites(lotDoc, prix, quantites, acceptees).filter(x => !x.acceptee).map(x => ({
+          ligneId: x.ligneId, code: x.code, titre: x.titre, unite: x.unite, quantiteDossier: x.quantiteMoe, quantiteEntreprise: x.quantiteEntreprise,
+        }));
+        const lot = lots.find(l => l.id === lotDoc.projectLotId);
+        if (lignes.length) groupes.push({ lot: lot ? `Lot ${lot.lot_number} ${lot.lot_title}` : `Lot ${lotDoc.numero} ${lotDoc.titre}`, lignes });
+      }
+      if (groupes.length) out[e.id] = groupes;
+    }
+    return out;
+  }, [consultation.entreprises, docs.offres, lotsDocument, lots]);
+
+  const chargerReponsesQuantites = useCallback(() => {
+    if (!projectId) return;
+    apiFetch<Array<{ entreprise_id: string; ligne_id: string; choix: ReponseQuantite['choix']; quantite: number | null }>>(
+      `/api/projects/${encodeURIComponent(projectId)}/depot/quantites/reponses`,
+    ).then(r => setReponsesQuantites((r || []).map(x => ({
+      entrepriseId: x.entreprise_id, ligneId: x.ligne_id, choix: x.choix, ...(x.quantite != null ? { quantite: x.quantite } : {}),
+    })))).catch(() => {});
+  }, [projectId]);
+  useEffect(() => { chargerReponsesQuantites(); }, [chargerReponsesQuantites]);
+
+  /**
+   * Applique à l'offre d'une entreprise les réponses qu'elle a données sur la page de dépôt. Ne modifie QUE son
+   * offre (jamais le DPGF / DQE) et jamais d'elle-même : c'est l'architecte qui déclenche.
+   */
+  const appliquerReponsesQuantites = async (lotId: string, entrepriseId: string) => {
+    const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+    const entreprise = latest.current.consultation.entreprises.find(e => e.id === entrepriseId);
+    if (!lotDoc || !entreprise) return;
+    const dossier = new Map<string, number>();
+    for (const c of chapitresDuLot(lotDoc)) for (const l of c.lignes) dossier.set(l.id, l.quantite || 0);
+    const idsLot = [...dossier.keys()];
+    const reponses = reponsesQuantites.filter(r => r.entrepriseId === entrepriseId && dossier.has(r.ligneId));
+    const suite = quantitesApresReponses(quantitesEntreprise(docs.offres, entrepriseId), reponses, dossier);
+    const quantites: Record<string, number> = {};
+    for (const [id, q] of Object.entries(suite)) if (typeof q === 'number') quantites[id] = q;
+    const prixTous = prixEntreprise(docs.offres, entrepriseId);
+    const prix: Record<string, PrixSaisi> = {};
+    for (const id of idsLot) prix[id] = prixTous[id];
+    await enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id), quantites, quantitesAcceptees(docs.offres, entrepriseId));
   };
 
   /** Un bordereau importé passe en « poste par poste » les lots de l'entreprise qu'il chiffre. */
@@ -1703,7 +1765,31 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
             base={consultation.base_quantites ?? 'moe'}
             onChangeBase={changerBaseQuantites}
             onAccepterQuantite={(lotId, entrepriseId, ligneId, accepte) => { void accepterQuantite(lotId, entrepriseId, ligneId, accepte); }}
+            reponses={reponsesQuantites}
+            onAppliquerReponses={(lotId, entrepriseId) => { void appliquerReponsesQuantites(lotId, entrepriseId); }}
+            nbADemander={Object.keys(quantitesAConfirmerParEntreprise).length}
+            onDemanderConfirmation={() => setConfirmationQuantites(true)}
           />
+          {confirmationQuantites && (
+            <DceEnvoiGroupeDialog
+              titre="Demander aux entreprises de confirmer leurs quantités"
+              mode="quantites"
+              entreprises={consultation.entreprises.filter(e => !!quantitesAConfirmerParEntreprise[e.id])}
+              contexte={{
+                projectId, projectName, lots, pieces: [], documents: [], depotActif: !!depot.eligibilite?.eligible,
+                depotIndisponible: depot.eligibilite?.message, deadlineAt: depot.deadlineAt, quantites: quantitesAConfirmerParEntreprise,
+              }}
+              onEnvoye={entrepriseId => {
+                editVersion.current += 1;
+                setDirty(true);
+                setConsultation(prev => ({
+                  ...prev,
+                  entreprises: prev.entreprises.map(e => (e.id === entrepriseId ? { ...e, ...marquageEnvoi(e, 'quantites', todayIso(), false) } : e)),
+                }));
+              }}
+              onClose={() => setConfirmationQuantites(false)}
+            />
+          )}
 
           {/* ── Comparatif manuel : seulement pour les lots sans article de référence ── */}
           {lotsSansDocument.length > 0 && (
