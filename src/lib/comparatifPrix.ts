@@ -249,6 +249,9 @@ export interface MiseAJourOffre {
   id: string | null;
   prix: Record<string, number | null>;
   postesAjoutes: PosteAjoute[];
+  /** Présents seulement quand la saisie a géré les quantités de l'entreprise (celles qui diffèrent du document) et les articles acceptés. */
+  quantites?: Record<string, number>;
+  quantitesAcceptees?: string[];
 }
 
 /**
@@ -265,6 +268,12 @@ export function repartirSaisie(
   idsLot: string[],
   prixLot: Record<string, PrixSaisi>,
   ajoutsLot: PosteAjoute[],
+  /**
+   * Quantités voulues par l'entreprise sur ce lot (article -> quantité ; undefined : même quantité que le document)
+   * et articles dont l'architecte accepte la quantité. Omis : les quantités déjà enregistrées ne sont pas touchées.
+   */
+  quantitesLot?: Record<string, number | undefined>,
+  accepteesLot?: ReadonlySet<string>,
 ): MiseAJourOffre[] {
   const miennes = offres.filter(o => retenue(o, entrepriseId))
     .sort((a, b) => (b.importedAt || '').localeCompare(a.importedAt || ''));
@@ -291,6 +300,29 @@ export function repartirSaisie(
     }
   }
 
+  // Quantités de l'entreprise : posées dans l'offre qui porte déjà le prix de l'article (à défaut « Saisie
+  // manuelle »), retirées partout quand elles reprennent celle du document. L'acceptation suit la quantité.
+  if (quantitesLot) {
+    const qEtat = (o: OffreDocument | null) => {
+      const e = etat(o);
+      e.quantites ??= { ...(o?.quantites ?? {}) };
+      e.quantitesAcceptees ??= [...(o?.quantitesAcceptees ?? [])];
+      return e as MiseAJourOffre & { quantites: Record<string, number>; quantitesAcceptees: string[] };
+    };
+    for (const id of idsLot) {
+      const voulue = quantitesLot[id];
+      const porteuses = miennes.filter(o => Object.prototype.hasOwnProperty.call(o.prix ?? {}, id));
+      for (const o of miennes) {
+        if (Object.prototype.hasOwnProperty.call(o.quantites ?? {}, id)) delete qEtat(o).quantites[id];
+        if ((o.quantitesAcceptees ?? []).includes(id)) qEtat(o).quantitesAcceptees = qEtat(o).quantitesAcceptees.filter(x => x !== id);
+      }
+      if (typeof voulue !== 'number') continue;
+      const porteuse = qEtat(porteuses[0] ?? manuelle);
+      porteuse.quantites[id] = voulue;
+      if (accepteesLot?.has(id)) porteuse.quantitesAcceptees.push(id);
+    }
+  }
+
   const voulus = new Map(ajoutsLot.map(p => [p.id, p]));
   const places = new Set<string>();
   for (const o of miennes) {
@@ -306,9 +338,11 @@ export function repartirSaisie(
   const originaux = new Map(miennes.map(o => [o.id, o]));
   return [...etats.values()].filter(e => {
     const o = e.id ? originaux.get(e.id) : null;
-    if (!o) return Object.keys(e.prix).length > 0 || e.postesAjoutes.length > 0;
+    if (!o) return Object.keys(e.prix).length > 0 || e.postesAjoutes.length > 0 || Object.keys(e.quantites ?? {}).length > 0;
     return JSON.stringify(e.prix) !== JSON.stringify(o.prix ?? {})
-      || JSON.stringify(e.postesAjoutes) !== JSON.stringify(o.postesAjoutes ?? []);
+      || JSON.stringify(e.postesAjoutes) !== JSON.stringify(o.postesAjoutes ?? [])
+      || (e.quantites !== undefined && JSON.stringify(e.quantites) !== JSON.stringify(o.quantites ?? {}))
+      || (e.quantitesAcceptees !== undefined && JSON.stringify([...e.quantitesAcceptees].sort()) !== JSON.stringify([...(o.quantitesAcceptees ?? [])].sort()));
   });
 }
 

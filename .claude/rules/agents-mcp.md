@@ -111,7 +111,11 @@ postes_ajoutes?: [{numero?, designation, unite?, quantite?, prix_unitaire | pour
 règles que `repartirSaisie`, recopiées car ce paquet n'importe rien de `src/`), puis le lot passe en `mode_saisie:
 'postes'` avec un `montant_base` DÉDUIT des prix (jamais saisi). Ordre : la consultation d'abord (elle ajoute l'entreprise,
 le lot et la date de réception par `set_offre`), puis les prix ; un échec du second temps le dit et rejouer est sans risque.
-Garde-fous : un numéro inconnu ou ambigu refuse le LOT entier (rien n'est écrit, la liste des numéros possibles est
+Un poste peut porter `quantite` : la quantité PROPOSÉE par l'entreprise, gardée dans son offre (`OffreDocument.quantites`)
+seulement si elle diffère de celle du DPGF, à la virgule près (absence = même quantité, une quantité qui reprend celle du DPGF
+efface l'ancienne) ; la réponse rend `quantites_differentes_du_dpgf`. Le total du lot suit la base de la consultation
+(`base_quantites`) : quantités du DPGF sauf quantités ACCEPTÉES (`quantitesAcceptees`, qui se posent à l'écran, jamais par l'outil)
+ou, base « entreprise », celles de l'entreprise ; voir `.claude/rules/act-marches.md`. Garde-fous : un numéro inconnu ou ambigu refuse le LOT entier (rien n'est écrit, la liste des numéros possibles est
 rendue) ; `pour_memoire` n'est jamais 0 ; remplacer un total saisi à la main demande confirmation (ancien et nouveau
 total) ; une ligne de devis qui regroupe plusieurs postes se saisit en `postes_ajoutes`, JAMAIS répartie entre postes, et
 rejouer la même ligne (même numéro et désignation) la met à jour sans la doubler ; le DPGF n'est jamais modifié.

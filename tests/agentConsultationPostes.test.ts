@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { executeAgentAction } from '../packages/archioffice-agents/src/server/tools';
-import { articlesDuLot, cleNumero, trouverArticle, totalLotPostes, repartirSaisie } from '../packages/archioffice-agents/src/server/consultationPostes';
+import { articlesDuLot, cleNumero, trouverArticle, totalLotPostes, repartirSaisie, quantitesDifferent } from '../packages/archioffice-agents/src/server/consultationPostes';
 import { capabilitiesFromAgent } from '../packages/archioffice-agents/src/types';
 
 const NO_CAPS = { action_scopes: [] as string[], web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false, geo_enabled: false, docs_read_enabled: false };
@@ -26,10 +26,11 @@ const dpgf = () => ({
 });
 
 /** Serveur factice avec état : la consultation et les offres du DPGF se relisent après écriture. */
-const monde = (opts: { document_reference?: string; offres?: any[]; entreprises?: any[]; offresConsultation?: any[]; contacts?: any[] } = {}) => {
+const monde = (opts: { document_reference?: string; base_quantites?: string; offres?: any[]; entreprises?: any[]; offresConsultation?: any[]; contacts?: any[] } = {}) => {
   const etat = {
     consultation: {
       document_reference: opts.document_reference,
+      base_quantites: opts.base_quantites,
       entreprises: opts.entreprises ?? [{ id: 'e1', nom: 'Dupont SARL', contact_id: 'c1', lots_ids: ['l2'] }],
       offres: opts.offresConsultation ?? [],
     } as any,
@@ -201,5 +202,68 @@ describe('manage_consultation / set_postes', () => {
     expect(r.response.error).toBeDefined();
     expect(JSON.stringify(r.response.non_traites)).toContain("n'existe pas dans le DPGF");
     expect(m.ecritures).toHaveLength(0);
+  });
+});
+
+describe('set_postes : quantités proposées par l\'entreprise', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const devis = (quantite: number) => ({ lot: '02', entreprise: 'Dupont SARL', postes: [{ numero: '1.1', prix_unitaire: 100, quantite }, { numero: '3.1', prix_unitaire: 3550 }] });
+
+  it('garde la quantité de l\'entreprise dans son offre quand elle diffère du DPGF, sans toucher au total (base MOE)', async () => {
+    const m = monde();
+    const r = await run({ offres: [devis(12)] });
+    expect(r.response.success).toBe(true);
+    const [post] = m.postsDpgf().filter(e => e.method === 'POST');
+    expect(post.body.offre).toMatchObject({ quantites: { a1: 12 }, quantitesAcceptees: [] });
+    expect(m.etat.consultation.offres[0].montant_base).toBe(100 * 10 + 3550); // quantités du MOE
+    expect(r.response.saisies[0].quantites_differentes_du_dpgf).toEqual([{ poste: '1.1', quantite_dpgf: 10, quantite_entreprise: 12, acceptee: false }]);
+  });
+
+  it('base « entreprise » : le total suit les quantités remises', async () => {
+    const m = monde({ base_quantites: 'entreprise' });
+    await run({ offres: [devis(12)] });
+    expect(m.etat.consultation.offres[0].montant_base).toBe(100 * 12 + 3550);
+  });
+
+  it('ne garde rien quand la quantité reprend celle du DPGF, et n\'écrit aucune quantité sans en recevoir', async () => {
+    const m = monde();
+    await run({ offres: [devis(10)] });
+    const [post] = m.postsDpgf().filter(e => e.method === 'POST');
+    expect(post.body.offre.quantites ?? {}).toEqual({}); // rien à garder : absence = même quantité
+    const m2 = monde();
+    await run({ offres: [{ lot: '02', entreprise: 'Dupont SARL', postes: [{ numero: '1.1', prix_unitaire: 100 }] }] });
+    const [post2] = m2.postsDpgf().filter(e => e.method === 'POST');
+    expect(post2.body.offre).not.toHaveProperty('quantites');
+  });
+
+  it('refuse une quantité négative ou illisible : rien n\'est enregistré pour ce lot', async () => {
+    const m = monde();
+    const r = await run({ offres: [devis(-3)] });
+    expect(r.response.non_traites?.[0].erreurs?.[0].raison).toContain('quantite');
+    expect(m.postsDpgf()).toHaveLength(0);
+  });
+
+  it('rejouer avec la même quantité ne change rien, une quantité retirée efface l\'ancienne ; le DPGF reste intact', async () => {
+    const m = monde();
+    await run({ offres: [devis(12)] });
+    await run({ offres: [devis(12)] });
+    expect(m.etat.offres).toHaveLength(1);
+    expect(m.etat.offres[0].quantites).toEqual({ a1: 12 });
+    await run({ offres: [devis(10)] }); // reprend la quantité du DPGF : l'écart disparaît
+    expect(m.etat.offres[0].quantites).toEqual({});
+    expect(m.ecritures.every(e => /\/dpgf\/offres|\/act/.test(e.url))).toBe(true);
+  });
+
+  it('une quantité acceptée à l\'écran reste acceptée quand on rejoue les prix sans la changer', async () => {
+    const m = monde({ offres: [{ id: 'o1', entrepriseId: 'e1', fichierNom: 'Saisie manuelle', importedAt: '2026-10-01', prix: { a1: 100 }, postesAjoutes: [], quantites: { a1: 12 }, quantitesAcceptees: ['a1'] }] });
+    const r = await run({ offres: [devis(12)] });
+    expect(r.response.success).toBe(true);
+    expect(m.etat.offres[0].quantitesAcceptees ?? []).toEqual(['a1']);
+    expect(m.etat.consultation.offres[0].montant_base).toBe(100 * 12 + 3550); // acceptée : compte dans la base MOE
+  });
+
+  it('compare à la virgule près', () => {
+    expect(quantitesDifferent(10, 10.001)).toBe(true);
+    expect(quantitesDifferent(0.1 + 0.2, 0.3)).toBe(false);
   });
 });

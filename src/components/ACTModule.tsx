@@ -43,6 +43,9 @@ import { entreprisesDeLaReponse, marquerDiffusee, questionsAReprendre, reponseDi
 import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
 import DceAdditifPanel from './act/DceAdditifPanel';
 import { marquerRevisionNotifiee, type DceRevision } from '../lib/dceRevisions';
+import {
+  quantitesAcceptees, quantitesEntreprise, totalLotQuantites, type BaseQuantites,
+} from '../lib/quantitesEntreprise';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
@@ -51,8 +54,8 @@ import ComparatifPrixUnitaires from './act/ComparatifPrixUnitaires';
 import { OffreImportDialog } from './pro/OffreImportDialog';
 import { useOffresDocument, type CibleDocument } from '../hooks/useOffresDocument';
 import {
-  aDesPrix, ajoutsEntreprise, chapitresDuLot, comparatifDepuisOffres, modeEffectif, prixEntreprise, totalLotPostes,
-  type EntrepriseComparee, type ModeSaisie,
+  aDesPrix, ajoutsEntreprise, chapitresDuLot, comparatifDepuisOffres, modeEffectif, prixEntreprise,
+  type EntrepriseComparee, type ModeSaisie, type PrixSaisi,
 } from '../lib/comparatifPrix';
 import type { Lot as LotDocument, OffreDocument } from '../types/dpgf';
 import { lignesIndices, type DocumentDce } from '../lib/dceIndices';
@@ -182,6 +185,8 @@ interface Consultation extends DonneesNegociation {
   dce_documents: DCEDocument[];
   /** Additifs au DCE : pièces modifiées, motif, entreprises prévenues (jsonb). */
   dce_revisions?: DceRevision[];
+  /** Base du total et du classement des offres « poste par poste » : quantités du MOE (sauf acceptées) ou de chaque entreprise. */
+  base_quantites?: BaseQuantites;
   entreprises: EntrepriseConsultee[];
   creneaux_visite?: import('../lib/actVisites').CreneauVisite[];
   /** Lieu et consignes de la visite de site, cités dans le mail d'envoi du DCE. */
@@ -772,7 +777,18 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   const totalPostesLot = (lotId: string, entrepriseId: string, offres: OffreDocument[]): number => {
     const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
     if (!lotDoc) return 0;
-    return totalLotPostes(lotDoc, prixEntreprise(offres, entrepriseId), ajoutsEntreprise(offres, entrepriseId, lotDoc.id)) ?? 0;
+    // Le total suit la base de quantités choisie : c'est lui qui nourrit le classement de l'analyse.
+    return totalLotQuantites(
+      lotDoc, prixEntreprise(offres, entrepriseId), ajoutsEntreprise(offres, entrepriseId, lotDoc.id),
+      latest.current.consultation.base_quantites ?? 'moe', quantitesEntreprise(offres, entrepriseId), quantitesAcceptees(offres, entrepriseId),
+    ) ?? 0;
+  };
+
+  /** Change la base de comparaison : les offres « poste par poste » sont recalculées par l'effet de lecture ci-dessous. */
+  const changerBaseQuantites = (base_quantites: BaseQuantites) => {
+    const c = latest.current.consultation;
+    if ((c.base_quantites ?? 'moe') === base_quantites) return;
+    update({ ...c, base_quantites });
   };
 
   /** Modifie (ou crée) l'offre d'un lot x entreprise sur la consultation la plus récente. */
@@ -797,12 +813,31 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
   const enregistrerSaisie = async (
     lotId: string, entreprise: EntrepriseConsultee, lotDoc: LotDocument,
     prix: Parameters<typeof docs.ecrireSaisie>[0]['prix'], ajouts: Parameters<typeof docs.ecrireSaisie>[0]['postesAjoutes'],
+    quantites?: Parameters<typeof docs.ecrireSaisie>[0]['quantites'], acceptees?: Parameters<typeof docs.ecrireSaisie>[0]['acceptees'],
   ) => {
     const idsLot = chapitresDuLot(lotDoc).flatMap(c => c.lignes.map(l => l.id));
     const suivantes = await docs.ecrireSaisie({
-      entreprise: { id: entreprise.id, nom: entreprise.nom }, lotId: lotDoc.id, idsLot, prix, postesAjoutes: ajouts,
+      entreprise: { id: entreprise.id, nom: entreprise.nom }, lotId: lotDoc.id, idsLot, prix, postesAjoutes: ajouts, quantites, acceptees,
     });
     patchOffre(lotId, entreprise.id, { mode_saisie: 'postes', montant_base: totalPostesLot(lotId, entreprise.id, suivantes) });
+  };
+
+  /**
+   * Accepte (ou retire l'acceptation de) la quantité qu'une entreprise a remise sur un poste. Ne modifie QUE son
+   * offre : le DPGF / DQE reste celui du maître d'œuvre. Les prix et postes ajoutés de l'entreprise sont réécrits tels quels.
+   */
+  const accepterQuantite = async (lotId: string, entrepriseId: string, ligneId: string, accepte: boolean) => {
+    const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+    const entreprise = latest.current.consultation.entreprises.find(e => e.id === entrepriseId);
+    if (!lotDoc || !entreprise) return;
+    const idsLot = chapitresDuLot(lotDoc).flatMap(c => c.lignes.map(l => l.id));
+    const quantites = quantitesEntreprise(docs.offres, entrepriseId);
+    const acceptees = new Set(quantitesAcceptees(docs.offres, entrepriseId));
+    if (accepte) acceptees.add(ligneId); else acceptees.delete(ligneId);
+    const prixTous = prixEntreprise(docs.offres, entrepriseId);
+    const prix: Record<string, PrixSaisi> = {};
+    for (const id of idsLot) prix[id] = prixTous[id];
+    await enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id), quantites, acceptees);
   };
 
   /** Un bordereau importé passe en « poste par poste » les lots de l'entreprise qu'il chiffre. */
@@ -848,7 +883,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     }
     if (change) update({ ...c, offres });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, docs.chargement, docs.document, docs.offres]);
+  }, [loaded, docs.chargement, docs.document, docs.offres, consultation.base_quantites]);
 
   // ── Phase helpers ─────────────────────────────────────────────────────────
 
@@ -1665,6 +1700,9 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
             entreprisesDuLot={entreprisesDuLot}
             documentLabel={libelleDocument}
             onExport={() => generateComparatifExcel(lots, consultationCourante, projectName, settings ?? {})}
+            base={consultation.base_quantites ?? 'moe'}
+            onChangeBase={changerBaseQuantites}
+            onAccepterQuantite={(lotId, entrepriseId, ligneId, accepte) => { void accepterQuantite(lotId, entrepriseId, ligneId, accepte); }}
           />
 
           {/* ── Comparatif manuel : seulement pour les lots sans article de référence ── */}
@@ -2135,7 +2173,9 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
             entreprise={{ id: entreprise.id, nom: entreprise.nom }}
             prixInitial={prixEntreprise(docs.offres, entreprise.id)}
             ajoutsInitiaux={ajoutsEntreprise(docs.offres, entreprise.id, lotDoc.id)}
-            onSave={(prix, ajouts) => enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajouts)}
+            quantitesInitiales={quantitesEntreprise(docs.offres, entreprise.id)}
+            accepteesInitiales={quantitesAcceptees(docs.offres, entreprise.id)}
+            onSave={(prix, ajouts, quantites, acceptees) => enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajouts, quantites, acceptees)}
             onClose={() => setSaisieOuverte(null)}
           />
         ) : null;
