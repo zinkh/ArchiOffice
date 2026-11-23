@@ -177,9 +177,13 @@ function SharedDetail({ projectId }: { projectId: string }) {
         </section>
       )}
 
-      {(['cctp', 'dpgf'] as const).filter(mode => view.grants.some(g => g.kind === mode)).map(mode => (
-        <SharedDocument key={mode} projectId={projectId} mode={mode} grants={view.grants} archived={view.archived} />
-      ))}
+      {/* Un seul écran pour le CCTP et le DPGF : les retours du confrère partent ensemble, quel que soit l'onglet. */}
+      {(['cctp', 'dpgf'] as const).some(mode => view.grants.some(g => g.kind === mode)) && (
+        <SharedDocument
+          projectId={projectId} grants={view.grants} archived={view.archived}
+          modes={(['cctp', 'dpgf'] as const).filter(mode => view.grants.some(g => g.kind === mode))}
+        />
+      )}
 
       {docs && (
         <section className="rounded-lg p-4" style={cardStyle}>
