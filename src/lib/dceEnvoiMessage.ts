@@ -1,0 +1,114 @@
+// ── Message d'envoi du DCE : un modèle, des blocs propres à chaque entreprise ──
+// Le même texte sert à l'envoi d'une seule entreprise et à l'envoi groupé : le modèle
+// porte des jetons {{...}} remplacés entreprise par entreprise (lots, pièces, lien de
+// dépôt). Aucun jeton n'est inventé : un bloc sans donnée devient vide et les lignes
+// vides en trop sont resserrées.
+
+export interface LotMessage { lot_number: string; lot_title: string }
+export interface LigneIndiceMessage { designation: string; fichier: string; indice: string }
+
+export interface DonneesMessageDce {
+  operation: string;
+  entreprise: string;
+  lots: LotMessage[];
+  /** Libellés des pièces du marché (RC, CCAP, acte d'engagement) générées pour ce message. */
+  piecesMarche: string[];
+  lignesIndices: LigneIndiceMessage[];
+  /** Lien de dépôt personnel de l'entreprise. */
+  lienDepot?: string;
+  /** Date limite de remise, déjà mise en forme. */
+  dateLimite?: string;
+  /** Raison pour laquelle aucun lien de dépôt n'est proposé (espace indisponible). */
+  depotNonPropose?: string;
+  /** Le lien devait être créé mais la création a échoué. */
+  echecLienDepot?: boolean;
+  /** Fichiers qui n'ont pas pu être joints. */
+  echecsPieces: string[];
+}
+
+export const MODELE_SUJET = 'Consultation des entreprises — {{operation}}{{lots_courts}}';
+
+export const MODELE_CORPS = [
+  'Bonjour,',
+  '',
+  'Dans le cadre de la consultation des entreprises pour l\'opération « {{operation}} », nous vous transmettons le dossier de consultation (DCE){{lots}}',
+  '',
+  '{{pieces_marche}}',
+  '',
+  '{{pieces_dossier}}',
+  '',
+  '{{depot}}',
+  '',
+  '{{avertissements}}',
+  '',
+  'Nous restons à votre disposition pour toute précision.',
+  '',
+  'Cordialement,',
+].join('\n');
+
+/** Jetons reconnus, avec ce qu'ils deviennent : sert d'aide dans la fenêtre d'envoi groupé. */
+export const JETONS_MODELE: Array<{ jeton: string; aide: string }> = [
+  { jeton: 'operation', aide: 'Nom de l\'opération' },
+  { jeton: 'entreprise', aide: 'Nom de l\'entreprise destinataire' },
+  { jeton: 'lots', aide: 'Lots de l\'entreprise (liste)' },
+  { jeton: 'lots_courts', aide: 'Lots de l\'entreprise, en une ligne (Lot 01, Lot 02)' },
+  { jeton: 'pieces_marche', aide: 'Pièces du marché jointes (RC, CCAP, acte d\'engagement)' },
+  { jeton: 'pieces_dossier', aide: 'Pièces du dossier et indices de révision' },
+  { jeton: 'depot', aide: 'Lien de dépôt personnel et date limite' },
+  { jeton: 'avertissements', aide: 'Pièces non jointes ou lien non créé' },
+];
+
+const JETON = /\{\{\s*([a-z_]+)\s*\}\}/g;
+
+const libelleLot = (l: LotMessage) => `Lot ${l.lot_number} — ${l.lot_title}`;
+
+/** Les valeurs de chaque jeton pour une entreprise. */
+export function blocsMessageDce(d: DonneesMessageDce): Record<string, string> {
+  const lotsCourts = d.lots.map(l => `Lot ${l.lot_number}`).join(', ');
+  const piecesMarche = d.piecesMarche.length
+    ? ['Pièces du marché jointes :', ...d.piecesMarche.map(l => `- ${l}`),
+       ...(d.piecesMarche.some(l => /acte/i.test(l)) ? ['L\'acte d\'engagement est à compléter, signer et remettre avec votre offre.'] : [])].join('\n')
+    : '';
+  const piecesDossier = d.lignesIndices.length
+    ? ['Pièces du dossier (indice de révision) :',
+       ...d.lignesIndices.map(l => `- ${l.designation}${l.fichier ? ` : ${l.fichier}` : ''}${l.indice ? ` (indice ${l.indice})` : ''}`),
+       '', 'Le tableau des indices est joint à ce message.'].join('\n')
+    : '';
+  const depot = d.lienDepot
+    ? ['Vous pouvez remettre votre offre en ligne sur votre espace de dépôt personnel (saisie de l\'offre ou dépôt de vos documents) :', d.lienDepot,
+       ...(d.dateLimite ? [`Date limite de remise : ${d.dateLimite}.`] : []),
+       'Ce lien vous est personnel : merci de ne pas le transmettre.'].join('\n')
+    : '';
+  const avertissements = [
+    ...(!d.lienDepot && d.depotNonPropose ? [`[Lien de dépôt non proposé : ${d.depotNonPropose}]`] : []),
+    ...(d.echecLienDepot ? ['[Lien de dépôt non créé : à créer depuis la ligne de l\'entreprise (icône lien)]'] : []),
+    ...(d.echecsPieces.length ? [`[À joindre manuellement, téléchargement impossible : ${d.echecsPieces.join(', ')}]`] : []),
+  ].join('\n\n');
+  return {
+    operation: d.operation,
+    entreprise: d.entreprise,
+    lots: d.lots.length ? ` relatif à :\n${d.lots.map(l => `- ${libelleLot(l)}`).join('\n')}` : '.',
+    lots_courts: lotsCourts ? ` — ${lotsCourts}` : '',
+    pieces_marche: piecesMarche,
+    pieces_dossier: piecesDossier,
+    depot,
+    avertissements,
+  };
+}
+
+/** Remplace les jetons connus ; un jeton inconnu reste en clair, pour que la faute se voie. */
+export function remplirModele(modele: string, blocs: Record<string, string>): string {
+  return modele
+    .replace(JETON, (tout, nom: string) => (nom in blocs ? blocs[nom] : tout))
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\n+/, '')
+    .replace(/\n+$/, '');
+}
+
+/** Jetons du modèle qui ne sont pas reconnus (faute de frappe). */
+export function jetonsInconnus(modele: string, connus: string[] = JETONS_MODELE.map(j => j.jeton)): string[] {
+  const trouves = new Set<string>();
+  for (const m of modele.matchAll(JETON)) if (!connus.includes(m[1])) trouves.add(m[0]);
+  return [...trouves];
+}

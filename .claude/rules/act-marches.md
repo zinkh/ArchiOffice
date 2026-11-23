@@ -59,8 +59,23 @@ migration).
   `initial`) prérempli avec les lots de l'entreprise et les pièces du DCE qui
   la concernent ; à l'envoi, `dce_transmis_le` est posée. Les pièces du DCE
   ne sont que des intitulés : les fichiers se joignent dans la fenêtre de
-  message. Pas d'envoi groupé volontairement (chaque entreprise ne doit voir
-  que son propre message).
+  message. Chaque entreprise ne doit voir que son propre message. **L'envoi groupé existe,
+  sans changer ce principe** : un message UNIQUE (objet et corps communs, jetons `{{lots}}`,
+  `{{depot}}`... remplacés entreprise par entreprise) mais un mail INDIVIDUEL par entreprise, jamais de
+  destinataires visibles entre eux. Deux entrées : « Envoyer le DCE… » dans les actions groupées
+  (sélection) et le bandeau « DCE à envoyer » (`entreprisesDceAEnvoyer` : case cochée, DCE non parti, ni
+  « ne répond pas » ni offre reçue). `act/DceEnvoiGroupeDialog.tsx` : aperçu par entreprise,
+  confirmation avant départ, envoi en série, rapport par entreprise, « Relancer les échecs ». Seuls les
+  envois RÉUSSIS posent `dce_transmis_le` (au fil de l'eau, `marquerDceEnvoye` repart de la dernière
+  liste). Écartées avec motif : sans adresse, sans lot, « ne répond pas » (`planEnvoiGroupe`) ; décochée
+  d'office une entreprise qui a déjà reçu le DCE (un nouvel envoi révoque son lien de dépôt). Logique
+  pure testée : `src/lib/dceEnvoiMessage.ts` (modèle et jetons, le même que le mail d'une seule
+  entreprise : `DceMailDialog` l'utilise aussi), `dceEnvoiGroupe.ts` (plan) ; préparation des fichiers et
+  du lien de dépôt dans `dceEnvoiPreparation.ts` ; envoi sans fenêtre dans `mailEnvoiDirect.ts` (mêmes
+  routes que `MailComposeModal` pour un nouveau message : si l'une change, l'autre aussi). Les pièces du
+  marché sont générées une fois pour tout l'envoi. Plafond de 25 Mo par message : une entreprise trop
+  lourde échoue seule, avec le motif. Pas de bloc « dossier partagé » dans le message groupé : ces
+  pièces restent sur la page de dépôt.
 - **Ajout d'une entreprise** (`EntrepriseAddForm.tsx`, bouton « Ajouter » de l'en-tête) : un mini
   formulaire au-dessus du tableau (entreprise choisie dans les contacts ou créée sur place, email,
   corps d'état, lots, dates, DCE à envoyer) remplace l'ancienne ligne vide ajoutée tout en bas. À
