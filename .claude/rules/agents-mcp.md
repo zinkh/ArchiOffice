@@ -95,7 +95,37 @@ calcule JAMAIS retenue, révision, TVA ni net à payer, et refuse une situation 
 `manage_project_notices` (list/read/write/generate, remplacer un texte rédigé passe par
 confirmation, les notices réglementaires restent des brouillons), `manage_consultation` (entreprises
 consultées de l'ACT : écrit la consultation ENTIÈRE en ne changeant que `entreprises`, jamais d'envoi
-de DCE), `create_invoice_from_note` (scope `invoices`, montants confirmés avant génération) et
+de DCE ; `list_offres`, `set_offre` et `remove_offre` saisissent les prix REÇUS par lot et par entreprise dans
+`consultation.offres[]`, jamais dans le DPGF qui reste l'estimation : `set_offre` n'écrit qu'un total HT
+(`mode_saisie: 'total'`), saisir une offre AJOUTE d'office l'entreprise aux entreprises consultées (fiche contact
+rapprochée comme pour `add`, `envoyer_dce: false` : elle a déjà le dossier) et le lot à ses lots, sans rien
+ajouter quand la saisie est refusée ; `remove_offre` ne retire jamais l'entreprise. Un montant saisi pose aussi
+`offre_recue_le` (statut « Offre reçue ») à la date du jour quand l'entreprise n'en a pas, ou à la date donnée
+(`offre_recue_le` de la ligne) ; une date déjà enregistrée n'est jamais écrasée d'office, et une entreprise
+marquée « ne répond pas » garde ce statut (avertissement dans la réponse). Un devis qui ne couvre qu'une partie
+du lot (spécialiste en chape) se marque `partielle: true` avec `perimetre` : voir `.claude/rules/act-marches.md`.
+`set_postes` (`consultationPostes.ts`, testé dans `tests/agentConsultationPostes.test.ts`) saisit le DÉTAIL d'un devis dans
+le DPGF de référence : `offres: [{lot, entreprise, postes: [{numero | id, prix_unitaire | pour_memoire: true}],
+postes_ajoutes?: [{numero?, designation, unite?, quantite?, prix_unitaire | pour_memoire}]}]`. Il écrit ce que l'écran écrit
+(`dpgfs.offres`, `OffreDocument.prix`, offre « Saisie manuelle » créée au besoin, prix corrigé là où il est déjà ; mêmes
+règles que `repartirSaisie`, recopiées car ce paquet n'importe rien de `src/`), puis le lot passe en `mode_saisie:
+'postes'` avec un `montant_base` DÉDUIT des prix (jamais saisi). Ordre : la consultation d'abord (elle ajoute l'entreprise,
+le lot et la date de réception par `set_offre`), puis les prix ; un échec du second temps le dit et rejouer est sans risque.
+Un poste peut porter `quantite` : la quantité PROPOSÉE par l'entreprise, gardée dans son offre (`OffreDocument.quantites`)
+seulement si elle diffère de celle du DPGF, à la virgule près (absence = même quantité, une quantité qui reprend celle du DPGF
+efface l'ancienne) ; la réponse rend `quantites_differentes_du_dpgf`. Le total du lot suit la base de la consultation
+(`base_quantites`) : quantités du DPGF sauf quantités ACCEPTÉES (`quantitesAcceptees`, qui se posent à l'écran, jamais par l'outil)
+ou, base « entreprise », celles de l'entreprise ; voir `.claude/rules/act-marches.md`. Garde-fous : un numéro inconnu ou ambigu refuse le LOT entier (rien n'est écrit, la liste des numéros possibles est
+rendue) ; `pour_memoire` n'est jamais 0 ; remplacer un total saisi à la main demande confirmation (ancien et nouveau
+total) ; une ligne de devis qui regroupe plusieurs postes se saisit en `postes_ajoutes`, JAMAIS répartie entre postes, et
+rejouer la même ligne (même numéro et désignation) la met à jour sans la doubler ; le DPGF n'est jamais modifié.
+Limites : DPGF seulement (une consultation sur le bordereau est refusée) ; un total d'article « option » n'entre pas dans
+le total du lot, comme à l'écran. Un lot saisi poste par poste n'est
+écrasé qu'avec confirmation, `remove_offre` passe par la confirmation en deux temps ; les prix par article et
+les lignes de négociation restent à l'écran ; ne pose pas `offre_recue_le`, qui se règle par `update`. Limite :
+sans mode enregistré, une offre dont les prix sont arrivés par le portail de dépôt ou un ancien import PRO est
+lue comme « poste par poste » par l'écran, que l'outil ne détecte pas : il la remplace alors sans demander),
+`create_invoice_from_note` (scope `invoices`, montants confirmés avant génération) et
 `manage_calendar` (scope `meetings` : agenda agrégé réunions + jalons + tâches + Google, création,
 déplacement et suppression d'événements Google). Les événements Google passent par
 `POST/PATCH/DELETE /api/google-calendar/events` (`server/googleCalendarEvent.ts`, pur et testé :

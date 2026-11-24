@@ -134,6 +134,16 @@ describe('repères d\'un lot', () => {
     expect(reperesLot(offres, negs, 'L1', 'ouverture').moinsDisantId).toBe('B');
   });
 
+  it('ne compare jamais une offre partielle aux offres complètes', () => {
+    const avecChape = [...offres, offre('E', 3000, { partielle: true })];
+    const r = reperesLot(avecChape, [], 'L1', 'ouverture');
+    expect(r.moinsDisantId).toBe('B');
+    expect(r.base).toBe(8000);
+    expect(r.moyenneBase).toBe(9000);
+    expect(r.nbOffres).toBe(2);
+    expect(reperesLot([offre('E', 3000, { partielle: true })], [], 'L1', 'ouverture').moinsDisantId).toBeNull();
+  });
+
   it('sans offre exploitable, rien', () => {
     const r = reperesLot([], [], 'L1', 'ouverture');
     expect(r).toEqual({ moinsDisantId: null, base: null, total: null, moyenneBase: null, nbOffres: 0 });

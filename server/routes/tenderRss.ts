@@ -2,6 +2,7 @@
 // d'offres ---" section. pollAllTenderRssSources is imported directly
 // (already its own module, server/tenderRssPoller.ts) rather than passed
 // as a dependency, following the sanitizeFilename/fetchWithTimeout pattern.
+import { usableSiteAddress } from '../../src/lib/tenderSiteAddress';
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { pollAllTenderRssSources, matchesKeywords } from '../tenderRssPoller';
@@ -239,6 +240,8 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
         submission_deadline: match.date_limite_reponse || '', status: 'Draft', value: 0,
         description: match.description || null, type: match.type_marche || null,
         construction_cost: match.montant_travaux || null, ville_execution: match.ville_execution || null,
+        // Le lieu d'exécution de l'annonce sert d'adresse du site quand c'en est une (pas un code NUTS ni un département).
+        adresse_terrain: usableSiteAddress(match.ville_execution),
         notes: match.link || '', archived: false
       });
       if (te) throw te;

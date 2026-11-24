@@ -16,6 +16,7 @@
 // comme alias : c'est le nom que le code et les tests existants connaissent.
 import type { Lot, Ligne, OffreDocument } from '../types/dpgf';
 import { montantPoste } from './postesAjoutes';
+import { quantiteRetenue, quantitesAcceptees, quantitesDifferent, quantitesEntreprise, type BaseQuantites } from './quantitesOffre';
 
 /** Forme des articles attendue par ACTModule (voir son ComparatifArticle). */
 export interface ComparatifArticle {
@@ -34,6 +35,11 @@ export interface ComparatifArticle {
    * signaler dans l'analyse des offres.
    */
   ajoute_par?: string;
+  /**
+   * Entreprises qui ont remis une quantité différente de celle du document (quantité, acceptée ou non, P.U.).
+   * Les montants de `prix` suivent la base de quantités demandée (voir `versComparatif`).
+   */
+  ecartsQuantites?: Record<string, { quantite: number; acceptee: boolean; prixUnitaire: number | null }>;
 }
 
 export interface ComparatifLot {
@@ -49,16 +55,20 @@ export interface VersementResultat {
 
 /**
  * Projette un document (DPGF ou BPU) et les offres retenues vers la structure
- * du comparatif.
+ * du comparatif. Les montants par article suivent la base de quantités : `moe` (défaut, les quantités du
+ * document, sauf celles que l'architecte a acceptées) ou `entreprise` (les quantités de chaque entreprise).
  *
  * ComparatifLot.lot_id désigne un project_lots.id, pas un lot interne au
  * document : un lot non rattaché ne peut pas être versé. Ils sont rapportés à
  * l'appelant plutôt que laissés tomber en silence.
  */
-export function versComparatif(lots: Lot[], offres: OffreDocument[]): VersementResultat {
+export function versComparatif(lots: Lot[], offres: OffreDocument[], base: BaseQuantites = 'moe'): VersementResultat {
   const comparatif: ComparatifLot[] = [];
   const lotsNonRattaches: { numero: string; titre: string }[] = [];
   const retenues = offres.filter(o => o.statut !== 'ecartee' && o.entrepriseId);
+  const quantitesParEntreprise = new Map(
+    [...new Set(retenues.map(o => o.entrepriseId!))].map(id => [id, { q: quantitesEntreprise(offres, id), ok: quantitesAcceptees(offres, id) }]),
+  );
 
   for (const lot of lots) {
     if (!lot.projectLotId) {
@@ -80,15 +90,22 @@ export function versComparatif(lots: Lot[], offres: OffreDocument[]): VersementR
           // pas et n'a donc rien à faire dans un comparatif de prix.
           if (l.children?.length) { walk(l.children); continue; }
           const prix: Record<string, number> = {};
+          const ecarts: NonNullable<ComparatifArticle['ecartsQuantites']> = {};
           for (const o of retenues) {
             const pu = o.prix?.[l.id];
+            const { q, ok } = quantitesParEntreprise.get(o.entrepriseId!)!;
+            const moe = l.quantite || 0;
             // Un poste non chiffré reste absent : l'écrire à 0 fausserait le
             // classement des offres.
-            if (pu != null) prix[o.entrepriseId!] = pu * (l.quantite || 0);
+            if (pu != null) prix[o.entrepriseId!] = pu * quantiteRetenue(base, moe, l.id, q, ok);
+            if (typeof q[l.id] === 'number' && moe > 0 && quantitesDifferent(q[l.id], moe)) {
+              ecarts[o.entrepriseId!] = { quantite: q[l.id], acceptee: ok.has(l.id), prixUnitaire: typeof o.prix?.[l.id] === 'number' ? (o.prix[l.id] as number) : (typeof pu === 'number' ? pu : null) };
+            }
           }
           articles.push({
             id: l.id, code: l.numero, titre: l.designation, unite: l.unite,
             quantite: l.quantite, estimatif: l.prixTotal || undefined, prix,
+            ...(Object.keys(ecarts).length ? { ecartsQuantites: ecarts } : {}),
           });
         }
       };

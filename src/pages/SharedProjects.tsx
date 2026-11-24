@@ -104,28 +104,6 @@ function TaskRow({ projectId, task, canWrite, onSaved, onError }: {
   );
 }
 
-/** Sous-onglets CCTP et DPGF du dossier PRO, avec la même ligne d'onglets que la fiche du cabinet. */
-function ProSubTabs({ modes, active, onChange }: { modes: Array<'cctp' | 'dpgf'>; active: 'cctp' | 'dpgf'; onChange: (m: 'cctp' | 'dpgf') => void }) {
-  const { t } = useTranslation();
-  if (modes.length < 2) return null;
-  return (
-    <div role="tablist" aria-label={t('project_tab_title_pro')} className="flex items-center gap-1 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
-      {modes.map(mode => {
-        const isActive = mode === active;
-        return (
-          <button
-            key={mode} type="button" role="tab" aria-selected={isActive} onClick={() => onChange(mode)}
-            className={`-mb-px px-3 py-2 border-b-2 text-[0.8125rem] ${isActive ? 'font-semibold' : 'font-medium hover:text-[var(--tblr-text)]'}`}
-            style={{ borderColor: isActive ? 'var(--tblr-primary)' : 'transparent', color: isActive ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}
-          >
-            {t(mode === 'cctp' ? 'shared_cctp_title' : 'shared_dpgf_title')}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function SharedDetail({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
@@ -133,7 +111,6 @@ function SharedDetail({ projectId }: { projectId: string }) {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [docs, setDocs] = useState<Doc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [proMode, setProMode] = useState<'cctp' | 'dpgf' | null>(null);
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
@@ -179,7 +156,6 @@ function SharedDetail({ projectId }: { projectId: string }) {
     setParams(next, { replace: true });
   };
   const proModes = sharedProSubTabs(view.grants);
-  const activeProMode = proMode && proModes.includes(proMode) ? proMode : proModes[0];
 
   // Le lien est demandé au serveur à chaque ouverture (il expire) : le fichier n'est jamais
   // une adresse stockée côté page.
@@ -245,11 +221,9 @@ function SharedDetail({ projectId }: { projectId: string }) {
         </>
       )}
 
-      {activeTab === 'PRO' && activeProMode && (
-        <>
-          <ProSubTabs modes={proModes} active={activeProMode} onChange={setProMode} />
-          <SharedDocument key={activeProMode} projectId={projectId} mode={activeProMode} grants={view.grants} archived={view.archived} />
-        </>
+      {/* Un seul écran pour le CCTP et le DPGF (relecture d'abord, retours envoyés en lot) : ses onglets remplacent les sous-onglets. */}
+      {activeTab === 'PRO' && proModes.length > 0 && (
+        <SharedDocument projectId={projectId} modes={proModes} grants={view.grants} archived={view.archived} />
       )}
 
       {activeTab === 'ACT' && <SharedAct projectId={projectId} canPropose={view.grants.some(g => g.kind === 'act' && g.access === 'write') && !view.archived} detail={view.grants.some(g => g.kind === 'act' && g.detail === true)} />}

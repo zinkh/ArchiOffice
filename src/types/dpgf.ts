@@ -384,6 +384,13 @@ export interface OffreDocument {
   anomalies: OffreAnomalie[];
   /** Postes que l'entreprise a ajoutés au bordereau (absent : aucun). */
   postesAjoutes?: PosteAjoute[];
+  /**
+   * articleId -> quantité proposée par l'entreprise, SEULEMENT quand elle diffère de celle du document
+   * (absent : même quantité). Le document n'est jamais modifié (voir src/lib/quantitesEntreprise.ts).
+   */
+  quantites?: Record<string, number>;
+  /** Articles dont l'architecte a accepté la quantité de l'entreprise : elle compte alors dans l'offre. */
+  quantitesAcceptees?: string[];
   /** Mis en cache pour la liste des offres. */
   totalOffreHT?: number;
   statut: 'brouillon' | 'validee' | 'ecartee';

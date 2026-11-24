@@ -19,6 +19,7 @@ export interface SyncContactRow {
   email?: string | null;
   email_work?: string | null;
   email_home?: string | null;
+  email_other?: string | null;
   google_resource_name?: string | null;
   is_personal?: boolean | null;
   created_at?: string | null;
@@ -27,6 +28,9 @@ export interface SyncContactRow {
 export interface SyncCandidate {
   resourceName?: string | null;
   email?: string | null;
+  email_work?: string | null;
+  email_home?: string | null;
+  email_other?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   company_name?: string | null;
@@ -54,7 +58,7 @@ export function emptySyncIndex(): ContactSyncIndex {
 export function addToSyncIndex(index: ContactSyncIndex, row: SyncContactRow): void {
   if (row.is_personal) return;
   if (row.google_resource_name) keepOldest(index.byResource, row.google_resource_name, row);
-  for (const email of [row.email, row.email_work, row.email_home]) keepOldest(index.byEmail, normEmail(email), row);
+  for (const email of [row.email, row.email_work, row.email_home, row.email_other]) keepOldest(index.byEmail, normEmail(email), row);
   keepOldest(index.byName, nameKey(row as any), row);
 }
 
@@ -69,13 +73,70 @@ export function findExistingContact(index: ContactSyncIndex, candidate: SyncCand
     const byResource = index.byResource.get(candidate.resourceName);
     if (byResource) return byResource;
   }
-  const email = normEmail(candidate.email);
-  if (email) {
+  for (const raw of [candidate.email, candidate.email_work, candidate.email_home, candidate.email_other]) {
+    const email = normEmail(raw);
+    if (!email) continue;
     const byEmail = index.byEmail.get(email);
     if (byEmail) return byEmail;
   }
   const key = nameKey(candidate as any);
   return key ? index.byName.get(key) : undefined;
+}
+
+// ── Adresses e-mail typées (Google Contacts : Travail, Domicile, Autre) ─────────────────────
+// Google range chaque adresse sous un type (`work`, `home`, `other`, ou aucun / personnalisé).
+// La fiche a trois champs correspondants et `email`, l'adresse principale (travail d'abord)
+// que lisent le tableau et l'envoi vers Google historique.
+export type EmailSlot = 'email_work' | 'email_home' | 'email_other';
+export interface TypedEmails {
+  email_work: string;
+  email_home: string;
+  email_other: string;
+  email: string;
+}
+
+const SLOT_ORDER: EmailSlot[] = ['email_work', 'email_home', 'email_other'];
+const PREFERRED_SLOT: Record<string, EmailSlot | undefined> = { work: 'email_work', home: 'email_home', other: 'email_other' };
+
+/** Reporte les adresses d'une personne Google sur les champs de la fiche, selon leur type. */
+export function emailsFromGoogle(list?: Array<{ value?: string; type?: string }> | null): TypedEmails {
+  const out: TypedEmails = { email_work: '', email_home: '', email_other: '', email: '' };
+  const seen = new Set<string>();
+  for (const entry of list || []) {
+    const value = (entry?.value || '').trim();
+    if (!value || seen.has(value.toLowerCase())) continue;
+    seen.add(value.toLowerCase());
+    const preferred = PREFERRED_SLOT[(entry.type || '').toLowerCase()];
+    // Type connu et place libre : on le respecte. Sinon (sans type, personnalisé, ou deuxième
+    // adresse du même type) : première place libre, travail d'abord, sans jamais en écraser une.
+    const slot = (preferred && !out[preferred]) ? preferred : SLOT_ORDER.find(s => !out[s]);
+    if (slot) out[slot] = value;
+  }
+  out.email = out.email_work || out.email_home || out.email_other;
+  return out;
+}
+
+/** Inverse : les adresses de la fiche, typées, telles que Google les attend. */
+export function emailsForGoogle(contact: Partial<Record<keyof TypedEmails, string | null>>): Array<{ value: string; type?: string }> {
+  const typed: Array<{ value: string; type?: string }> = [];
+  const seen = new Set<string>();
+  const push = (value: string | null | undefined, type?: string) => {
+    const v = (value || '').trim();
+    if (!v || seen.has(v.toLowerCase())) return;
+    seen.add(v.toLowerCase());
+    typed.push(type ? { value: v, type } : { value: v });
+  };
+  push(contact.email_work, 'work');
+  push(contact.email_home, 'home');
+  push(contact.email_other, 'other');
+  // Fiche ancienne (ou importée) dont seul `email` est renseigné : envoyée telle quelle, sans type.
+  push(contact.email);
+  return typed;
+}
+
+/** Toutes les adresses d'une personne Google, pour rapprocher une fiche locale. */
+export function allGoogleEmails(list?: Array<{ value?: string }> | null): string[] {
+  return (list || []).map(e => (e?.value || '').trim()).filter(Boolean);
 }
 
 /** Une valeur importée vide n'efface jamais ce que la fiche porte déjà. */

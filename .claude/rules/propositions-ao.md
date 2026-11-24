@@ -317,3 +317,21 @@ Logique pure et testée dans `src/lib/tranches.ts` (`src/lib/__tests__/tranches.
   ferme et conditionnel ; la liste des phases confiées ne répète pas une mission répartie sur plusieurs tranches) ;
   Excel : un groupe par tranche et les lignes « TOTAL TRANCHES FERMES / CONDITIONNELLES HT » (formules).
 
+
+### Appel d'offres : carte du site, distance depuis l'agence et isochrones
+
+Carte « Site du chantier » de l'onglet Aperçu de `/appels-offres/:id` (`src/components/TenderSiteMap.tsx`, MapLibre sur le plan IGN).
+`tenders.adresse_terrain`, `site_lat`, `site_lon` (`supabase/migrate_tender_site_address.sql`) : l'adresse choisie dans l'autocomplétion est
+enregistrée AVEC ses coordonnées ; une fiche qui n'a qu'une adresse est géocodée à l'affichage. Le point de départ est l'adresse du cabinet
+(`settings.address`, géocodée). Trois relais sans état vers la Géoplateforme de l'IGN, sans clé (`server/routes/geoTravel.ts`,
+`tests/geoTravel.test.ts`) : `GET /api/geo/geocode`, `GET /api/geo/route` (distance et durée par la route, repli sur la distance à vol
+d'oiseau marquée `approximate`) et `GET /api/geo/isochrones` (30 min, 1 h, 1 h 30, 2 h en voiture, DEPUIS L'AGENCE ; une durée refusée par le
+service n'empêche pas les autres, elle est listée dans `failed`). Résultats mis en cache une heure ; rien du cabinet n'est envoyé, seulement
+une adresse ou des coordonnées. Le texte « le site se situe dans l'isochrone de X » vient de `containingIsochrone` (`pointInGeometry`).
+
+**Origine de l'adresse du site** (`src/lib/tenderSiteAddress.ts`, testé) : le « lieu d'exécution » de l'annonce (`ville_execution`) sert d'adresse quand
+`usableSiteAddress` le juge exploitable (jamais « Dépt. 57, 54 » ni « NUTS FRF31 », que les connecteurs écrivent à défaut). À la conversion d'une annonce
+(`POST /api/tender-rss-matches/:id/convert`) il est copié dans `tenders.adresse_terrain` ; la carte géocode alors l'adresse et enregistre ses coordonnées une
+fois. Sur une fiche sans adresse mais avec un lieu exploitable, la carte PROPOSE de l'utiliser (rien n'est écrit sans clic). Sinon l'architecte saisit
+l'adresse à la main dans le même champ. BOAMP (`lieuExecutionOf`) donne « adresse, code postal ville » quand la rubrique le permet. `siteAddressOf` (adresse de la
+fiche, à défaut lieu exploitable) alimente le prompt de « Rédiger avec IA » de la note méthodologique ; toute nouvelle lecture de l'adresse du site passe par elle.

@@ -8,7 +8,7 @@
 // écraserait sinon le planning enregistré par un planning vide.
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { IconChevronDown, IconChevronRight, IconSparkles, IconPlus, IconFileDownload, IconAlertTriangle, IconLoader2, IconCheck } from '@tabler/icons-react';
+import { IconArrowBackUp, IconArrowForwardUp, IconChevronDown, IconChevronRight, IconSparkles, IconPlus, IconFileDownload, IconAlertTriangle, IconLoader2, IconCheck } from '@tabler/icons-react';
 import { saveAs } from 'file-saver';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../../UserContext';
@@ -19,17 +19,19 @@ import { fetchAgencySettings } from '../../lib/pdfLetterhead';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { Project, ProjectLot } from '../../types';
 import { telechargerPdf } from '../../lib/observationsExport';
-import { exportPlanningToPDF } from '../../lib/planningChantierPdf';
+import { exportPlanningToPDF, type FormatPdfPlanning } from '../../lib/planningChantierPdf';
 import {
-  placerApresPredecesseurs, datesParGeste, dateDepuisPositionPlanning, dimensionsPlanning, verifierLienPlanning, joursEntre, type GesteDatesPlanning,
+  placerApresPredecesseurs, decalerSuccesseurs, datesParGeste, dateDepuisPositionPlanning, dimensionsPlanning, verifierLienPlanning, joursEntre, type GesteDatesPlanning,
   CALENDRIER_PLANNING, AFFICHAGE_PLANNING, sanitizeAffichage, periodesPlanning, positionPlanning, incoherencesDependances, type AffichagePlanning,
   PLANNING_VIDE, aujourdhuiIso, appliquerGeneration, bornesPlanning, etatTache, lundiDe, planningParLot,
   sanitizePlanning, ajouterJours, type EtatTache, type PlanningChantier, type PlanningGenere, type TachePlanning,
 } from '../../lib/planningChantier';
 import { PlanningTacheDialog } from './PlanningTacheDialog';
 import { usePlanningPressDrag } from '../../hooks/usePlanningPressDrag';
-import { PlanningCalendrierReglages } from './PlanningCalendrierReglages';
-import { reperesCalendrierPlanning } from '../../lib/planningChantierCalendrier';
+import { PlanningCalendrierOptions, PlanningCalendrierPeriodes } from './PlanningCalendrierReglages';
+import { estOuvreDuPlanning, reperesCalendrierPlanning } from '../../lib/planningChantierCalendrier';
+import { canRedo, canUndo, createHistory, pushHistory, redoHistory, undoHistory, type History } from '../../lib/croquis/history';
+import { ecartJalonMission, jalonMissionAvecDate, jalonsMissionDepuisApi } from '../../lib/planningJalonsMission';
 import { PlanningBarre } from './PlanningBarre';
 import { PlanningGenerateDialog } from './PlanningGenerateDialog';
 
@@ -43,6 +45,12 @@ interface Props {
 type EtatEnregistrement = 'repos' | 'envoi' | 'ok' | 'echec';
 
 const LIGNE_PX = 44;
+/** Pas d'annulation conservés : un pas par action de l'utilisateur. */
+const HISTORIQUE_MAX = 50;
+// Commandes compactes au pointeur fin, cibles de 44 px au doigt.
+const champCompact = 'rounded border border-[var(--tblr-border)] bg-[var(--tblr-surface)] px-2 py-1 text-sm min-h-9 pointer-coarse:min-h-11';
+const ligneCase = 'flex items-center gap-2 min-h-8 pointer-coarse:min-h-11';
+const titreGroupe = 'text-xs font-semibold uppercase tracking-wide text-[var(--tblr-muted)] pb-1';
 
 const LIBELLE_ETAT: Record<EtatTache, string> = { a_venir: 'À venir', en_cours: 'En cours', terminee: 'Terminée', en_retard: 'En retard' };
 
@@ -71,6 +79,8 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const diagrammeRef = useRef<HTMLDivElement>(null);
   const [largeurDisponible, setLargeurDisponible] = useState(1000);
   const [apercu, setApercu] = useState<TachePlanning | null>(null);
+  // Aperçu des successeurs que le relâché décalerait (réglage « Décaler les successeurs ») : dates provisoires, jamais enregistrées.
+  const [apercuSucc, setApercuSucc] = useState<{ id: string; debut: string; fin: string; jours: number }[]>([]);
   const [lienSource, setLienSource] = useState<string | null>(null);
   const [lienGeste, setLienGeste] = useState<{ source: string; x: number; y: number; cible: string | null } | null>(null);
   const [messageGeste, setMessageGeste] = useState('');
@@ -80,9 +90,12 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     window.addEventListener('keydown', annuler);
     return () => { window.removeEventListener('keydown', annuler); };
   }, []);
-  useEffect(() => { setLienSource(null); setLienGeste(null); setApercu(null); setMessageGeste(''); }, [cleAffichage]);
+  useEffect(() => { setLienSource(null); setLienGeste(null); setApercu(null); setApercuSucc([]); setMessageGeste(''); }, [cleAffichage]);
   const [couleursAor, setCouleursAor] = useState<Record<string, string>>({});
   const [planning, setPlanning] = useState<PlanningChantier>(PLANNING_VIDE);
+  // Calendrier partagé et jours travaillés : tous les jours tant que le calcul en jours ouvrés n'est pas demandé.
+  const calendrier = planning.calendrier ?? CALENDRIER_PLANNING;
+  const ouvre = useMemo(() => estOuvreDuPlanning(calendrier), [calendrier]);
   const [lu, setLu] = useState(false);
   const [disponible, setDisponible] = useState(true);
   const [erreurLecture, setErreurLecture] = useState<string | null>(null);
@@ -90,6 +103,13 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const [tacheOuverte, setTacheOuverte] = useState<{ tache: TachePlanning; nouvelle: boolean } | null>(null);
   const [genererOuvert, setGenererOuvert] = useState(false);
   const [enExport, setEnExport] = useState<string | null>(null);
+  // Réglages propres à l'export PDF : ne modifient ni l'écran ni le planning partagé.
+  const [formatPdf, setFormatPdf] = useState<FormatPdfPlanning>('a4');
+  const [synthesePdf, setSynthesePdf] = useState(false);
+  const [indicePdf, setIndicePdf] = useState('');
+  const [periodesPdf, setPeriodesPdf] = useState(0);
+  const [plagePdf, setPlagePdf] = useState<{ debut: string; fin: string }>({ debut: '', fin: '' });
+  const plagePdfInvalide = !!plagePdf.debut && !!plagePdf.fin && plagePdf.debut > plagePdf.fin;
   // Le composant peut être monté avant la lecture, ou sans tâche : observer dès que la région existe.
   useEffect(() => {
     const region = regionRef.current;
@@ -100,6 +120,31 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   }, [lu, planning.taches.length === 0]);
 
   const base = `/api/projects/${encodeURIComponent(project.id)}/planning-chantier`;
+  // Jalons de mission de l'affaire (table milestones), lus tels quels : un PUT les réécrit en entier.
+  const [missionsBrutes, setMissionsBrutes] = useState<unknown[]>([]);
+  const missions = useMemo(() => jalonsMissionDepuisApi(missionsBrutes), [missionsBrutes]);
+  useEffect(() => {
+    let annule = false;
+    setMissionsBrutes([]);
+    apiFetch<unknown>(`/api/milestones?project_id=${encodeURIComponent(project.id)}`)
+      .then(r => { if (!annule) setMissionsBrutes(Array.isArray(r) ? r : []); })
+      .catch(() => { /* sans jalons de mission, le planning fonctionne comme avant */ });
+    return () => { annule = true; };
+  }, [project.id]);
+  /** Geste explicite : écrit la date sur le jalon de mission. Rien d'automatique ailleurs. */
+  const alignerMission = async (id: string, date: string): Promise<boolean> => {
+    const corps = jalonMissionAvecDate(missionsBrutes, id, date);
+    if (!corps) { showToast(tr('planning_mission_error'), 'error'); return false; }
+    try {
+      await apiFetch(`/api/milestones/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(corps) });
+      setMissionsBrutes(prev => prev.map(m => (m && typeof m === 'object' && (m as { id?: unknown }).id === id ? corps : m)));
+      showToast(tr('planning_mission_updated', { date }));
+      return true;
+    } catch (e: any) {
+      showToast(e?.message || tr('planning_mission_error'), 'error');
+      return false;
+    }
+  };
   // Entreprises titulaires issues des marchés, rapprochés des lots par le serveur : la fiche du lot n'en porte pas toujours.
   const [entreprises, setEntreprises] = useState<Record<string, string>>({});
   const lotsPlanif = useMemo(
@@ -147,6 +192,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
         if (annule) return;
         const relu = sanitizePlanning(r.planning);
         dernier.current = relu; version.current = 0; enregistree.current = 0;
+        majHistorique(createHistory(relu)); // on n'annule pas au-delà de ce qui a été lu
         setCouleursAor(r.couleursAor ?? {}); setPlanning(relu); setDisponible(r.available !== false); setEntreprises(r.entreprises ?? {}); setLu(true);
       })
       .catch((e: any) => { if (!annule) setErreurLecture(e?.message || 'Lecture du planning impossible.'); });
@@ -160,12 +206,53 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     return () => window.removeEventListener('pagehide', envoyer);
   }, [vider]);
 
-  const modifier = (suivant: PlanningChantier) => {
+  // Historique d'annulation : un pas par action de l'utilisateur, y compris quand elle déplace plusieurs tâches.
+  const histRef = useRef<History<PlanningChantier>>(createHistory(PLANNING_VIDE));
+  const [historique, setHistorique] = useState(histRef.current);
+  const majHistorique = (h: History<PlanningChantier>) => { histRef.current = h; setHistorique(h); };
+
+  /** Remplace le planning affiché et lance l'enregistrement automatique, sans toucher à l'historique. */
+  const appliquer = (suivant: PlanningChantier) => {
     dernier.current = suivant; version.current += 1;
     setPlanning(suivant); setEtat('envoi');
     if (minuteur.current) clearTimeout(minuteur.current);
     minuteur.current = setTimeout(() => void vider(), 1200);
   };
+  const modifier = (suivant: PlanningChantier) => {
+    if (JSON.stringify(dernier.current) !== JSON.stringify(suivant)) majHistorique(pushHistory(histRef.current, suivant, HISTORIQUE_MAX));
+    appliquer(suivant);
+  };
+  // Annuler et rétablir passent par le même enregistrement automatique : l'état restauré est écrit.
+  const annulerDernier = () => {
+    if (!disponibleRef.current || !canUndo(histRef.current)) return;
+    const h = undoHistory(histRef.current);
+    majHistorique(h); appliquer(h.present); setMessageGeste(tr('planning_undone'));
+  };
+  const retablirDernier = () => {
+    if (!disponibleRef.current || !canRedo(histRef.current)) return;
+    const h = redoHistory(histRef.current);
+    majHistorique(h); appliquer(h.present); setMessageGeste(tr('planning_redone'));
+  };
+  const actionsHistorique = useRef({ annuler: annulerDernier, retablir: retablirDernier });
+  actionsHistorique.current = { annuler: annulerDernier, retablir: retablirDernier };
+  const fenetreOuverte = useRef(false);
+  fenetreOuverte.current = !!tacheOuverte || genererOuvert;
+  useEffect(() => {
+    // Ctrl/Cmd+Z annule, Ctrl/Cmd+Maj+Z ou Ctrl+Y rétablit ; jamais dans un champ de saisie (annulation native du champ)
+    // ni pendant qu'une fenêtre est ouverte.
+    const touche = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== 'z' && k !== 'y') return;
+      const cible = e.target as HTMLElement | null;
+      if (cible && (cible.isContentEditable || /^(input|textarea|select)$/i.test(cible.tagName))) return;
+      if (fenetreOuverte.current) return;
+      e.preventDefault();
+      if (k === 'y' || e.shiftKey) actionsHistorique.current.retablir(); else actionsHistorique.current.annuler();
+    };
+    window.addEventListener('keydown', touche);
+    return () => window.removeEventListener('keydown', touche);
+  }, []);
 
   // ── Actions ──
   const nouvelleTache = (lotId = ''): TachePlanning => {
@@ -174,12 +261,26 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     return { id: crypto.randomUUID(), lotId, libelle: '', debut, fin: ajouterJours(debut, 4), avancement: 0, source: 'manuel' };
   };
 
+  /** Décale les successeurs si le réglage est actif ; sinon rend les tâches telles quelles. */
+  const avecCascade = (taches: TachePlanning[], modifiees: string[], avant?: TachePlanning[]) => {
+    if (!affichage.cascade) return { taches, decalees: 0, terminees: 0 };
+    const r = decalerSuccesseurs(taches, modifiees, ouvre, { avant, rapprocher: affichage.cascadeRapprocher });
+    return { taches: r.taches, decalees: r.decalees.length, terminees: r.terminees.length };
+  };
+  const messageCascade = (c: { decalees: number; terminees: number }) =>
+    [c.decalees ? `${tr('planning_cascade_done', { n: c.decalees })} ${tr('planning_cascade_undo_tip')}` : '', c.terminees ? tr('planning_cascade_blocked', { n: c.terminees }) : ''].filter(Boolean).join(' ');
+
   const enregistrerTache = (tache: TachePlanning) => {
-    const existe = planning.taches.some(t => t.id === tache.id);
+    const avant = planning.taches.find(t => t.id === tache.id);
     // Une tâche d'origine IA que l'architecte modifie devient la sienne : elle survit à une nouvelle génération.
     const finale: TachePlanning = { ...tache, source: 'manuel' };
-    modifier(sanitizePlanning({ ...planning, taches: existe ? planning.taches.map(t => (t.id === tache.id ? finale : t)) : [...planning.taches, finale] }));
+    const taches = avant ? planning.taches.map(t => (t.id === tache.id ? finale : t)) : [...planning.taches, finale];
+    const datesChangees = !!avant && (avant.debut !== finale.debut || avant.fin !== finale.fin);
+    const cascade = datesChangees ? avecCascade(taches, [finale.id], planning.taches) : { taches, decalees: 0, terminees: 0 };
+    modifier(sanitizePlanning({ ...planning, taches: cascade.taches }));
     setTacheOuverte(null);
+    const message = messageCascade(cascade);
+    if (message) showToast(message);
   };
 
   const supprimerTache = (id: string) => {
@@ -197,10 +298,12 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const exporter = async (lotId?: string) => {
     const reglages = settings ?? await fetchAgencySettings().catch(() => null);
     if (!reglages) { showToast('Réglages du cabinet non chargés, réessayez dans un instant.', 'error'); return; }
+    if (plagePdfInvalide) { showToast(tr('planning_pdf_range_invalid'), 'error'); return; }
     setEnExport(lotId ?? '*');
     try {
       const pdf = await exportPlanningToPDF(planning, lotsPlanif, reglages, {
-        lotId, affichage, couleurs, project: { name: project.name, project_code: project.project_code, address: project.address },
+        lotId, affichage, couleurs, format: formatPdf, synthese: synthesePdf && !lotId, indice: indicePdf, periodesParPage: periodesPdf, jalonsMission: missions,
+        plage: { debut: plagePdf.debut || undefined, fin: plagePdf.fin || undefined }, project: { name: project.name, project_code: project.project_code, address: project.address },
       });
       telechargerPdf(pdf);
     } catch (e: any) {
@@ -213,8 +316,9 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const enregistrerDates = (tache: TachePlanning) => {
     const originale = dernier.current.taches.find(t => t.id === tache.id);
     if (!originale || (originale.debut === tache.debut && originale.fin === tache.fin)) return;
-    modifier(sanitizePlanning({ ...dernier.current, taches: dernier.current.taches.map(t => t.id === tache.id ? { ...t, debut: tache.debut, fin: tache.fin, source: 'manuel' } : t) }));
-    setMessageGeste(tr('planning_dates_saved', { name: tache.libelle, start: tache.debut, end: tache.fin }));
+    const cascade = avecCascade(dernier.current.taches.map(t => t.id === tache.id ? { ...t, debut: tache.debut, fin: tache.fin, source: 'manuel' } : t), [tache.id], dernier.current.taches);
+    modifier(sanitizePlanning({ ...dernier.current, taches: cascade.taches }));
+    setMessageGeste([tr('planning_dates_saved', { name: tache.libelle, start: tache.debut, end: tache.fin }), messageCascade(cascade)].filter(Boolean).join(' '));
   };
   const commencerDates = (e: ReactPointerEvent<HTMLElement>, tache: TachePlanning, geste: GesteDatesPlanning) => {
     if (!disponible || lienSource) return;
@@ -230,15 +334,20 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
       const date = dateDepuisPositionPlanning(originePosition + delta / largeurColonne, axe, affichage.echelle);
       candidate = datesParGeste(tache, geste, geste === 'fin' ? ajouterJours(date, -1) : date);
       setApercu(prev => prev?.debut === candidate.debut && prev?.fin === candidate.fin ? prev : candidate);
-      setMessageGeste(tr('planning_dates_preview', { start: candidate.debut, end: candidate.fin }));
+      // Le nombre de successeurs qui seraient décalés est annoncé avant le relâché.
+      const simulation = affichage.cascade ? decalerSuccesseurs(dernier.current.taches.map(t => t.id === tache.id ? candidate : t), [tache.id], ouvre, { avant: dernier.current.taches, rapprocher: affichage.cascadeRapprocher }) : null;
+      const n = simulation?.decalees.length ?? 0;
+      const fantomes = simulation ? simulation.decalees.map(d => { const t = simulation.taches.find(x => x.id === d.id)!; return { id: d.id, debut: t.debut, fin: t.fin, jours: d.jours }; }) : [];
+      setApercuSucc(prev => JSON.stringify(prev) === JSON.stringify(fantomes) ? prev : fantomes);
+      setMessageGeste(tr(n ? 'planning_dates_preview_cascade' : 'planning_dates_preview', { start: candidate.debut, end: candidate.fin, n }));
     };
     commencerGeste(e, {
       onLift: (start, current) => { depart = start.x; actualiser(current.x); },
       onMove: current => actualiser(current.x),
       onEnd: end => {
-        setApercu(null);
+        setApercu(null); setApercuSucc([]);
         if (end.cancelled) { setMessageGeste(tr('planning_gesture_cancelled')); return; }
-        actualiser(end.x); setApercu(null); enregistrerDates(candidate);
+        actualiser(end.x); setApercu(null); setApercuSucc([]); enregistrerDates(candidate);
       },
     });
   };
@@ -247,7 +356,12 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     setMessageGeste(tr(`planning_link_${resultat}`));
     setLienSource(null); setLienGeste(null);
     if (resultat !== 'ajoute') return;
-    modifier(sanitizePlanning({ ...dernier.current, taches: dernier.current.taches.map(t => t.id === cible ? placerApresPredecesseurs({ ...t, source: 'manuel', dependencies: [...(t.dependencies ?? []), source] }, dernier.current.taches) : t) }));
+    const placees = dernier.current.taches.map(t => t.id === cible ? placerApresPredecesseurs({ ...t, source: 'manuel', dependencies: [...(t.dependencies ?? []), source] }, dernier.current.taches, ouvre) : t);
+    // La cible a pu être déplacée par le placement : ses propres successeurs suivent si le réglage est actif.
+    const cascade = avecCascade(placees, [cible]);
+    modifier(sanitizePlanning({ ...dernier.current, taches: cascade.taches }));
+    const message = messageCascade(cascade);
+    if (message) setMessageGeste(`${tr('planning_link_ajoute')} ${message}`);
   };
   const cibleAuPoint = (x: number, y: number) => {
     const cible = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-planning-task-id]');
@@ -291,13 +405,12 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const COLONNE_PX = dimensions.periode;
   // Une marge accueille la poignée de liaison, sans couper la dernière tâche.
   const largeur = periodes.length * COLONNE_PX;
-  const calendrier = planning.calendrier ?? CALENDRIER_PLANNING;
   const reperes = useMemo(() => periodes.length ? reperesCalendrierPlanning(calendrier, periodes[0].debut, periodes[periodes.length - 1].fin, affichage) : [], [calendrier, bornes?.debut, bornes?.fin, affichage]);
   const nomRepere = (r: typeof reperes[number]) => r.cle ? tr(`planning_holiday_${r.cle}`) : r.libelle;
   const margeLien = 80;
   const x = (iso: string) => positionPlanning(iso, periodes) * COLONNE_PX;
   const largeurBarre = (debut: string, fin: string) => Math.max(6, x(ajouterJours(fin, 1)) - x(debut));
-  const conflits = incoherencesDependances(planning.taches);
+  const conflits = incoherencesDependances(planning.taches, ouvre);
   // Hauteurs déterministes : les liaisons utilisent les mêmes lignes que le rendu.
   const positions = new Map<string, number>();
   let hauteur = 38;
@@ -323,21 +436,31 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   if (erreurLecture) return <p role="alert" className="text-sm text-red-600 p-4">{erreurLecture}</p>;
   if (!lu) return <div className="p-6 flex justify-center"><IconLoader2 className="animate-spin text-[var(--tblr-muted)]" aria-label="Chargement du planning" /></div>;
 
+  const recap = [affichage.echelle === 'mois' ? tr('planning_months') : tr('planning_weeks'), affichage.relatif ? tr('planning_relative') : null, calendrier.joursOuvres ? tr('planning_working_days') : null, affichage.cascade ? tr('planning_cascade') : null].filter(Boolean).join(' · ');
+
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-        <div className="flex flex-wrap items-center gap-2 justify-between">
-          <div>
-            <h3 className="text-base font-bold text-[var(--tblr-text)]">Planning de chantier</h3>
-            <p className="text-xs text-[var(--tblr-muted)] mt-0.5">
+    <div className="space-y-2">
+      <div className="rounded-xl px-3 py-2.5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 justify-between">
+          <div className="min-w-0">
+            <h3 className="text-base font-bold leading-tight text-[var(--tblr-text)]">Planning de chantier</h3>
+            <p className="text-xs text-[var(--tblr-muted)]">
               {bornes
                 ? `Du ${fmtCourt(bornes.debut)}/${bornes.debut.slice(0, 4)} au ${fmtCourt(bornes.fin)}/${bornes.fin.slice(0, 4)} · ${planning.taches.length} tâche${planning.taches.length > 1 ? 's' : ''}`
                 : 'Aucune tâche planifiée'}
               {retards > 0 && <span className="text-red-600 font-semibold"> · {retards} en retard</span>}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span role="status" className="text-xs text-[var(--tblr-muted)] inline-flex items-center gap-1 min-w-[9rem] justify-end">{indicateur}</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span role="status" className="text-xs text-[var(--tblr-muted)] inline-flex items-center gap-1 min-w-[7rem] justify-end">{indicateur}</span>
+            <span className="inline-flex" role="group" aria-label={`${tr('planning_undo')} / ${tr('planning_redo')}`}>
+              <button type="button" className="btn btn-secondary px-2 rounded-r-none" aria-label={tr('planning_undo')} title={tr('planning_undo_hint')} onClick={annulerDernier} disabled={!disponible || !canUndo(historique)}>
+                <IconArrowBackUp size={16} aria-hidden="true" />
+              </button>
+              <button type="button" className="btn btn-secondary px-2 rounded-l-none -ml-px" aria-label={tr('planning_redo')} title={tr('planning_redo_hint')} onClick={retablirDernier} disabled={!disponible || !canRedo(historique)}>
+                <IconArrowForwardUp size={16} aria-hidden="true" />
+              </button>
+            </span>
             <button type="button" className="btn btn-secondary" onClick={() => setTacheOuverte({ tache: nouvelleTache(), nouvelle: true })} disabled={!disponible}>
               <IconPlus size={16} aria-hidden="true" />Tâche
             </button>
@@ -350,54 +473,114 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
           </div>
         </div>
         {!disponible && (
-          <p role="alert" className="mt-3 text-xs text-amber-700">Le planning n’est pas encore disponible sur cette instance (migration à appliquer) : il ne pourra pas être enregistré.</p>
+          <p role="alert" className="mt-2 text-xs text-amber-700">Le planning n’est pas encore disponible sur cette instance (migration à appliquer) : il ne pourra pas être enregistré.</p>
         )}
         {lots.length === 0 && (
-          <p className="mt-3 text-xs text-[var(--tblr-muted)]">Renseignez d’abord les lots de l’opération (fiche affaire, onglet Infos) : le planning est décomposé lot par lot.</p>
+          <p className="mt-2 text-xs text-[var(--tblr-muted)]">Renseignez d’abord les lots de l’opération (fiche affaire, onglet Infos) : le planning est décomposé lot par lot.</p>
         )}
       </div>
 
-      <details className="rounded-lg p-3 border border-[var(--tblr-border)] bg-[var(--tblr-surface)]">
-        <summary className="cursor-pointer font-semibold text-sm">{tr('planning_view_settings')}</summary>
-        <div className="flex flex-wrap items-center gap-4 mt-3 text-sm">
-          <label>{tr('planning_scale')} <select className="ml-2 p-2 bg-[var(--tblr-surface)] border border-[var(--tblr-border)] rounded" value={affichage.echelle} onChange={e => regler({ echelle: e.target.value as AffichagePlanning['echelle'] })}>
-            <option value="semaines">{tr('planning_weeks')}</option><option value="mois">{tr('planning_months')}</option>
-          </select></label>
-          <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={affichage.relatif} onChange={e => regler({ relatif: e.target.checked })} />{tr('planning_relative')}</label>
-          <label className="flex items-center gap-2 min-h-11"><input type="checkbox" disabled={affichage.echelle !== 'semaines' || affichage.relatif} checked={affichage.numerosSemaines} onChange={e => regler({ numerosSemaines: e.target.checked })} />{tr('planning_iso_weeks')}</label>
-          <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={affichage.generales} onChange={e => regler({ generales: e.target.checked })} />{tr('planning_general')}</label>
-          <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={affichage.avancement} onChange={event => regler({ avancement: event.target.checked })} />{tr('planning_show_progress')}</label>
-          <label className="flex items-center gap-2 min-h-11"><input type="checkbox" checked={affichage.ajusterLargeur} onChange={event => regler({ ajusterLargeur: event.target.checked })} />{tr('planning_fit_width')}</label>
-          <label className="flex flex-wrap items-center gap-2">{tr('planning_labels_width')}
-            <input type="range" min={140} max={560} step={1} value={affichage.largeurLibelles} onChange={event => regler({ largeurLibelles: Number(event.target.value) })} /><output>{affichage.largeurLibelles} px</output>
-          </label>
-          <label className="flex flex-wrap items-center gap-2">{tr('planning_period_width')}
-            <input type="range" min={28} max={240} step={4} disabled={affichage.ajusterLargeur} value={affichage.largeurPeriode} onChange={event => regler({ largeurPeriode: Number(event.target.value) })} /><output>{affichage.largeurPeriode} px</output>
-          </label>
-          <button className="btn btn-secondary" onClick={() => regler({ replies: toutesLignes.map(l => l.lot?.id ?? 'general') })}>{tr('planning_collapse_all')}</button>
-          <button className="btn btn-secondary" onClick={() => regler({ replies: [] })}>{tr('planning_expand_all')}</button>
-          <label>{tr('planning_xml_export')} <select aria-label={tr('planning_xml_format')} className="p-2 bg-[var(--tblr-surface)] border border-[var(--tblr-border)] rounded" value="" disabled={!planning.taches.length} onChange={e => {
-            const format = e.target.value as 'msproject' | 'ganttproject';
-            if (!format) return;
-            try { saveAs(new Blob([exportPlanningChantierXml(project, planning, lotsPlanif, format, couleurs)], { type: 'application/xml;charset=utf-8' }), `planning-chantier-${format}.${format === 'msproject' ? 'xml' : 'gan'}`); }
-            catch (error) { showToast(error instanceof Error ? error.message : 'Export impossible.', 'error'); }
-          }}><option value="">{tr('planning_choose_format')}</option><option value="msproject">Microsoft Project XML</option><option value="ganttproject">GanttProject XML (.gan)</option></select></label>
+      <details className="group rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)]">
+        <summary className="cursor-pointer text-sm px-3 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <IconChevronRight size={14} aria-hidden="true" className="shrink-0 transition-transform group-open:rotate-90" />
+          <span className="font-semibold">{tr('planning_view_settings')}</span>
+          <span className="text-xs text-[var(--tblr-muted)]">{recap}</span>
+        </summary>
+        <div className="grid gap-x-6 gap-y-3 px-3 pb-3 pt-1 text-sm sm:grid-cols-2 xl:grid-cols-4">
+          <fieldset className="space-y-0.5 min-w-0">
+            <legend className={titreGroupe}>{tr('planning_group_display')}</legend>
+            <label className="block">{tr('planning_scale')} <select className={`${champCompact} ml-1`} value={affichage.echelle} onChange={e => regler({ echelle: e.target.value as AffichagePlanning['echelle'] })}>
+              <option value="semaines">{tr('planning_weeks')}</option><option value="mois">{tr('planning_months')}</option>
+            </select></label>
+            <div className="flex flex-wrap gap-x-4">
+              <label className={ligneCase}><input type="checkbox" checked={affichage.relatif} onChange={e => regler({ relatif: e.target.checked })} />{tr('planning_relative')}</label>
+              <label className={ligneCase}><input type="checkbox" disabled={affichage.echelle !== 'semaines' || affichage.relatif} checked={affichage.numerosSemaines} onChange={e => regler({ numerosSemaines: e.target.checked })} />{tr('planning_iso_weeks')}</label>
+              <label className={ligneCase}><input type="checkbox" checked={affichage.generales} onChange={e => regler({ generales: e.target.checked })} />{tr('planning_general')}</label>
+              <label className={ligneCase}><input type="checkbox" checked={affichage.avancement} onChange={event => regler({ avancement: event.target.checked })} />{tr('planning_show_progress')}</label>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button type="button" className="btn btn-secondary min-h-8 pointer-coarse:min-h-11" onClick={() => regler({ replies: toutesLignes.map(l => l.lot?.id ?? 'general') })}>{tr('planning_collapse_all')}</button>
+              <button type="button" className="btn btn-secondary min-h-8 pointer-coarse:min-h-11" onClick={() => regler({ replies: [] })}>{tr('planning_expand_all')}</button>
+            </div>
+          </fieldset>
+          <fieldset className="space-y-0.5 min-w-0">
+            <legend className={titreGroupe}>{tr('planning_group_size')}</legend>
+            <label className={ligneCase}><input type="checkbox" checked={affichage.ajusterLargeur} onChange={event => regler({ ajusterLargeur: event.target.checked })} />{tr('planning_fit_width')}</label>
+            <label className="block">{tr('planning_labels_width')}
+              <span className="flex items-center gap-2"><input className="flex-1 min-w-0" type="range" min={140} max={560} step={1} value={affichage.largeurLibelles} onChange={event => regler({ largeurLibelles: Number(event.target.value) })} /><output className="w-14 text-right text-xs">{affichage.largeurLibelles} px</output></span>
+            </label>
+            <label className="block">{tr('planning_period_width')}
+              <span className="flex items-center gap-2"><input className="flex-1 min-w-0" type="range" min={28} max={240} step={4} disabled={affichage.ajusterLargeur} value={affichage.largeurPeriode} onChange={event => regler({ largeurPeriode: Number(event.target.value) })} /><output className="w-14 text-right text-xs">{affichage.largeurPeriode} px</output></span>
+            </label>
+          </fieldset>
+          <div className="space-y-1 min-w-0">
+            <PlanningCalendrierOptions calendrier={calendrier} affichage={affichage} disabled={!disponible}
+              onChange={calendrier => modifier(sanitizePlanning({ ...dernier.current, calendrier }))} onAffichage={regler} />
+            <label className={ligneCase} title={tr('planning_cascade_help')}><input type="checkbox" checked={affichage.cascade} aria-describedby="planning-cascade-help" onChange={event => regler({ cascade: event.target.checked })} />{tr('planning_cascade')}</label>
+            <span id="planning-cascade-help" className="sr-only">{tr('planning_cascade_help')}</span>
+            <label className={`${ligneCase} pl-6`} title={tr('planning_cascade_pull_help')}><input type="checkbox" disabled={!affichage.cascade} checked={affichage.cascadeRapprocher} aria-describedby="planning-cascade-pull-help" onChange={event => regler({ cascadeRapprocher: event.target.checked })} />{tr('planning_cascade_pull')}</label>
+            <span id="planning-cascade-pull-help" className="sr-only">{tr('planning_cascade_pull_help')}</span>
+          </div>
+          <fieldset className="space-y-1 min-w-0">
+            <legend className={titreGroupe}>{tr('planning_group_export')}</legend>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label>{tr('planning_pdf_format')} <select className={`${champCompact} ml-1`} value={formatPdf} onChange={e => setFormatPdf(e.target.value === 'a3' ? 'a3' : 'a4')}>
+                <option value="a4">A4</option><option value="a3">A3</option>
+              </select></label>
+              <label>{tr('planning_pdf_content')} <select className={`${champCompact} ml-1`} value={synthesePdf ? 'synthese' : 'detail'} onChange={e => setSynthesePdf(e.target.value === 'synthese')}>
+                <option value="detail">{tr('planning_pdf_detailed')}</option><option value="synthese">{tr('planning_pdf_summary')}</option>
+              </select></label>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label>{tr('planning_pdf_index')} <input className={`${champCompact} ml-1 w-24`} maxLength={12} placeholder="A, B, C…" value={indicePdf} onChange={e => setIndicePdf(e.target.value)} /></label>
+              <label>{tr('planning_pdf_per_page')} <select className={`${champCompact} ml-1`} value={periodesPdf} onChange={e => setPeriodesPdf(Number(e.target.value))}>
+                <option value={0}>{tr('planning_pdf_all_periods')}</option>
+                {[8, 12, 16, 26, 52].map(n => <option key={n} value={n}>{tr(affichage.echelle === 'mois' ? 'planning_pdf_n_months' : 'planning_pdf_n_weeks', { n })}</option>)}
+              </select></label>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label>{tr('planning_pdf_from')} <input type="date" className={`${champCompact} ml-1`} value={plagePdf.debut} max={plagePdf.fin || undefined} onChange={e => setPlagePdf(p => ({ ...p, debut: e.target.value }))} /></label>
+              <label>{tr('planning_pdf_to')} <input type="date" className={`${champCompact} ml-1`} value={plagePdf.fin} min={plagePdf.debut || undefined} onChange={e => setPlagePdf(p => ({ ...p, fin: e.target.value }))} /></label>
+              {(plagePdf.debut || plagePdf.fin) && <button type="button" className="btn btn-secondary min-h-8 pointer-coarse:min-h-11" onClick={() => setPlagePdf({ debut: '', fin: '' })}>{tr('planning_pdf_all')}</button>}
+            </div>
+            {plagePdfInvalide && <span role="alert" className="block text-xs text-red-600">{tr('planning_pdf_range_invalid')}</span>}
+            <label className="block">{tr('planning_xml_export')} <select aria-label={tr('planning_xml_format')} className={`${champCompact} ml-1`} value="" disabled={!planning.taches.length} onChange={e => {
+              const format = e.target.value as 'msproject' | 'ganttproject';
+              if (!format) return;
+              try { saveAs(new Blob([exportPlanningChantierXml(project, planning, lotsPlanif, format, couleurs)], { type: 'application/xml;charset=utf-8' }), `planning-chantier-${format}.${format === 'msproject' ? 'xml' : 'gan'}`); }
+              catch (error) { showToast(error instanceof Error ? error.message : 'Export impossible.', 'error'); }
+            }}><option value="">{tr('planning_choose_format')}</option><option value="msproject">Microsoft Project XML</option><option value="ganttproject">GanttProject XML (.gan)</option></select></label>
+          </fieldset>
+          <div className="sm:col-span-2 xl:col-span-4 border-t border-[var(--tblr-border)] pt-2">
+            <PlanningCalendrierPeriodes key={project.id} calendrier={calendrier} disabled={!disponible}
+              onChange={calendrier => modifier(sanitizePlanning({ ...dernier.current, calendrier }))} />
+          </div>
+          <details className="sm:col-span-2 xl:col-span-4 text-xs text-[var(--tblr-muted)]">
+            <summary className="cursor-pointer font-semibold">{tr('planning_help_title')}</summary>
+            <p className="mt-1">
+            {bornes ? tr('planning_origin', { date: bornes.debut }) : ''} {tr('planning_preferences_help')} <strong>{tr('planning_gestures_title')}.</strong> {tr('planning_gestures_help')}
+            </p>
+          </details>
         </div>
-        <PlanningCalendrierReglages key={project.id} calendrier={calendrier} affichage={affichage} disabled={!disponible}
-          onChange={calendrier => modifier(sanitizePlanning({ ...dernier.current, calendrier }))} onAffichage={regler} />
-        <p className="text-xs text-[var(--tblr-muted)] mt-2">{bornes ? tr('planning_origin', { date: bornes.debut }) : ''} {tr('planning_preferences_help')}</p>
       </details>
-      <details className="text-xs text-[var(--tblr-muted)]"><summary className="cursor-pointer font-semibold">{tr('planning_gestures_title')}</summary><p className="mt-2">{tr('planning_gestures_help')}</p></details>
-      <p role="status" aria-live="polite" className="text-sm text-[var(--tblr-text)]">{messageGeste}</p>
+      <p role="status" aria-live="polite" className="text-sm text-[var(--tblr-text)] empty:hidden">{messageGeste}</p>
       {lienSource && <button type="button" className="btn btn-secondary" onClick={() => { setLienSource(null); setMessageGeste(tr('planning_gesture_cancelled')); }}>{tr('planning_cancel_link')}</button>}
       {conflits.length > 0 && <div role="status" className="text-sm text-[var(--tblr-text)]">
         {conflits.map(c => <p key={`${c.tache.id}:${c.precedent.id}`}>{tr('planning_dates_conflict', { task: c.tache.libelle, predecessor: c.precedent.libelle, date: c.precedent.fin })}</p>)}
       </div>}
-      {liens.length > 0 && <details className="text-sm"><summary>{tr('planning_links_count', { count: liens.length, hidden: liensMasques.length })}</summary><ul>{liens.map(l => <li key={`${l.p.id}:${l.t.id}`}>{nomTache(l.p)} → {nomTache(l.t)} ({tr('planning_link_type')})</li>)}</ul></details>}
+      {(() => {
+        const ecarts = planning.taches.flatMap(t => { const e = ecartJalonMission(t, missions); return e && e.jours !== 0 ? [{ t, e }] : []; });
+        return ecarts.length > 0 ? <div className="text-xs text-[var(--tblr-muted)]">
+          {ecarts.map(({ t, e }) => <p key={t.id}>{tr('planning_mission_line', { task: t.libelle, title: e.mission.title, date: e.mission.due_date, n: Math.abs(e.jours), sens: tr(e.jours > 0 ? 'planning_mission_later' : 'planning_mission_earlier') })}</p>)}
+        </div> : null;
+      })()}
+      <div className="flex flex-wrap items-start gap-x-6 gap-y-1 empty:hidden">
+      {liens.length > 0 && <details className="text-xs text-[var(--tblr-muted)]"><summary className="cursor-pointer font-semibold">{tr('planning_links_count', { count: liens.length, hidden: liensMasques.length })}</summary><ul>{liens.map(l => <li key={`${l.p.id}:${l.t.id}`}>{nomTache(l.p)} → {nomTache(l.t)} ({tr('planning_link_type')})</li>)}</ul></details>}
 
       {reperes.length > 0 && <details className="text-xs text-[var(--tblr-muted)]"><summary className="cursor-pointer font-semibold">{tr('planning_calendar_visible', { count: reperes.length })}</summary>
         <ul className="mt-2 space-y-1">{reperes.map(r => <li key={r.id}>{r.debut}{r.fin !== r.debut ? ` – ${r.fin}` : ''} · {nomRepere(r)} · {tr(`planning_calendar_type_${r.type}`)}</li>)}</ul>
       </details>}
+      </div>
 
       {planning.taches.length === 0 ? (
         <div className="rounded-xl p-8 text-center text-sm text-[var(--tblr-muted)]" style={{ border: '1px dashed var(--tblr-border)' }}>
@@ -479,6 +662,22 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
                             onDateKeyboard={(geste, date) => enregistrerDates(datesParGeste(originale, geste, date))}
                             onLinkStart={event => commencerLien(event, originale)}
                             onLinkClick={() => { setLienSource(t.id); setMessageGeste(tr('planning_link_choose_target', { name: t.libelle })); }} />
+                          {(() => {
+                            // Jalon de mission lié et à une autre date : un losange vide marque la date de la mission.
+                            const ecartM = ecartJalonMission(t, missions);
+                            if (!ecartM || ecartM.jours === 0 || !periodes.length || ecartM.mission.due_date < periodes[0].debut || ecartM.mission.due_date > periodes[periodes.length - 1].fin) return null;
+                            const couleur = couleurs.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE;
+                            return <div data-planning-mission={t.id} aria-hidden="true" title={tr('planning_mission_marker', { title: ecartM.mission.title, date: ecartM.mission.due_date })}
+                              className="absolute pointer-events-none" style={{ left: x(ecartM.mission.due_date), top: 15, width: 14, height: 14, border: `2px solid ${couleur}`, transform: 'rotate(45deg)', background: 'var(--tblr-surface)' }} />;
+                          })()}
+                          {apercuSucc.filter(f => f.id === t.id).map(f => {
+                            // Fantôme : où la barre irait au relâché. La barre réelle reste en place jusque-là.
+                            const couleur = couleurs.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE;
+                            return <div key={f.id} data-planning-ghost={f.id} aria-hidden="true" className="absolute pointer-events-none rounded flex items-center justify-center text-[0.6875rem] font-semibold text-[var(--tblr-text)]"
+                              style={{ left: x(f.debut), width: t.jalon ? 14 : Math.max(28, largeurBarre(f.debut, f.fin)), top: 7, height: LIGNE_PX - 14, border: `2px dashed ${couleur}`, background: `color-mix(in srgb, ${couleur} 22%, transparent)` }}>
+                              {!t.jalon && `${f.jours > 0 ? '+' : ''}${f.jours} j`}
+                            </div>;
+                          })}
                         </div>
                       </div>
                     );
@@ -531,6 +730,10 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
           nouvelle={tacheOuverte.nouvelle}
           lots={lotsPlanif}
           taches={planning.taches}
+          ouvre={ouvre}
+          joursOuvres={!!calendrier.joursOuvres}
+          jalonsMission={missions}
+          onAlignerMission={alignerMission}
           onSave={enregistrerTache}
           onDelete={() => supprimerTache(tacheOuverte.tache.id)}
           onClose={() => setTacheOuverte(null)}

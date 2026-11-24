@@ -5,7 +5,9 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertPublicHttpUrl } from '../ssrfGuard';
 import { selectAllPages } from '../selectAllPages';
-import { addToSyncIndex, buildSyncIndex, findExistingContact, nonEmptyFields, type SyncContactRow } from '../contactSyncMatch';
+import { PHONE_SLOTS, phonesForGoogle, phonesFromGoogle } from '../../src/lib/contactPhones';
+import { CardDavError, runCardDavSync } from '../carddavSyncRun';
+import { addToSyncIndex, allGoogleEmails, buildSyncIndex, emailsForGoogle, emailsFromGoogle, findExistingContact, nonEmptyFields, type SyncContactRow } from '../contactSyncMatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -17,15 +19,15 @@ export interface RouteDeps {
 // both directions.
 function mapGooglePersonToContactFields(person: any) {
   const name = person.names?.[0] || {};
-  const email = person.emailAddresses?.[0]?.value || '';
-  const phone = person.phoneNumbers?.[0]?.value || '';
+  const emails = emailsFromGoogle(person.emailAddresses);
+  const phones = phonesFromGoogle(person.phoneNumbers);
   const org = person.organizations?.[0] || {};
   const addr = person.addresses?.[0] || {};
   return {
     first_name: name.givenName || '',
     last_name: name.familyName || '',
-    email,
-    phone,
+    ...emails,
+    ...phones,
     company_name: org.name || '',
     job_title: org.title || '',
     city: addr.city || '',
@@ -40,8 +42,8 @@ function mapGooglePersonToContactFields(person: any) {
 function buildGooglePersonPayload(contact: any) {
   return {
     names: [{ givenName: contact.first_name || '', familyName: contact.last_name || '' }],
-    emailAddresses: contact.email ? [{ value: contact.email }] : [],
-    phoneNumbers: contact.phone ? [{ value: contact.phone }] : [],
+    emailAddresses: emailsForGoogle(contact),
+    phoneNumbers: phonesForGoogle(contact),
     organizations: (contact.company_name || contact.job_title)
       ? [{ name: contact.company_name || '', title: contact.job_title || '' }] : [],
     addresses: (contact.city || contact.zip || contact.country)
@@ -125,8 +127,7 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
       // creating a duplicate the first time it's pushed.
       const connectionByEmail = new Map<string, any>();
       for (const person of connections) {
-        const email = person.emailAddresses?.[0]?.value;
-        if (email) connectionByEmail.set(email, person);
+        for (const email of allGoogleEmails(person.emailAddresses)) connectionByEmail.set(email.toLowerCase(), person);
       }
 
       // Toutes les fiches du cabinet, lues UNE fois : rapprochement par identifiant Google,
@@ -134,7 +135,7 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
       // pour que deux fiches Google du même nom n'en fassent pas deux locales.
       const { data: localRows, error: localError } = await selectAllPages<SyncContactRow>(
         () => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-          .select('id, first_name, last_name, company_name, email, email_work, email_home, google_resource_name, is_personal, created_at') as any,
+          .select('id, first_name, last_name, company_name, email, email_work, email_home, email_other, google_resource_name, is_personal, created_at') as any,
       );
       if (localError) throw localError;
       const index = buildSyncIndex(localRows);
@@ -225,7 +226,12 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
                 } else {
                   // Google side is more recent — pull it into the local
                   // contact instead of overwriting the newer data with ours.
-                  const fields = mapGooglePersonToContactFields(googlePerson);
+                  const fields: Record<string, any> = mapGooglePersonToContactFields(googlePerson);
+                  // Une adresse ou un numéro absent côté Google n'efface pas celui de la fiche : une
+                  // fiche jamais envoyée avec ses types n'a, chez Google, qu'une partie de ses valeurs.
+                  for (const key of ['email', 'email_work', 'email_home', 'email_other', 'phone', ...PHONE_SLOTS]) {
+                    if (!fields[key]) delete fields[key];
+                  }
                   await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
                     .update({ ...fields, updated_at: googleUpdatedAt || new Date().toISOString(), google_synced_at: new Date().toISOString() })
                     .eq('id', contact.id);
@@ -238,7 +244,11 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
             // Not linked (or the link just went stale): reuse a connection
             // already pulled this run if the email matches, rather than
             // creating a duplicate Google contact for the same person.
-            const matched = contact.email ? connectionByEmail.get(contact.email) : undefined;
+            const matched = [contact.email_work, contact.email_home, contact.email_other, contact.email]
+              .map((e: string | null) => (e || '').trim().toLowerCase())
+              .filter(Boolean)
+              .map((e: string) => connectionByEmail.get(e))
+              .find(Boolean);
             if (matched) {
               await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
                 .update({ google_resource_name: matched.resourceName, google_synced_at: new Date().toISOString() })
@@ -290,77 +300,10 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
         return res.status(e.status || 400).json({ error: e.message || 'URL invalide' });
       }
 
-      const auth = Buffer.from(`${username}:${password}`).toString('base64');
-
-      // PROPFIND to list vCards
-      const propfindRes = await fetch(url, {
-        method: 'PROPFIND',
-        headers: {
-          Authorization: `Basic ${auth}`,
-          Depth: '1',
-          'Content-Type': 'application/xml',
-        },
-        body: '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><d:getetag/><card:address-data/></d:prop></d:propfind>'
-      });
-
-      if (!propfindRes.ok) {
-        return res.status(400).json({ error: `Erreur CardDAV ${propfindRes.status}: vérifiez l'URL et les identifiants` });
-      }
-
-      const xml = await propfindRes.text();
-
-      // Simple vCard parser — extract FN, EMAIL, TEL, ORG from each vCard block
-      const vcards = xml.match(/BEGIN:VCARD[\s\S]*?END:VCARD/g) || [];
-      const getField = (vcard: string, field: string) => {
-        const m = vcard.match(new RegExp(`(?:^|\\n)${field}[^:]*:([^\\r\\n]*)`, 'i'));
-        return m ? m[1].trim() : '';
-      };
-
-      let imported = 0;
-      let updated = 0;
-
-      const { data: localRows, error: localError } = await selectAllPages<SyncContactRow>(
-        () => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-          .select('id, first_name, last_name, company_name, email, email_work, email_home, google_resource_name, is_personal, created_at') as any,
-      );
-      if (localError) throw localError;
-      const index = buildSyncIndex(localRows);
-
-      for (const vcard of vcards) {
-        const fullName = getField(vcard, 'FN');
-        const email = getField(vcard, 'EMAIL');
-        const phone = getField(vcard, 'TEL');
-        const org = getField(vcard, 'ORG');
-        const nField = getField(vcard, 'N');
-        const nameParts = nField.split(';');
-        const lastName = nameParts[0] || '';
-        const firstName = nameParts[1] || (fullName.split(' ')[0] || '');
-
-        if (!fullName && !email) continue;
-
-        const fields = {
-          first_name: firstName,
-          last_name: lastName || fullName,
-          email: email,
-          phone: phone,
-          company_name: org.split(';')[0] || '',
-        };
-        const existing = findExistingContact(index, fields);
-        const now = new Date().toISOString();
-
-        if (existing) {
-          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update({ ...nonEmptyFields(fields), updated_at: now }).eq('id', existing.id);
-          updated++;
-        } else {
-          const id = crypto.randomUUID();
-          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({ ...fields, updated_at: now, id, address: '', city: '', zip: '', state: '', country: '', ca_amount: 0, created_at: now });
-          addToSyncIndex(index, { id, ...fields, created_at: now });
-          imported++;
-        }
-      }
-
-      res.json({ imported, updated });
+      // Import puis envoi : toute la logique est dans server/carddavSyncRun.ts.
+      res.json(await runCardDavSync(supabaseAdmin, tenantId, { url, username, password: password ?? '' }));
     } catch (error: any) {
+      if (error instanceof CardDavError) return res.status(error.status).json({ error: error.message });
       console.error('CardDAV sync error:', error);
       res.status(500).json({ error: error.message || "Erreur de synchronisation CardDAV" });
     }

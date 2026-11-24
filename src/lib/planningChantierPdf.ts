@@ -1,17 +1,22 @@
 // Export PDF du planning de chantier (Gantt par lot), à la charte du cabinet :
 // en-tête avec logo sur la première page, nuances de gris, pied et « P1|2 ».
 // Complet, ou limité à un lot pour remettre à chaque entreprise SON planning.
-import { reperesCalendrierPlanning } from './planningChantierCalendrier';
+import { estOuvreDuPlanning, reperesCalendrierPlanning } from './planningChantierCalendrier';
+import { ecartJalonMission, type JalonMission } from './planningJalonsMission';
 import { hexVersRgb, RESERVE_COULEUR_NEUTRE } from './reserveCouleurs';
 import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import {
   CALENDRIER_PLANNING, AFFICHAGE_PLANNING, periodesPlanning, positionPlanning, ajouterJours, etatTache, type AffichagePlanning,
-  aujourdhuiIso, bornesPlanning, planningParLot,
-  type LotPlanifiable, type PlanningChantier,
+  aujourdhuiIso, bornesPlanning, planningParLot, incoherencesDependances,
+  type LotPlanifiable, type PlanningChantier, type PeriodePlanning,
 } from './planningChantier';
 
 export interface PlanningPdf { blob: Blob; filename: string }
+
+export type FormatPdfPlanning = 'a4' | 'a3';
+/** Plage de dates AAAA-MM-JJ à imprimer ; une borne absente laisse le planning ouvert de ce côté. */
+export interface PlagePdfPlanning { debut?: string; fin?: string }
 
 export interface PlanningPdfOptions {
   project: { name: string; project_code?: string; address?: string };
@@ -19,14 +24,81 @@ export interface PlanningPdfOptions {
   lotId?: string;
   affichage?: AffichagePlanning;
   couleurs?: Map<string, string>;
+  /** A4 par défaut ; A3 agrandit la page et les caractères (plannings longs). */
+  format?: FormatPdfPlanning;
+  plage?: PlagePdfPlanning;
+  /** Une seule ligne par lot (barre du lot, avancement, dates) au lieu de toutes les tâches ; les dépendances ne sont pas tracées. */
+  synthese?: boolean;
+  /** Indice de diffusion du document (A, B, C...), imprimé dans le résumé et le nom du fichier. */
+  indice?: string;
+  /**
+   * Nombre de périodes (semaines ou mois) par page ; au-delà, le document continue sur des pages suivantes à la
+   * même échelle, colonne des libellés répétée. 0 ou absent : toutes les périodes sur la largeur d'une page.
+   */
+  periodesParPage?: number;
+  /** Jalons de mission de l'affaire : un jalon du planning qui y renvoie le dit, avec un anneau à la date de la mission si elle diffère. */
+  jalonsMission?: JalonMission[];
 }
 
+export const PERIODES_PAR_PAGE_MIN = 4;
+export const PERIODES_PAR_PAGE_MAX = 120;
+/** Entier entre 4 et 120, sinon 0 (pas de découpage). */
+export const periodesParPageValide = (n?: number): number => (Number.isInteger(n) && n! >= PERIODES_PAR_PAGE_MIN ? Math.min(n!, PERIODES_PAR_PAGE_MAX) : 0);
+
+/** Découpe l'axe en tranches de `taille` périodes (la dernière peut être plus courte). */
+export function tranchesPeriodes<T>(periodes: T[], taille: number): T[][] {
+  if (!taille || taille >= periodes.length) return periodes.length ? [periodes] : [];
+  return Array.from({ length: Math.ceil(periodes.length / taille) }, (_, i) => periodes.slice(i * taille, (i + 1) * taille));
+}
+
+/** Indice de diffusion court et sûr pour un nom de fichier : lettres, chiffres, tiret, 12 caractères. */
+export const indiceDiffusion = (brut?: string): string => (brut ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9-]+/g, '').slice(0, 12);
+
+const ROUGE_RETARD = [185, 28, 28] as const;
+const GRIS_FLECHE = [60, 60, 60] as const;
+
+const MOIS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const MOIS_COURTS = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+
+export interface BandeAxePlanning { libelle: string; court: string; debut: number; fin: number }
+
+/**
+ * Bandeau d'axe au-dessus des périodes : mois pour des semaines, année pour des mois.
+ * Aucun bandeau en calendrier relatif (S1, M1) : les dates y sont une origine, pas un calendrier.
+ * Une semaine appartient au mois de son jeudi, comme la numérotation ISO.
+ */
+export function bandesAxePlanning(periodes: PeriodePlanning[], affichage: AffichagePlanning): BandeAxePlanning[] {
+  if (affichage.relatif) return [];
+  const hebdo = affichage.echelle === 'semaines';
+  const bandes: BandeAxePlanning[] = [];
+  let cle = '';
+  periodes.forEach((p, i) => {
+    const ref = hebdo ? ajouterJours(p.debut, 3) : p.debut;
+    const k = hebdo ? ref.slice(0, 7) : ref.slice(0, 4);
+    if (k !== cle) {
+      cle = k;
+      const m = Number(ref.slice(5, 7)) - 1;
+      bandes.push(hebdo
+        ? { libelle: `${MOIS[m]} ${ref.slice(0, 4)}`, court: `${MOIS_COURTS[m]} ${ref.slice(2, 4)}`, debut: i, fin: i + 1 }
+        : { libelle: ref.slice(0, 4), court: ref.slice(2, 4), debut: i, fin: i + 1 });
+    } else bandes[bandes.length - 1].fin = i + 1;
+  });
+  return bandes;
+}
+
+/** Périodes qui rencontrent la plage ; la numérotation (S1, M1) reste celle du planning complet. */
+export function periodesDansPlage(periodes: PeriodePlanning[], plage?: PlagePdfPlanning): PeriodePlanning[] {
+  return periodes.filter(p => (!plage?.debut || p.fin >= plage.debut) && (!plage?.fin || p.debut <= plage.fin));
+}
+export const tacheDansPlage = (t: { debut: string; fin: string }, plage?: PlagePdfPlanning): boolean =>
+  (!plage?.debut || t.fin >= plage.debut) && (!plage?.fin || t.debut <= plage.fin);
+
 const MARGIN = 12;
-const ROW_H = 5.2;
 const GRIS_FOND = [236, 236, 236] as const;
 const GRIS_BARRE = [150, 150, 150] as const;
 const GRIS_FAIT = [45, 45, 45] as const;
 const GRIS_GRILLE = [215, 215, 215] as const;
+const GRIS_REPERE = [170, 170, 170] as const;
 
 const fmt = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 const nettoyer = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
@@ -38,12 +110,21 @@ export async function exportPlanningToPDF(
   opts: PlanningPdfOptions,
 ): Promise<PlanningPdf> {
   const { default: jsPDF } = await import('jspdf');
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const format = opts.format === 'a3' ? 'a3' : 'a4';
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format });
+  // A3 : même mise en page, caractères et lignes agrandis d'un quart.
+  const K = format === 'a3' ? 1.25 : 1;
+  const ROW_H = 5.2 * K;
+  const taille = (pt: number) => doc.setFontSize(pt * K);
+  const plage = opts.plage;
   const lot = opts.lotId ? lots.find(l => l.id === opts.lotId) : undefined;
   const affichage = opts.affichage ?? AFFICHAGE_PLANNING;
   // La largeur des périodes est un zoom écran. Le PDF ajuste toujours toutes les périodes.
-  const LABEL_W = Math.min(140, Math.max(40, 78 * affichage.largeurLibelles / AFFICHAGE_PLANNING.largeurLibelles));
-  const lignes = planningParLot(planning, lots).filter(l => (!opts.lotId || l.lot?.id === opts.lotId) && (affichage.generales || l.lot));
+  const LABEL_W = Math.min(140 * K, Math.max(40 * K, 78 * K * affichage.largeurLibelles / AFFICHAGE_PLANNING.largeurLibelles));
+  const lignes = planningParLot(planning, lots)
+    .filter(l => (!opts.lotId || l.lot?.id === opts.lotId) && (affichage.generales || l.lot))
+    .map(l => ({ ...l, taches: l.taches.filter(t => tacheDansPlage(t, plage)) }))
+    .filter(l => l.taches.length);
   const bornes = bornesPlanning({ ...planning, taches: lignes.flatMap(l => l.taches) });
 
   const titre = lot ? `Planning de chantier, lot ${lot.lot_number} ${lot.lot_title}` : 'Planning de chantier';
@@ -51,85 +132,162 @@ export async function exportPlanningToPDF(
   const letterhead = { title: titre, subtitle: opts.project.name, reference: opts.project.project_code, margin: MARGIN, logo };
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const filename = `Planning_${nettoyer(opts.project.project_code || '')}_${nettoyer(opts.project.name)}${lot ? `_lot${nettoyer(lot.lot_number)}` : ''}.pdf`;
+  const indice = indiceDiffusion(opts.indice);
+  const synthese = opts.synthese === true && !lot;
+  const filename = `Planning_${nettoyer(opts.project.project_code || '')}_${nettoyer(opts.project.name)}${lot ? `_lot${nettoyer(lot.lot_number)}` : ''}${synthese ? '_synthese' : ''}${indice ? `_ind${indice}` : ''}.pdf`;
+
+  // Origine du planning complet, même pour un export limité à un lot ou à une plage.
+  const total = bornesPlanning(planning);
+  const toutesPeriodes = total ? periodesDansPlage(periodesPlanning(total.debut, total.fin, affichage), plage) : [];
+  const parPage = periodesParPageValide(opts.periodesParPage);
+  const blocs = tranchesPeriodes(toutesPeriodes, parPage);
+  const largeurBloc = blocs.length > 1 ? parPage : toutesPeriodes.length;
 
   let y = drawAgencyHeader(doc, settings, letterhead) + 2;
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(17, 24, 39);
+  doc.setFont('helvetica', 'bold'); taille(14); doc.setTextColor(17, 24, 39);
   doc.text(titre, MARGIN, y);
-  y += 5.5;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(75, 85, 99);
+  y += 5.5 * K;
+  doc.setFont('helvetica', 'normal'); taille(9); doc.setTextColor(75, 85, 99);
   const resume = [
     [opts.project.project_code, opts.project.name].filter(Boolean).join(' - '),
     opts.project.address,
     bornes ? `Du ${fmt(bornes.debut)} au ${fmt(bornes.fin)}` : null,
+    plage?.debut || plage?.fin ? `Période imprimée : ${plage.debut ? `du ${fmt(plage.debut)}` : 'depuis le début'} ${plage.fin ? `au ${fmt(plage.fin)}` : 'jusqu’à la fin'}` : null,
     lot?.contact_name ? `Entreprise : ${lot.contact_name}` : null,
-    `Tous les lots dépliés ; tâches générales ${affichage.generales ? 'incluses' : 'masquées'}.`,
+    `${synthese ? 'Synthèse : une barre par lot' : 'Tous les lots dépliés'} ; tâches générales ${affichage.generales ? 'incluses' : 'masquées'}.`,
+    blocs.length > 1 ? `Axe découpé en ${blocs.length} tranches de ${parPage} ${affichage.echelle === 'mois' ? 'mois' : 'semaines'} par page` : null,
     affichage.relatif ? `Origine S1 / M1 : ${bornesPlanning(planning)?.debut ?? ''}` : 'Dates calendaires',
+    planning.calendrier?.joursOuvres ? 'Délais et décalages calculés en jours ouvrés' : null,
+    indice ? `Indice ${indice}` : null,
     `Édité le ${new Date().toLocaleDateString('fr-FR')}`,
   ].filter(Boolean).join('   ·   ');
   const resumeLignes = doc.splitTextToSize(resume, pageW - MARGIN * 2) as string[];
   doc.text(resumeLignes, MARGIN, y);
-  y += resumeLignes.length * 4.5 + 3;
+  y += resumeLignes.length * 4.5 * K + 3;
 
-  if (!bornes || !lignes.length) {
+  if (!bornes || !lignes.length || !toutesPeriodes.length) {
     doc.setFont('helvetica', 'italic');
-    doc.text('Aucune tâche planifiée.', MARGIN, y);
+    doc.text(plage?.debut || plage?.fin ? 'Aucune tâche planifiée sur cette période.' : 'Aucune tâche planifiée.', MARGIN, y);
     drawAgencyFooters(doc, settings, letterhead);
     return { blob: doc.output('blob'), filename };
   }
 
-  // Origine du planning complet, même pour un export limité à un lot.
-  const total = bornesPlanning(planning)!;
-  const periodes = periodesPlanning(total.debut, total.fin, affichage);
   const x0 = MARGIN + LABEL_W;
-  const colW = (pageW - MARGIN - x0) / periodes.length;
-  const premierLundi = periodes[0].debut;
+  // Même largeur de colonne pour toutes les tranches : l'échelle ne change pas d'une page à l'autre.
+  const colW = (pageW - MARGIN - x0) / largeurBloc;
+  const aujourdhui = aujourdhuiIso();
+  const calendrierPlanning = planning.calendrier ?? CALENDRIER_PLANNING;
+  const reperesTous = reperesCalendrierPlanning(calendrierPlanning, toutesPeriodes[0].debut, toutesPeriodes[toutesPeriodes.length - 1].fin, affichage);
+  const aujourdhuiVisibleTotal = aujourdhui >= toutesPeriodes[0].debut && aujourdhui <= toutesPeriodes[toutesPeriodes.length - 1].fin;
+  // Contexte de la tranche en cours de dessin (réassigné par `choisirBloc`).
+  let blocCourant = 0;
+  let periodes = blocs[0];
+  let premierLundi = periodes[0].debut;
+  let derniereFin = periodes[periodes.length - 1].fin;
   const xDate = (iso: string) => x0 + positionPlanning(iso, periodes) * colW;
   const xFin = (iso: string) => xDate(ajouterJours(iso, 1));
-  const aujourdhui = aujourdhuiIso();
-  const reperes = reperesCalendrierPlanning(planning.calendrier ?? CALENDRIER_PLANNING, periodes[0].debut, periodes[periodes.length - 1].fin, affichage);
-  const bandes = reperes.map(r => ({ r, bx: xDate(r.debut), bw: Math.max(0.2, xFin(r.fin) - xDate(r.debut)) }));
+  let aujourdhuiVisible = false;
+  let bandes: { r: ReturnType<typeof reperesCalendrierPlanning>[number]; bx: number; bw: number }[] = [];
+  let bandesAxe: BandeAxePlanning[] = [];
+  let debutsDeBande = new Set<number>();
+  const choisirBloc = (i: number) => {
+    blocCourant = i; periodes = blocs[i];
+    premierLundi = periodes[0].debut; derniereFin = periodes[periodes.length - 1].fin;
+    aujourdhuiVisible = aujourdhui >= premierLundi && aujourdhui <= derniereFin;
+    bandes = reperesCalendrierPlanning(calendrierPlanning, premierLundi, derniereFin, affichage).map(r => ({ r, bx: xDate(r.debut), bw: Math.max(0.2, xFin(r.fin) - xDate(r.debut)) }));
+    bandesAxe = bandesAxePlanning(periodes, affichage);
+    debutsDeBande = new Set(bandesAxe.map(b => b.debut));
+  };
+  choisirBloc(0);
+  const hachures = (bx: number, top: number, bw: number, h: number) => {
+    doc.setDrawColor(195, 200, 207); doc.setLineWidth(0.1);
+    for (let offset = -h; offset < bw; offset += 2) {
+      const a = Math.max(0, offset), b = Math.min(bw, offset + h);
+      doc.line(bx + a, top + h - (a - offset), bx + b, top + h - (b - offset));
+    }
+  };
   const peindreCalendrier = (top: number, h: number) => {
     for (const { r, bx, bw } of bandes) {
       if (r.type === 'ferie') { doc.setFillColor(225, 236, 250); doc.rect(bx, top, bw, h, 'F'); }
-      else {
-        doc.setDrawColor(195, 200, 207); doc.setLineWidth(0.1);
-        for (let offset = -h; offset < bw; offset += 2) {
-          const a = Math.max(0, offset), b = Math.min(bw, offset + h);
-          doc.line(bx + a, top + h - (a - offset), bx + b, top + h - (b - offset));
-        }
-      }
+      else hachures(bx, top, bw, h);
     }
   };
 
-  /** Axe des mois et des semaines, redessiné en tête de chaque page. */
+  /** Meilleur libellé de bandeau qui tient dans sa largeur. */
+  const libelleBande = (b: BandeAxePlanning, largeur: number) =>
+    [b.libelle, b.court].find(l => doc.getTextWidth(l) + 1.5 <= largeur) ?? '';
+
+  /** Axe : repère « Aujourd'hui », bandeau mois ou année, périodes, calendrier. Redessiné en tête de chaque page. */
   const axe = (top: number): number => {
+    const hRepere = aujourdhuiVisible ? 3.6 * K : 0;
+    const hBandeau = bandesAxe.length ? 4.2 * K : 0;
+    const hPeriodes = 9 * K;
+    const haut = top + hRepere;
     doc.setFillColor(...GRIS_FOND);
-    doc.rect(MARGIN, top, pageW - MARGIN * 2, 9, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(17, 24, 39);
-    doc.text('Lot / tâche', MARGIN + 1.5, top + 5.6);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5);
+    doc.rect(MARGIN, haut, pageW - MARGIN * 2, hBandeau + hPeriodes, 'F');
+    doc.setFont('helvetica', 'bold'); taille(7); doc.setTextColor(17, 24, 39);
+    doc.text('Lot / tâche', MARGIN + 1.5, haut + hBandeau + 5.6 * K);
+    if (blocs.length > 1) {
+      doc.setFont('helvetica', 'normal'); taille(5.5); doc.setTextColor(90, 90, 90);
+      doc.text(`Tranche ${blocCourant + 1}/${blocs.length} : ${periodes[0].libelle} à ${periodes[periodes.length - 1].libelle}`, MARGIN + 1.5, haut + hBandeau + 8.2 * K);
+      doc.setFont('helvetica', 'bold'); taille(7); doc.setTextColor(17, 24, 39);
+    }
+    if (bandesAxe.length) {
+      doc.setDrawColor(...GRIS_GRILLE); doc.setLineWidth(0.1);
+      doc.setFont('helvetica', 'bold'); taille(6);
+      for (const b of bandesAxe) {
+        const bx = x0 + b.debut * colW, bw = (b.fin - b.debut) * colW;
+        doc.line(bx, haut, bx, haut + hBandeau + hPeriodes);
+        doc.text(libelleBande(b, bw), bx + 0.8, haut + hBandeau - 1.2 * K);
+      }
+    }
+    doc.setFont('helvetica', 'normal'); taille(5.5); doc.setTextColor(17, 24, 39);
     // Éviter la superposition des libellés pour un planning long.
-    const pas = Math.max(1, Math.ceil(15 / colW));
+    const pas = Math.max(1, Math.ceil(15 * K / colW));
     periodes.forEach((p, i) => {
-      if (i % pas === 0) doc.text(p.libelle, x0 + i * colW + 0.5, top + 5.6);
+      if (i % pas === 0) doc.text(p.libelle, x0 + i * colW + 0.5, haut + hBandeau + 5.6 * K);
     });
-    peindreCalendrier(top + 7, 2);
-    return top + 9;
+    peindreCalendrier(haut + hBandeau + 7 * K, 2 * K);
+    if (aujourdhuiVisible) {
+      const libelle = 'Aujourd’hui';
+      doc.setFont('helvetica', 'bold'); taille(5.5);
+      const w = doc.getTextWidth(libelle) + 2.4;
+      const px = Math.min(pageW - MARGIN - w, Math.max(MARGIN, xDate(aujourdhui) - w / 2));
+      doc.setFillColor(60, 60, 60); doc.rect(px, top, w, hRepere - 0.4, 'F');
+      doc.setTextColor(255, 255, 255); doc.text(libelle, px + 1.2, top + hRepere - 1.1 * K);
+      doc.setTextColor(17, 24, 39);
+      doc.setDrawColor(60, 60, 60); doc.setLineWidth(0.35);
+      doc.line(xDate(aujourdhui), top + hRepere - 0.4, xDate(aujourdhui), haut + hBandeau + hPeriodes);
+    }
+    return haut + hBandeau + hPeriodes;
   };
 
   const grille = (top: number, bas: number) => {
-    doc.setDrawColor(...GRIS_GRILLE); doc.setLineWidth(0.1);
-    periodes.forEach((_, i) => doc.line(x0 + i * colW, top, x0 + i * colW, bas));
-    if (aujourdhui >= premierLundi && aujourdhui <= bornes.fin) {
+    periodes.forEach((_, i) => {
+      // Trait plus marqué au début de chaque mois (ou année), pour lire l'échelle sans l'axe.
+      const debutDeBande = i > 0 && debutsDeBande.has(i);
+      const [r, g, b] = debutDeBande ? GRIS_REPERE : GRIS_GRILLE;
+      doc.setDrawColor(r, g, b);
+      doc.setLineWidth(debutDeBande ? 0.22 : 0.1);
+      doc.line(x0 + i * colW, top, x0 + i * colW, bas);
+    });
+    if (aujourdhuiVisible) {
       doc.setDrawColor(60, 60, 60); doc.setLineWidth(0.35);
       doc.line(xDate(aujourdhui), top, xDate(aujourdhui), bas);
     }
   };
 
-  y = axe(y);
   let topGrille = y;
   let dansGrille = true;
+  /** Lot en cours d'impression : rappelé en tête d'une page qui prolonge sa liste de tâches. */
+  let lotCourant: string | null = null;
+  const ligneSuite = () => {
+    doc.setFillColor(...GRIS_FOND); doc.rect(MARGIN, y, pageW - MARGIN * 2, ROW_H, 'F');
+    peindreCalendrier(y, ROW_H);
+    doc.setFont('helvetica', 'bolditalic'); taille(7.5); doc.setTextColor(17, 24, 39);
+    doc.text(coupe(`${lotCourant} (suite)`, LABEL_W - 3), MARGIN + 1.5, y + ROW_H * 0.7);
+    y += ROW_H;
+  };
   const place = (h: number) => {
     if (y + h <= pageH - 16) return;
     if (dansGrille) grille(topGrille, y);
@@ -137,65 +295,154 @@ export async function exportPlanningToPDF(
     const haut = drawAgencyHeader(doc, settings, letterhead) + 2;
     y = dansGrille ? axe(haut) : haut;
     topGrille = y;
+    if (dansGrille && lotCourant) ligneSuite();
   };
-  const coupe = (texte: string, largeur: number) => (doc.splitTextToSize(texte, largeur) as string[])[0] ?? '';
+  function coupe(texte: string, largeur: number) { return (doc.splitTextToSize(texte, largeur) as string[])[0] ?? ''; }
 
-  for (const ligne of lignes) {
-    const couleur = hexVersRgb(opts.couleurs?.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE);
-    place(ROW_H * 2);
-    const nom = ligne.lot ? `Lot ${ligne.lot.lot_number}  ${ligne.lot.lot_title}` : 'Tâches générales du chantier';
-    doc.setFillColor(...GRIS_FOND); doc.rect(MARGIN, y, pageW - MARGIN * 2, ROW_H, 'F');
-    peindreCalendrier(y, ROW_H);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(17, 24, 39);
-    doc.text(coupe(nom, LABEL_W - 3), MARGIN + 1.5, y + ROW_H * 0.7);
-    // Barre de synthèse du lot, fine.
-    doc.setFillColor(...couleur);
-    doc.rect(xDate(ligne.debut), y + ROW_H * 0.38, Math.max(0.8, xFin(ligne.fin) - xDate(ligne.debut)), ROW_H * 0.24, 'F');
-    y += ROW_H;
-    if (ligne.lot?.contact_name) {
-      doc.setFont('helvetica', 'italic'); doc.setFontSize(6.5); doc.setTextColor(90, 90, 90);
-      doc.text(coupe(ligne.lot.contact_name, LABEL_W - 6), MARGIN + 4, y + ROW_H * 0.6);
-      y += ROW_H * 0.85;
-    }
-    for (const t of ligne.taches) {
-      place(ROW_H);
-      peindreCalendrier(y, ROW_H);
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(17, 24, 39);
-      const retard = etatTache(t, aujourdhui) === 'en_retard' ? ' [Retard]' : '';
-      doc.text(coupe(`${affichage.avancement ? `${t.avancement} % ` : ''}${retard} ${t.libelle}`, LABEL_W - 24), MARGIN + 4, y + ROW_H * 0.7);
-      doc.setFontSize(6); doc.setTextColor(90, 90, 90);
-      doc.text(`${fmt(t.debut).slice(0, 5)} - ${fmt(t.fin).slice(0, 5)}`, x0 - 1.5, y + ROW_H * 0.7, { align: 'right' });
-      if (t.jalon) {
-        doc.setFillColor(...couleur);
-        doc.circle(xDate(t.debut) + 0.5, y + ROW_H / 2, 1.3, 'F');
-      } else {
-        const bx = xDate(t.debut);
-        const bw = Math.max(0.8, xFin(t.fin) - bx);
-        doc.setFillColor(...couleur); doc.rect(bx, y + 1, bw, ROW_H - 2, 'F');
-        if (affichage.avancement && t.avancement > 0) { doc.setFillColor(...GRIS_FAIT); doc.rect(bx, y + 1, bw * (t.avancement / 100), ROW_H - 2, 'F'); }
-      }
-      y += ROW_H;
-    }
-  }
-  grille(topGrille, y);
-  dansGrille = false;
-
+  /** Où chaque tâche est dessinée (page, axe vertical, extrémités), pour tracer les dépendances. */
+  const positions = new Map<string, { page: number; y: number; xa: number; xb: number }>();
   const presentes = new Set(lignes.flatMap(l => l.taches.map(t => t.id)));
   const liaisons = planning.taches.flatMap(t => (t.dependencies ?? []).map(id => ({ t, p: planning.taches.find(p => p.id === id) }))).filter(l => l.p && presentes.has(l.t.id));
-  if (liaisons.length) {
-    y += 5; place(8); doc.setFontSize(8); doc.setTextColor(17, 24, 39);
+  // Même critère que l'écran : écart insuffisant, délai du lien et jours ouvrés compris.
+  const incoherentes = new Set(incoherencesDependances(planning.taches, estOuvreDuPlanning(planning.calendrier)).map(c => `${c.precedent.id}:${c.tache.id}`));
+  const liensTraces = { normaux: 0, conflits: 0 };
+  let jalonMissionVu = false;
+  /**
+   * Flèches fin à début de la tranche, tracées seulement quand les deux tâches sont sur la même page (le trait ne
+   * peut pas traverser un saut de page ni d'une tranche à l'autre) ; les autres liens restent dans la liste.
+   */
+  const tracerLiens = () => {
+    if (synthese) return;
+    const derniere = doc.getNumberOfPages();
+    doc.setLineWidth(0.22);
+    for (const { t, p } of liaisons) {
+      const a = positions.get(p!.id), b = positions.get(t.id);
+      if (!a || !b || a.page !== b.page) continue;
+      const conflit = incoherentes.has(`${p!.id}:${t.id}`);
+      doc.setPage(a.page);
+      doc.setDrawColor(...GRIS_FLECHE); doc.setFillColor(...GRIS_FLECHE);
+      doc.setLineDashPattern(conflit ? [0.8, 0.6] : [], 0);
+      const sortie = a.xb + 1.2, entree = b.xa;
+      const trace: [number, number][] = entree - 0.8 > sortie
+        ? [[a.xb, a.y], [sortie, a.y], [sortie, b.y], [entree - 1.4, b.y]]
+        : [[a.xb, a.y], [sortie, a.y], [sortie, b.y - ROW_H * 0.5], [entree - 1.9, b.y - ROW_H * 0.5], [entree - 1.9, b.y], [entree - 1.4, b.y]];
+      for (let i = 1; i < trace.length; i++) doc.line(trace[i - 1][0], trace[i - 1][1], trace[i][0], trace[i][1]);
+      doc.setLineDashPattern([], 0);
+      doc.triangle(entree, b.y, entree - 1.6, b.y - 0.8, entree - 1.6, b.y + 0.8, 'F');
+      if (conflit) liensTraces.conflits++; else liensTraces.normaux++;
+    }
+    doc.setPage(derniere);
+  };
+  for (let ib = 0; ib < blocs.length; ib++) {
+    choisirBloc(ib);
+    if (ib === 0) y = axe(y);
+    else { doc.addPage(); y = axe(drawAgencyHeader(doc, settings, letterhead) + 2); }
+    topGrille = y; dansGrille = true; lotCourant = null; positions.clear();
+    // Seules les lignes qui rencontrent la tranche sont imprimées dessus.
+    const lignesBloc = blocs.length === 1 ? lignes : lignes
+      .map(l => ({ ...l, taches: l.taches.filter(t => tacheDansPlage(t, { debut: premierLundi, fin: derniereFin })) }))
+      .filter(l => l.taches.length);
+    for (const ligne of lignesBloc) {
+      const couleur = hexVersRgb(opts.couleurs?.get(ligne.lot?.id ?? '') ?? RESERVE_COULEUR_NEUTRE);
+      if (synthese) {
+        // Une ligne par lot : nom, entreprise, nombre de tâches, dates, barre et avancement du lot.
+        const h = ROW_H * 1.5;
+        lotCourant = null;
+        place(h);
+        peindreCalendrier(y, h);
+        const nomLot = ligne.lot ? `Lot ${ligne.lot.lot_number}  ${ligne.lot.lot_title}` : 'Tâches générales du chantier';
+        doc.setFont('helvetica', 'bold'); taille(7.5); doc.setTextColor(17, 24, 39);
+        doc.text(coupe(nomLot, LABEL_W - 24 * K), MARGIN + 1.5, y + h * 0.42);
+        doc.setFont('helvetica', 'italic'); taille(6.5); doc.setTextColor(90, 90, 90);
+        doc.text(coupe([ligne.lot?.contact_name, `${ligne.taches.length} tâche${ligne.taches.length > 1 ? 's' : ''}`].filter(Boolean).join(' · '), LABEL_W - 24 * K), MARGIN + 1.5, y + h * 0.82);
+        doc.setFont('helvetica', 'normal'); taille(6);
+        doc.text(`${fmt(ligne.debut).slice(0, 5)} - ${fmt(ligne.fin).slice(0, 5)}`, x0 - 1.5, y + h * 0.58, { align: 'right' });
+        const bx = xDate(ligne.debut), bw = Math.max(0.8, xFin(ligne.fin) - bx);
+        doc.setFillColor(...couleur); doc.rect(bx, y + 1.3, bw, h - 2.6, 'F');
+        if (affichage.avancement && ligne.avancement > 0) { doc.setFillColor(...GRIS_FAIT); doc.rect(bx, y + 1.3, bw * (ligne.avancement / 100), h - 2.6, 'F'); }
+        doc.setDrawColor(...GRIS_GRILLE); doc.setLineWidth(0.1); doc.line(MARGIN, y + h, pageW - MARGIN, y + h);
+        y += h;
+        continue;
+      }
+      // Un titre de lot n'est jamais seul en bas de page : il emporte avec lui son entreprise et sa première tâche.
+      lotCourant = null;
+      place(ROW_H + (ligne.lot?.contact_name ? ROW_H * 0.85 : 0) + ROW_H);
+      const nom = ligne.lot ? `Lot ${ligne.lot.lot_number}  ${ligne.lot.lot_title}` : 'Tâches générales du chantier';
+      doc.setFillColor(...GRIS_FOND); doc.rect(MARGIN, y, pageW - MARGIN * 2, ROW_H, 'F');
+      peindreCalendrier(y, ROW_H);
+      doc.setFont('helvetica', 'bold'); taille(7.5); doc.setTextColor(17, 24, 39);
+      doc.text(coupe(nom, LABEL_W - 3), MARGIN + 1.5, y + ROW_H * 0.7);
+      // Barre de synthèse du lot, fine.
+      doc.setFillColor(...couleur);
+      doc.rect(xDate(ligne.debut), y + ROW_H * 0.38, Math.max(0.8, xFin(ligne.fin) - xDate(ligne.debut)), ROW_H * 0.24, 'F');
+      y += ROW_H;
+      if (ligne.lot?.contact_name) {
+        doc.setFont('helvetica', 'italic'); taille(6.5); doc.setTextColor(90, 90, 90);
+        doc.text(coupe(ligne.lot.contact_name, LABEL_W - 6), MARGIN + 4, y + ROW_H * 0.6);
+        y += ROW_H * 0.85;
+      }
+      lotCourant = nom;
+      for (const t of ligne.taches) {
+        place(ROW_H);
+        peindreCalendrier(y, ROW_H);
+        doc.setFont('helvetica', 'normal'); taille(7); doc.setTextColor(17, 24, 39);
+        const enRetardT = etatTache(t, aujourdhui) === 'en_retard';
+      const ecartM = ecartJalonMission(t, opts.jalonsMission ?? []);
+      const libelleT = ecartM ? `${t.libelle} (mission ${ecartM.mission.title}${ecartM.jours !== 0 ? ` ${fmt(ecartM.mission.due_date).slice(0, 5)}` : ''})` : t.libelle;
+        // Pourcentage, puis « [Retard] » en rouge (la couleur sert ici une donnée), puis l'intitulé.
+        let xt = MARGIN + 4;
+        if (affichage.avancement) { const pct = `${t.avancement} % `; doc.text(pct, xt, y + ROW_H * 0.7); xt += doc.getTextWidth(pct); }
+        if (enRetardT) {
+          doc.setFont('helvetica', 'bold'); doc.setTextColor(...ROUGE_RETARD);
+          doc.text('[Retard] ', xt, y + ROW_H * 0.7); xt += doc.getTextWidth('[Retard] ');
+          doc.setFont('helvetica', 'normal'); doc.setTextColor(17, 24, 39);
+        }
+        doc.text(coupe(libelleT, Math.max(8, LABEL_W - 24 * K - (xt - MARGIN - 4))), xt, y + ROW_H * 0.7);
+        taille(6); doc.setTextColor(90, 90, 90);
+        doc.text(`${fmt(t.debut).slice(0, 5)} - ${fmt(t.fin).slice(0, 5)}`, x0 - 1.5, y + ROW_H * 0.7, { align: 'right' });
+        if (t.jalon) {
+          doc.setFillColor(...couleur);
+          doc.circle(xDate(t.debut) + 0.5, y + ROW_H / 2, 1.3 * K, 'F');
+          if (enRetardT) { doc.setDrawColor(...ROUGE_RETARD); doc.setLineWidth(0.35); doc.circle(xDate(t.debut) + 0.5, y + ROW_H / 2, 1.3 * K + 0.3, 'S'); }
+        if (ecartM && ecartM.jours !== 0 && ecartM.mission.due_date >= premierLundi && ecartM.mission.due_date <= derniereFin) {
+          // Date de la mission : anneau vide de la couleur du lot.
+          doc.setDrawColor(...couleur); doc.setLineWidth(0.4);
+          doc.circle(xDate(ecartM.mission.due_date) + 0.5, y + ROW_H / 2, 1.5 * K, 'S');
+          jalonMissionVu = true;
+        }
+        } else {
+          const bx = xDate(t.debut);
+          const bw = Math.max(0.8, xFin(t.fin) - bx);
+          doc.setFillColor(...couleur); doc.rect(bx, y + 1, bw, ROW_H - 2, 'F');
+          if (affichage.avancement && t.avancement > 0) { doc.setFillColor(...GRIS_FAIT); doc.rect(bx, y + 1, bw * (t.avancement / 100), ROW_H - 2, 'F'); }
+          if (enRetardT) { doc.setFillColor(...ROUGE_RETARD); doc.rect(bx, y + ROW_H - 1.2, bw, 0.6, 'F'); }
+        }
+        positions.set(t.id, { page: doc.getNumberOfPages(), y: y + ROW_H / 2, xa: xDate(t.debut), xb: t.jalon ? xDate(t.debut) + 0.5 + 1.3 * K : xFin(t.fin) });
+        y += ROW_H;
+      }
+    }
+    lotCourant = null;
+    grille(topGrille, y);
+    tracerLiens();
+  }
+  dansGrille = false;
+
+  if (liaisons.length && !synthese) {
+    const unite = planning.calendrier?.joursOuvres ? 'ouvré' : 'calendaire';
+    y += 5; place(8); taille(8); doc.setTextColor(17, 24, 39);
     doc.text('Dépendances (fin à début, dates modifiables)', MARGIN, y);
     for (const { t, p } of liaisons) {
-      y += 4; place(4); doc.setFontSize(7);
-      doc.text(coupe(`${p!.libelle} -> ${t.libelle}${!presentes.has(p!.id) ? ' (prédécesseur hors périmètre)' : ''}${t.debut <= p!.fin ? ' : dates incohérentes' : ''}`, pageW - MARGIN * 2), MARGIN, y);
+      const delai = t.delais?.[p!.id] ?? 0;
+      y += 4; place(4); taille(7);
+      doc.text(coupe(`${p!.libelle} -> ${t.libelle}${delai ? ` (délai ${delai} jour${delai > 1 ? 's' : ''} ${unite}${delai > 1 ? 's' : ''})` : ''}${!presentes.has(p!.id) ? ' (prédécesseur hors périmètre)' : ''}${incoherentes.has(`${p!.id}:${t.id}`) ? ' : dates incohérentes' : ''}`, pageW - MARGIN * 2), MARGIN, y);
     }
   }
 
-  if (reperes.length) {
-    y += 5; place(8); doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(17, 24, 39);
+  if (reperesTous.length) {
+    y += 5; place(8); doc.setFont('helvetica', 'bold'); taille(8); doc.setTextColor(17, 24, 39);
     doc.text('Calendrier : jours fériés en bleu, congés hachurés (dates inchangées)', MARGIN, y);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
-    for (const r of reperes) {
+    doc.setFont('helvetica', 'normal'); taille(7);
+    for (const r of reperesTous) {
       y += 4; place(4);
       doc.text(coupe(`${fmt(r.debut)}${r.fin !== r.debut ? ` - ${fmt(r.fin)}` : ''} : ${r.libelle}`, pageW - MARGIN * 2), MARGIN, y);
     }
@@ -203,20 +450,39 @@ export async function exportPlanningToPDF(
 
   if (planning.hypotheses.length && !opts.lotId) {
     y += 4; place(8);
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(17, 24, 39);
+    doc.setFont('helvetica', 'bold'); taille(8); doc.setTextColor(17, 24, 39);
     doc.text('Hypothèses retenues', MARGIN, y);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(75, 85, 99);
+    doc.setFont('helvetica', 'normal'); taille(7.5); doc.setTextColor(75, 85, 99);
     for (const h of planning.hypotheses) {
       y += 4; place(4);
       doc.text(coupe(`- ${h}`, pageW - MARGIN * 2), MARGIN, y);
     }
   }
 
+  // Légende : seulement ce qui figure sur le document.
+  const enRetard = lignes.some(l => l.taches.some(t => etatTache(t, aujourdhui) === 'en_retard'));
+  const elements: { texte: string; dessiner: (x: number, yy: number) => void; largeur: number }[] = [
+    { texte: 'Prévu', largeur: 8, dessiner: (x, yy) => { doc.setFillColor(...GRIS_BARRE); doc.rect(x, yy - 2.5, 8, 3, 'F'); } },
+  ];
+  if (affichage.avancement) elements.push({ texte: 'Réalisé', largeur: 8, dessiner: (x, yy) => { doc.setFillColor(...GRIS_FAIT); doc.rect(x, yy - 2.5, 8, 3, 'F'); } });
+  elements.push({ texte: 'Jalon', largeur: 3, dessiner: (x, yy) => { doc.setFillColor(...GRIS_BARRE); doc.circle(x + 1.3, yy - 1, 1.3, 'F'); } });
+  if (enRetard && !synthese) elements.push({ texte: 'Tâche en retard', largeur: 8, dessiner: (x, yy) => { doc.setFillColor(...ROUGE_RETARD); doc.rect(x, yy - 1.6, 8, 0.7, 'F'); } });
+  if (jalonMissionVu) elements.push({ texte: 'Date du jalon de mission', largeur: 3, dessiner: (x, yy) => { doc.setDrawColor(...GRIS_BARRE); doc.setLineWidth(0.4); doc.circle(x + 1.5, yy - 1, 1.5, 'S'); } });
+  if (liensTraces.normaux) elements.push({ texte: 'Dépendance fin à début', largeur: 8, dessiner: (x, yy) => { doc.setDrawColor(...GRIS_FLECHE); doc.setFillColor(...GRIS_FLECHE); doc.setLineWidth(0.22); doc.line(x, yy - 1, x + 6.4, yy - 1); doc.triangle(x + 8, yy - 1, x + 6.4, yy - 1.8, x + 6.4, yy - 0.2, 'F'); } });
+  if (liensTraces.conflits) elements.push({ texte: 'Dépendance en conflit', largeur: 8, dessiner: (x, yy) => { doc.setDrawColor(...GRIS_FLECHE); doc.setLineWidth(0.22); doc.setLineDashPattern([0.8, 0.6], 0); doc.line(x, yy - 1, x + 8, yy - 1); doc.setLineDashPattern([], 0); } });
+  if (reperesTous.some(r => r.type === 'ferie')) elements.push({ texte: 'Jour férié', largeur: 8, dessiner: (x, yy) => { doc.setFillColor(225, 236, 250); doc.rect(x, yy - 2.5, 8, 3, 'F'); } });
+  if (reperesTous.some(r => r.type !== 'ferie')) elements.push({ texte: 'Congé ou fermeture', largeur: 8, dessiner: (x, yy) => { doc.setDrawColor(195, 200, 207); doc.setLineWidth(0.1); doc.rect(x, yy - 2.5, 8, 3, 'S'); hachures(x, yy - 2.5, 8, 3); } });
+  if (aujourdhuiVisibleTotal) elements.push({ texte: 'Aujourd’hui', largeur: 0, dessiner: (x, yy) => { doc.setDrawColor(60, 60, 60); doc.setLineWidth(0.35); doc.line(x + 1, yy - 3, x + 1, yy + 0.6); } });
   y += 7; place(6);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(75, 85, 99);
-  doc.setFillColor(...GRIS_BARRE); doc.rect(MARGIN, y - 2.5, 8, 3, 'F'); doc.text('Prévu', MARGIN + 10, y);
-  if (affichage.avancement) { doc.setFillColor(...GRIS_FAIT); doc.rect(MARGIN + 26, y - 2.5, 8, 3, 'F'); doc.text('Réalisé', MARGIN + 36, y); }
-  doc.circle(MARGIN + 58, y - 1, 1.3, 'F'); doc.text('Jalon', MARGIN + 61, y);
+  doc.setFont('helvetica', 'normal'); taille(7); doc.setTextColor(75, 85, 99);
+  let xl = MARGIN;
+  for (const e of elements) {
+    const bloc = (e.largeur || 2) + 2 + doc.getTextWidth(e.texte) + 6;
+    if (xl > MARGIN && xl + bloc > pageW - MARGIN) { y += 5 * K; place(5 * K); xl = MARGIN; }
+    e.dessiner(xl, y);
+    doc.text(e.texte, xl + (e.largeur || 2) + 2, y);
+    xl += bloc;
+  }
 
   drawAgencyFooters(doc, settings, letterhead);
   return { blob: doc.output('blob'), filename };

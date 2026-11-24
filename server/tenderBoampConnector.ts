@@ -169,6 +169,24 @@ export function villeOf(record: BoampRecord): string | null {
   return departements.length ? `Dépt. ${departements.join(', ')}` : null;
 }
 
+/**
+ * Lieu d'exécution le plus précis de l'avis : « adresse, code postal ville » quand la
+ * rubrique en donne une, sinon ce que renvoie `villeOf` (ville, puis département).
+ */
+export function lieuExecutionOf(record: BoampRecord): string | null {
+  const lieu = findByKey(parseDonnees(record), /lieu.?exec/i);
+  if (lieu && typeof lieu === 'object') {
+    const adresse = findByKey(lieu, /^adresse$/i);
+    const cp = findByKey(lieu, /^code.?postal$|^cp$/i);
+    const ville = findByKey(lieu, /^ville$|^commune$|^localite$/i);
+    const rue = typeof adresse === 'string' ? adresse.trim() : '';
+    const commune = [typeof cp === 'string' || typeof cp === 'number' ? String(cp).trim() : '', typeof ville === 'string' ? ville.trim() : '']
+      .filter(Boolean).join(' ');
+    if (rue && commune) return `${rue}, ${commune}`;
+  }
+  return villeOf(record);
+}
+
 export interface BoampMatchRow {
   id: string;
   tenant_id: string;
@@ -217,7 +235,7 @@ export function mapBoampRecord(record: BoampRecord, source: { id: string; tenant
     description: lines.length ? lines.join('\n') : null,
     pub_date: isoDateTime(record.dateparution),
     status: 'new',
-    ville_execution: villeOf(record),
+    ville_execution: lieuExecutionOf(record),
     pouvoir_adjudicateur: acheteur,
     montant_travaux: null,
     date_limite_reponse: dateLimite,

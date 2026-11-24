@@ -10,7 +10,7 @@ vi.mock('axios', () => ({ default: { get: vi.fn() } }));
 import axios from 'axios';
 import {
   normalizeBoampConfig, buildBoampWhere, mapBoampRecord, isAvisInitial, recordMatchesConfig,
-  villeOf, fetchBoampRecords, BOAMP_API_URL,
+  villeOf, lieuExecutionOf, fetchBoampRecords, BOAMP_API_URL,
 } from '../server/tenderBoampConnector';
 
 const source = { id: 'src-1', tenant_id: 'tenant-1' };
@@ -132,5 +132,15 @@ describe('fetchBoampRecords', () => {
   it('surfaces a readable error for other failures', async () => {
     mockedGet.mockRejectedValueOnce({ response: { status: 503, data: { message: 'Service Unavailable' } } });
     await expect(fetchBoampRecords(normalizeBoampConfig({}))).rejects.toThrow('BOAMP API HTTP 503 : Service Unavailable');
+  });
+
+  it('lieuExecutionOf compose l\'adresse complète quand la rubrique lieu d\'exécution en donne une', () => {
+    const donnees = { LIEU_EXECUTION: { adresse: '12 rue des Lilas', code_postal: '54000', ville: 'Nancy' } };
+    expect(lieuExecutionOf({ donnees: JSON.stringify(donnees) } as any)).toBe('12 rue des Lilas, 54000 Nancy');
+  });
+
+  it('lieuExecutionOf retombe sur la ville, puis le département', () => {
+    expect(lieuExecutionOf({ donnees: JSON.stringify({ LIEU_EXEC: { ville: 'Metz' } }) } as any)).toBe('Metz');
+    expect(lieuExecutionOf({ code_departement: ['57'] } as any)).toBe('Dépt. 57');
   });
 });

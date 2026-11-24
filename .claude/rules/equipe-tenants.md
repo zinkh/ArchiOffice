@@ -491,16 +491,15 @@ administrateur ou manager), `SharedProjects.tsx` (`/partages`), entrée de menu
 Tests : `tests/projectShares.test.ts`.
 
 **La fiche d'un confrère est la vraie interface d'ArchiOffice** (`SharedProjectShell.tsx`, `src/lib/sharedTabs.ts`,
-`tests/sharedDocumentDpgf.test.ts`, `src/lib/__tests__/sharedTabs.test.ts`). `/partages?affaire=<id>` reprend l'en-tête de
+`src/lib/__tests__/sharedTabs.test.ts`). `/partages?affaire=<id>` reprend l'en-tête de
 la fiche du cabinet (retour, nom, code, pastille, cabinet qui partage) et sa vraie barre d'onglets (`ProjectTabBar`, prop
 `isTabVisible`) ; l'onglet ouvert vit dans `?tab=`. **Un onglet n'existe que si l'atelier est accordé** (`sharedVisibleTabs` :
-`lots` et `documents` sous INFOS, `tasks` TACHES, `cctp` et `dpgf` PRO avec deux sous-onglets, `act` ACT, `reports` RDT,
+`lots` et `documents` sous INFOS, `tasks` TACHES, `cctp` et `dpgf` PRO, `act` ACT, `reports` RDT,
 `reserves` AOR, `gpa` GPA) ; un onglet non accordé demandé dans l'adresse retombe sur INFOS (`sharedInitialTab`). Rien n'a changé
 côté serveur hormis `tenantName` dans `GET /api/shared/projects/:id` (le nom que la liste montrait déjà) : le garde
 `guestAccessGuard` et les listes blanches restent la seule barrière, la fiche du confrère n'appelle que `/api/shared`. **Pas de
-réutilisation de `ProjectDetail.tsx` ni des éditeurs PRO** (ils lisent des routes du cabinet fermées aux invités) : le CCTP est
-une feuille avec un plan des lots et chapitres, le DPGF une grille (unité, quantité, P.U., total, sous-total de lot recalculé
-depuis les articles, jamais un « pour mémoire ») avec une ligne de détail repliable pour proposer et commenter. **Promotion** :
+réutilisation de `ProjectDetail.tsx` ni des éditeurs PRO** (ils lisent des routes du cabinet fermées aux invités) : le CCTP et le DPGF passent par `SharedDocument.tsx` (relecture d'abord, retours envoyés en lot, voir ci-dessus), un seul écran
+à onglets rendu dans l'onglet PRO. **Promotion** :
 pastille et bouton « Essayer ArchiOffice » (`/register`) dans l'en-tête, mention en pied de page ; rien sur les boutons
 grisés. **Ateliers de chantier** (`SharedChantier.tsx`, `SharedKpis.tsx`, `tests/sharedChantier.test.ts`) : réserves AOR et GPA en
 tableau (n°, intitulé, localisation, entreprise, échéance avec jours de retard, statut en pastille colorée, détail repliable
@@ -509,7 +508,7 @@ pour description, réponse et échéance) sous quatre chiffres (total, à lever,
 à droite, libellés visibles au-dessus des champs. ACT en tableaux à en-têtes avec le repère « Meilleur prix » (offre conforme
 la moins chère du lot, jamais une offre non conforme). Tâches en tableau avec barre d'avancement. Mécaniques inchangées :
 enregistrement à la sortie du champ, proposition pour l'ACT, droits revérifiés par le serveur. Le détail (photos, présences,
-pénalités, adresses) est décrit plus haut ; **pas encore fait** : plan des réserves ; pas vérifié dans un navigateur.
+pénalités, adresses) est décrit plus haut ; pas vérifié dans un navigateur.
 
 **Écriture par proposition** (`project_share_proposals`,
 `supabase/migrate_project_share_proposals.sql`, `server/routes/projectShareProposals.ts`).
@@ -602,7 +601,7 @@ qu'il n'est pas ajouté à cette liste. Le métré (`metre`) en fait partie.
   lignes (`metreEnTexte`). Tests : `tests/projectShareMetre.test.ts`,
   `tests/sharedDocumentMetre.test.ts`.
 
-Écrans : `ProposeEdit` dans `SharedDocument.tsx` (invité), `ShareProposalsInbox.tsx`
+Écran du confrère (`SharedDocument.tsx`, un seul pour le CCTP et le DPGF, onglets) : **lecture d'abord, annotation au clic**. Trois zones (sommaire, document, « Mes retours »), bascule Lecture / Annoter ; un passage sélectionné affiche seul ses actions (commenter, proposer une modification, quantité, unité, prix, métré). **Ce que le confrère propose ou commente s'accumule en brouillons locaux et part en une fois** (« Envoyer mes retours ») : le serveur est inchangé, l'envoi appelle `POST .../proposals` et `.../comments` à la suite, le premier refus (dont `PROPOSAL_LIMIT`) arrête l'envoi et laisse le reste en brouillon avec le message. L'aperçu avant/après d'un texte vient de `src/lib/wordDiff.ts` (segments, jamais de HTML injecté). Mise en forme selon `DESIGN.md` (jetons `--tblr-*`, bleu unique, statuts en vert, orange, rouge). Tests : `tests/sharedDocumentMetre.test.ts`, `src/lib/__tests__/wordDiff.test.ts`. Pas encore vérifié dans un navigateur. Autres écrans : `ShareProposalsInbox.tsx`
 (cabinet : actuel face à proposé, approuver, refuser avec motif, alerte de limite, historique)
 et niveau « propositions » du choix des droits par lot dans `ProjectSharesPanel.tsx`. Tests :
 `tests/projectShareProposals.test.ts`, `tests/projectShareProposalsPrices.test.ts`,
@@ -636,6 +635,14 @@ journalise dans `contact_merge_log`. Réservée au rôle serveur (`REVOKE` pour 
 - **Onglet « Affaires » et choix de la société** : `GET /api/contacts/:id/projects` (`server/routes/contacts.ts`, `tests/contactProjects.test.ts`) rend les affaires où la fiche tient un rôle : maître d'ouvrage (`projects.client_id`), lot (`project_lots.contact_id`), cotraitant, intervenant. Il y ajoute celles de la société de rattachement et des interlocuteurs : un artisan est rattaché à l'affaire par la fiche société OU par la fiche personne selon la saisie, et ne lire que `client_id` le faisait disparaître. Le choix de la société passe par `CompanyPicker.tsx` (recherche dans les sociétés du cabinet, création de la société tapée proposée quand rien ne correspond, ou de celle déjà saisie sur la fiche).
 - **Fusion automatique des doublons sûrs** (`POST /api/contacts/merge-safe`, `planSafeMerges` / `isSafeDuplicateGroup` dans `src/lib/contactMerge.ts`, `SafeMergeDialog.tsx`, bouton du bandeau des doublons, administrateurs et managers) : un groupe est sûr quand toutes les fiches ont la même clé de nom ET qu'aucune colonne à choix n'a deux valeurs différentes (les vides se complètent, les listes se cumulent). Les groupes réunis par e-mail ou SIRET sous des noms différents, ou en conflit, restent à la main. `dry_run: true` rend l'aperçu (groupes, fiches en double, groupes laissés de côté) ; sinon le mot FUSIONNER est exigé et le serveur fusionne 25 groupes par appel via la même fonction `merge_contacts` (fiche conservée = `suggestPrimary`), l'écran rappelant la route jusqu'à épuisement. Tests : `tests/contactMergeRoute.test.ts`, `src/lib/__tests__/contactMerge.test.ts`.
 - **Import Google Contacts et CardDAV : jamais de doublon à la resynchronisation** (`server/contactSyncMatch.ts`, `tests/contactSyncMatch.test.ts`). Un contact importé est rapproché d'une fiche par identifiant Google (`google_resource_name`), puis e-mail (les trois champs, sans tenir compte de la casse), puis nom (`nameKey`) ; la fiche la plus ancienne l'emporte, un contact personnel n'est jamais rapproché, une valeur importée vide n'efface rien. L'ancien code cherchait par e-mail avec `.maybeSingle()` : une société sans e-mail était recréée à chaque synchro, et dès que deux fiches partageaient un e-mail l'erreur ignorée en faisait créer une de plus. Les doublons déjà créés se traitent avec la fusion.
+- **Adresses e-mail et téléphones typés** (Google et CardDAV) : Google range chaque valeur sous un type (travail, domicile, mobile...), la fiche a un champ par type et `email` / `phone` pour la valeur principale (travail ou mobile d'abord). `emailsFromGoogle` (`server/contactSyncMatch.ts`) et `phonesFromGoogle` (`src/lib/contactPhones.ts`) rangent, `emailsForGoogle` et `phonesForGoogle` renvoient ; un type connu garde sa place, sinon première place libre, jamais d'écrasement. Un numéro sans type est rangé en mobile (06/07) ou en fixe (`legacyPhoneSlot`), et le formulaire fait pareil pour une fiche qui n'a que l'ancienne colonne (`handleEdit`). CardDAV passe par `server/vcardTypedValues.ts`, qui ramène les types vCard à ceux de Google. Dans la branche « Google plus récent », une valeur absente chez Google n'efface pas celle de la fiche.
+- **Envoi vers CardDAV** (`server/carddavSyncRun.ts`, appelé par `POST /api/sync/carddav`, `tests/carddavPush.test.ts`). Même principe que l'envoi Google : réglage `settings.carddav_sync_categories` (Réglages > CardDAV, **vide par défaut : rien ne part**), lien `contacts.carddav_href` / `carddav_etag` / `carddav_synced_at` (`supabase/migrate_carddav_push.sql`, additive : une instance non migrée importe comme avant, la réponse porte `pushUnavailable: true`). Un contact « Personnel » ne part jamais. À ne pas défaire :
+  - **Jamais d'écrasement à l'aveugle** : création avec `If-None-Match: *`, mise à jour avec `If-Match` (l'ETag courant du serveur), un 412 est un conflit compté (`pushConflicts`), pas forcé. **Jamais de suppression**, dans un sens comme dans l'autre.
+  - **Jamais d'écriture hors du carnet choisi** : l'adresse d'une vCard donnée par le serveur est résolue contre l'adresse du carnet (`resolveCardHref`) et refusée si elle en sort (autre hôte, autre dossier). Un serveur ne peut donc pas faire écrire ailleurs.
+  - **Décision à l'import** (`decidePull`) : vCard inchangée depuis le dernier échange (même ETag), rien ; changée côté serveur seulement, importée ; changée des deux côtés, la plus récente l'emporte (`getlastmodified` demandé au PROPFIND) et **sans date serveur on ne tranche pas** (`conflict`, rien d'écrasé). Une catégorie non envoyée garde le comportement d'avant (le serveur l'emporte).
+  - **Plafond de 300 envois par synchronisation** (`CARDDAV_PUSH_LIMIT`), le reste est compté dans `pushRemaining`. Les identifiants (carnet, utilisateur, mot de passe) ne sont toujours pas conservés : ils se saisissent à chaque synchronisation (Contacts > CardDAV).
+  - **La vCard est fabriquée par `server/vcardBuild.ts`** (3.0, `UID` = id de la fiche, texte échappé, lignes repliées à 75 caractères) et ne contient que ce que la lecture sait relire : un aller-retour ne doit rien inventer ni perdre. La lecture décode les `\,` `\;` `\n` (`splitVcardValue`) et lit le XML de la réponse (`parseCardMultistatus`, entités décodées), et une société (FN identique à l'ORG) n'est plus rangée comme nom de famille.
+  - **Limite connue** : la fusion de contacts (`merge_contacts`) ne reporte pas encore le lien CardDAV de la fiche supprimée ; la vCard du doublon reste sur le serveur et se rapproche de la fiche conservée par e-mail ou par nom à l'import suivant.
 - **Relances** : filtre par statut ou « Relances à faire » dans le tableau ; règle d'alerte `contact_relance_echue` (`server/agentAlerts.ts`, seuil en jours de retard, 0 par défaut, contacts personnels exclus, colonne absente = aucune alerte).
 
 ### Visibilité des contacts personnels

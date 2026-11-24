@@ -257,6 +257,36 @@ describe('POST /api/tender-rss-matches/:id/convert (description and type carried
   });
 });
 
+describe('POST /api/tender-rss-matches/:id/convert (adresse du site reprise du lieu d\'exécution)', () => {
+  it('copie le lieu d\'exécution dans adresse_terrain quand c\'est une adresse', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('tender_rss_matches', [{
+      id: 'm-addr-1', tenant_id: tenantId, title: 'Groupe scolaire', ville_execution: '12 rue des Lilas, 54000 Nancy', status: 'new',
+    }]);
+    const res = await request(app).post('/api/tender-rss-matches/m-addr-1/convert').set(authHeader(token));
+    expect(res.status).toBe(201);
+    const tender = fakeSupabaseAdmin.getTable('tenders').find((t: any) => t.id === res.body.id);
+    expect(tender?.adresse_terrain).toBe('12 rue des Lilas, 54000 Nancy');
+    expect(tender?.ville_execution).toBe('12 rue des Lilas, 54000 Nancy');
+  });
+
+  it('laisse adresse_terrain vide quand le lieu n\'est qu\'un département ou un code NUTS', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('tender_rss_matches', [
+      { id: 'm-addr-2', tenant_id: tenantId, title: 'A', ville_execution: 'Dépt. 57, 54', status: 'new' },
+      { id: 'm-addr-3', tenant_id: tenantId, title: 'B', ville_execution: 'NUTS FRF31', status: 'new' },
+    ]);
+    for (const id of ['m-addr-2', 'm-addr-3']) {
+      const res = await request(app).post(`/api/tender-rss-matches/${id}/convert`).set(authHeader(token));
+      expect(res.status).toBe(201);
+      const tender = fakeSupabaseAdmin.getTable('tenders').find((t: any) => t.id === res.body.id);
+      expect(tender?.adresse_terrain ?? null).toBeNull();
+    }
+  });
+});
+
 describe('GET /api/tender-rss-matches?tender_id= (source announcement lookup for a converted tender)', () => {
   it('returns the match that was converted into this tender', async () => {
     const tenantId = makeTenant();

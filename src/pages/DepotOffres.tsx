@@ -16,6 +16,9 @@ import {
   MAX_LIGNES_SAISIE, controlerLot, extensionDe, formatOctets, validerSaisie, type DepotKind,
 } from '../lib/consultationDepot';
 import { euros, formaterDate, formaterDateHeure } from '../lib/depotAffichage';
+import { libelleVisite } from '../lib/actVisites';
+import type { ChoixQuantite } from '../lib/quantitesConfirmation';
+import { MAX_OBJET_CARACTERES, MAX_QUESTION_CARACTERES, validerQuestion } from '../lib/depotQuestions';
 
 interface Contexte {
   operation: string | null;
@@ -34,6 +37,26 @@ interface Contexte {
     liens?: Array<{ libelle: string; url: string }>;
   }>;
   depots: Array<{ id: string; lot_id: string | null; kind: DepotKind; version: number; nom: string | null; taille: number | null; hors_delai: boolean; recu_le: string }>;
+  /** Visite de site : le créneau de l'entreprise, à défaut les créneaux proposés (dates du chantier, sans fuseau). */
+  visite?: { creneau: string | null; propositions: string[]; lieu: string | null; consignes: string | null; confirmee_le?: string | null } | null;
+  /** Questions de l'entreprise (avec la réponse du cabinet quand elle existe) et réponses rendues publiques. */
+  questions?: {
+    date_limite: string | null; ouvertes: boolean;
+    mes_questions: Array<{ id: string; objet: string | null; question: string; lot_id: string | null; envoyee_le: string; reponse: string | null; reponse_le: string | null }>;
+    reponses_publiques: Array<{ id: string; objet: string | null; question: string; reponse: string; reponse_le: string | null }>;
+  } | null;
+  /** Additifs au DCE qui concernent cette entreprise (du plus récent au plus ancien) et date de son accusé de réception. */
+  additifs?: Array<{ id: string; numero: number; date: string; motif: string; pieces: Array<{ libelle: string; indice: string | null }>; accuse_le: string | null }>;
+  /** Quantités que le cabinet demande de confirmer (présent seulement après sa demande), avec la réponse déjà donnée. */
+  quantites?: {
+    demandees_le: string;
+    lots: Array<{ lot: string; lignes: Array<{
+      ligne_id: string; code: string; titre: string; unite: string; quantite_dossier: number; quantite_entreprise: number;
+      reponse: { choix: ChoixQuantite; quantite: number | null } | null;
+    }> }>;
+  } | null;
+  /** Tout le dossier en une archive : nombre de fichiers et taille connue ; absent s'il n'y a rien à rassembler. */
+  dossier_zip?: { fichiers: number; taille: number | null } | null;
 }
 
 interface Recu { recu_le: string; hors_delai: boolean; accuse_envoye: boolean; elements: string[]; empreintes: string[] }
@@ -48,6 +71,273 @@ async function lireReponse(res: Response): Promise<any> {
   const corps = await res.json().catch(() => ({}));
   if (!res.ok) { const e: any = new Error(corps?.error || 'Une erreur est survenue.'); e.status = res.status; e.corps = corps; throw e; }
   return corps;
+}
+
+/** Nom du fichier annoncé par le serveur (Content-Disposition), à défaut un nom neutre. */
+function nomFichierReponse(res: Response): string {
+  const entete = res.headers.get('Content-Disposition') || '';
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(entete)?.[1];
+  if (utf8) { try { return decodeURIComponent(utf8); } catch { /* repli ci-dessous */ } }
+  return /filename="([^"]+)"/i.exec(entete)?.[1] || 'Dossier de consultation.zip';
+}
+
+/**
+ * Bouton « tout le dossier en une fois ». Un simple lien afficherait une page d'erreur brute au
+ * premier refus (archive trop lourde, serveur occupé) : on télécharge donc par fetch et l'on dit
+ * clairement ce qui se passe, la préparation de l'archive pouvant prendre quelques secondes.
+ */
+function TelechargerDossier({ base, zip }: { base: string; zip: NonNullable<Contexte['dossier_zip']> }) {
+  const [etat, setEtat] = useState<'repos' | 'prepare'>('repos');
+  const [erreur, setErreur] = useState<string | null>(null);
+  const telecharger = async () => {
+    setEtat('prepare'); setErreur(null);
+    try {
+      const res = await appelPublic(`${base}/dossier.zip`);
+      if (!res.ok) { const corps = await res.json().catch(() => ({})); throw new Error(corps?.error || 'Le téléchargement a échoué.'); }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = nomFichierReponse(res);
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e: any) {
+      setErreur(e?.message || 'Le téléchargement a échoué.');
+    } finally {
+      setEtat('repos');
+    }
+  };
+  return (
+    <section aria-label="Tout le dossier de consultation" className="space-y-2">
+      <button type="button" onClick={telecharger} disabled={etat === 'prepare'}
+        className={`${BOUTON} border w-full sm:w-auto`} style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}>
+        {etat === 'prepare' ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : <IconDownload size={16} aria-hidden />}
+        {etat === 'prepare' ? 'Préparation de l’archive…' : 'Télécharger tout le dossier en une fois (zip)'}
+      </button>
+      <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+        {zip.fichiers} fichier{zip.fichiers > 1 ? 's' : ''}{zip.taille ? ` · environ ${formatOctets(zip.taille)}` : ''}, rangés par pièce. Les liens externes sont listés dans l’archive.
+      </p>
+      {erreur && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erreur}</p>}
+    </section>
+  );
+}
+
+function VisiteDeSite({ visite, base, onChange }: { visite: NonNullable<Contexte['visite']>; base: string; onChange: () => void }) {
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const confirmer = async () => {
+    setEnvoi(true); setErreur(null);
+    try { await lireReponse(await appelPublic(`${base}/visite/confirmer`, { method: 'POST' })); onChange(); }
+    catch (e: any) { setErreur(e?.message || 'La confirmation a échoué.'); }
+    finally { setEnvoi(false); }
+  };
+  return (
+    <section aria-label="Visite de site" className="space-y-2">
+      <h2 className="text-sm font-bold uppercase tracking-wider">Visite de site</h2>
+      <div className="rounded-lg px-3 py-2.5 text-sm space-y-1" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+        {visite.creneau
+          ? <p>Votre visite est fixée au <strong>{libelleVisite(visite.creneau)}</strong>.</p>
+          : (
+            <>
+              <p>Créneaux de visite proposés. Merci d’indiquer au cabinet celui que vous retenez :</p>
+              <ul className="list-disc pl-5">{visite.propositions.map(d => <li key={d}><strong>{libelleVisite(d)}</strong></li>)}</ul>
+            </>
+          )}
+        {visite.lieu && <p>Lieu : {visite.lieu}</p>}
+        {visite.consignes && <p className="whitespace-pre-line">Consignes : {visite.consignes}</p>}
+        {visite.creneau && (visite.confirmee_le
+          ? <p className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-200"><IconCheck size={15} aria-hidden /> Présence confirmée le {formaterDateHeure(visite.confirmee_le)}.</p>
+          : (
+            <button type="button" onClick={confirmer} disabled={envoi} className={`${BOUTON} border mt-1`} style={{ borderColor: 'var(--tblr-border)' }}>
+              {envoi ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : <IconCheck size={16} aria-hidden />} Confirmer ma présence
+            </button>
+          ))}
+        {erreur && <p role="alert" className="text-red-700 dark:text-red-300">{erreur}</p>}
+      </div>
+    </section>
+  );
+}
+
+
+const nombre = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 6 });
+
+/**
+ * Quantités à confirmer : pour chaque poste dont la quantité de l'entreprise diffère du dossier, elle reprend celle du
+ * dossier, maintient la sienne ou en propose une autre. Sa réponse est transmise au cabinet et ne modifie jamais son offre.
+ */
+function QuantitesAConfirmer({ base, quantites, onEnvoyee }: { base: string; quantites: NonNullable<Contexte['quantites']>; onEnvoyee: () => void }) {
+  type Choix = { choix: ChoixQuantite | ''; quantite: string };
+  const lignes = quantites.lots.flatMap(l => l.lignes);
+  const [saisies, setSaisies] = useState<Record<string, Choix>>(() => Object.fromEntries(lignes.map(l => [
+    l.ligne_id, l.reponse ? { choix: l.reponse.choix, quantite: l.reponse.quantite != null ? String(l.reponse.quantite).replace('.', ',') : '' } : { choix: '', quantite: '' },
+  ])));
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [ok, setOk] = useState(false);
+  const maj = (id: string, c: Partial<Choix>) => { setOk(false); setSaisies(prev => ({ ...prev, [id]: { ...prev[id], ...c } })); };
+  const reste = lignes.filter(l => !saisies[l.ligne_id]?.choix).length;
+
+  const envoyer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (reste > 0) { setErreur(`Indiquez votre choix pour les ${reste} poste${reste > 1 ? 's' : ''} restant${reste > 1 ? 's' : ''}.`); return; }
+    const reponses = lignes.map(l => {
+      const c = saisies[l.ligne_id];
+      return c.choix === 'autre' ? { ligne_id: l.ligne_id, choix: 'autre', quantite: Number(c.quantite.replace(',', '.')) } : { ligne_id: l.ligne_id, choix: c.choix };
+    });
+    if (reponses.some(r => r.choix === 'autre' && (!Number.isFinite(r.quantite) || (r.quantite as number) < 0))) {
+      setErreur('Indiquez une quantité positive pour les postes où vous proposez une autre quantité.'); return;
+    }
+    setEnvoi(true); setErreur(null);
+    try {
+      await lireReponse(await appelPublic(`${base}/quantites`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reponses }),
+      }));
+      setOk(true); onEnvoyee();
+    } catch (err: any) {
+      setErreur(err?.message || 'Votre réponse n’a pas pu être envoyée.');
+    } finally { setEnvoi(false); }
+  };
+
+  return (
+    <section aria-label="Quantités à confirmer" className="space-y-3">
+      <h2 className="text-sm font-bold uppercase tracking-wider">Quantités à confirmer</h2>
+      <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
+        Votre offre est chiffrée sur des quantités différentes de celles du dossier. Pour chaque poste, indiquez la quantité à retenir. Votre réponse est transmise au cabinet, qui l’examine : elle ne modifie pas votre offre d’elle-même.
+      </p>
+      <form onSubmit={envoyer} className="space-y-4">
+        {quantites.lots.map(l => (
+          <div key={l.lot} className="space-y-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{l.lot}</h3>
+            <ul className="space-y-2">
+              {l.lignes.map(x => {
+                const c = saisies[x.ligne_id];
+                const nom = `quantite-${x.ligne_id}`;
+                return (
+                  <li key={x.ligne_id} className="rounded-lg px-3 py-2.5 text-sm space-y-1.5" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+                    <p><strong>{x.code}</strong> {x.titre}</p>
+                    <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                      Votre offre : {nombre(x.quantite_entreprise)} {x.unite} · Dossier : {nombre(x.quantite_dossier)} {x.unite}
+                    </p>
+                    <fieldset className="space-y-1">
+                      <legend className="sr-only">Quantité retenue pour {x.code} {x.titre}</legend>
+                      <label className="flex items-center gap-2"><input type="radio" name={nom} checked={c.choix === 'moe'} onChange={() => maj(x.ligne_id, { choix: 'moe' })} /> Je reprends la quantité du dossier ({nombre(x.quantite_dossier)} {x.unite})</label>
+                      <label className="flex items-center gap-2"><input type="radio" name={nom} checked={c.choix === 'maintenue'} onChange={() => maj(x.ligne_id, { choix: 'maintenue' })} /> Je maintiens ma quantité ({nombre(x.quantite_entreprise)} {x.unite})</label>
+                      <label className="flex items-center gap-2 flex-wrap"><input type="radio" name={nom} checked={c.choix === 'autre'} onChange={() => maj(x.ligne_id, { choix: 'autre' })} /> Je propose une autre quantité
+                        <input type="text" inputMode="decimal" aria-label={`Autre quantité pour ${x.code}`} disabled={c.choix !== 'autre'} value={c.quantite}
+                          onChange={ev => maj(x.ligne_id, { quantite: ev.target.value })}
+                          className="w-28 rounded-md px-2 py-1 text-sm" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }} /> {x.unite}
+                      </label>
+                    </fieldset>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+        <button type="submit" disabled={envoi} className={`${BOUTON} border`} style={{ borderColor: 'var(--tblr-border)' }}>
+          {envoi ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : <IconCheck size={16} aria-hidden />} Envoyer ma réponse
+        </button>
+        {ok && <p role="status" className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-200 text-sm"><IconCheck size={15} aria-hidden /> Votre réponse a été transmise au cabinet.</p>}
+        {erreur && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erreur}</p>}
+      </form>
+    </section>
+  );
+}
+
+/** Poser une question au cabinet, suivre les réponses, lire les réponses publiées pour tous. */
+function QuestionsEntreprise({ base, ctx, onEnvoyee }: { base: string; ctx: Contexte; onEnvoyee: () => void }) {
+  const q = ctx.questions;
+  const [objet, setObjet] = useState('');
+  const [texte, setTexte] = useState('');
+  const [lotId, setLotId] = useState('');
+  const [envoi, setEnvoi] = useState(false);
+  const [erreur, setErreur] = useState<string | null>(null);
+  const [envoyee, setEnvoyee] = useState(false);
+  if (!q) return null;
+  const lotLibelle = (id: string | null) => { const l = ctx.lots.find(x => x.id === id); return l ? `Lot ${l.lot_number} ${l.lot_title}` : null; };
+
+  const poser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const controle = validerQuestion({ objet, question: texte });
+    if (!controle.ok) { setErreur(controle.raison); return; }
+    setEnvoi(true); setErreur(null); setEnvoyee(false);
+    try {
+      await lireReponse(await appelPublic(`${base}/questions`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ objet, question: texte, lot_id: lotId || null }),
+      }));
+      setObjet(''); setTexte(''); setLotId(''); setEnvoyee(true); onEnvoyee();
+    } catch (err: any) {
+      setErreur(err?.message || 'La question n’a pas pu être envoyée.');
+    } finally { setEnvoi(false); }
+  };
+
+  return (
+    <section aria-label="Questions" className="space-y-3">
+      <h2 className="text-sm font-bold uppercase tracking-wider">Questions au maître d’œuvre</h2>
+      {q.ouvertes ? (
+        <form onSubmit={poser} className="space-y-2 rounded-lg p-3" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+          <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+            {q.date_limite ? <>Questions possibles jusqu’au <strong>{formaterDateHeure(q.date_limite)}</strong>. </> : null}
+            Une réponse d’intérêt général peut être communiquée à toutes les entreprises consultées, sans citer votre nom.
+          </p>
+          <input className={CHAMP} style={CHAMP_STYLE} value={objet} maxLength={MAX_OBJET_CARACTERES} placeholder="Objet (facultatif)" aria-label="Objet de la question" onChange={e => setObjet(e.target.value)} />
+          {ctx.lots.length > 1 && (
+            <select className={CHAMP} style={CHAMP_STYLE} value={lotId} aria-label="Lot concerné" onChange={e => setLotId(e.target.value)}>
+              <option value="">Question générale</option>
+              {ctx.lots.map(l => <option key={l.id} value={l.id}>Lot {l.lot_number} : {l.lot_title}</option>)}
+            </select>
+          )}
+          <textarea className={CHAMP} style={CHAMP_STYLE} rows={4} value={texte} maxLength={MAX_QUESTION_CARACTERES} placeholder="Votre question" aria-label="Votre question" onChange={e => setTexte(e.target.value)} />
+          <div className="flex items-center gap-3">
+            <button type="submit" disabled={envoi || !texte.trim()} className={`${BOUTON} bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900`}>
+              {envoi ? <IconLoader2 size={16} className="animate-spin" aria-hidden /> : null} Envoyer la question
+            </button>
+            <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{texte.length} / {MAX_QUESTION_CARACTERES}</span>
+          </div>
+          {envoyee && <p role="status" className="text-sm text-emerald-800 dark:text-emerald-200 flex items-center gap-1.5"><IconCheck size={15} aria-hidden /> Question envoyée au cabinet.</p>}
+          {erreur && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{erreur}</p>}
+        </form>
+      ) : (
+        <p role="status" className="rounded-lg px-3 py-2 text-sm" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+          La date limite des questions est passée{q.date_limite ? <> ({formaterDateHeure(q.date_limite)})</> : null}. Pour une question urgente, contactez directement le cabinet.
+        </p>
+      )}
+
+      {q.mes_questions.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Vos questions</h3>
+          <ul className="rounded-lg divide-y" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+            {q.mes_questions.map(m => (
+              <li key={m.id} className="px-3 py-2.5 text-sm space-y-1">
+                <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  {formaterDate(m.envoyee_le)}{lotLibelle(m.lot_id) ? ` · ${lotLibelle(m.lot_id)}` : ''}{m.objet ? ` · ${m.objet}` : ''}
+                </p>
+                <p className="whitespace-pre-line break-words">{m.question}</p>
+                {m.reponse
+                  ? <p className="whitespace-pre-line break-words rounded-md px-2.5 py-1.5 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-100"><strong>Réponse{m.reponse_le ? ` du ${formaterDate(m.reponse_le)}` : ''} :</strong> {m.reponse}</p>
+                  : <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>En attente de réponse.</p>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {q.reponses_publiques.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Réponses communiquées à toutes les entreprises</h3>
+          <ul className="rounded-lg divide-y" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+            {q.reponses_publiques.map(r => (
+              <li key={r.id} className="px-3 py-2.5 text-sm space-y-1">
+                {r.objet && <p className="font-semibold">{r.objet}</p>}
+                <p className="whitespace-pre-line break-words">{r.question}</p>
+                <p className="whitespace-pre-line break-words rounded-md px-2.5 py-1.5 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-100"><strong>Réponse{r.reponse_le ? ` du ${formaterDate(r.reponse_le)}` : ''} :</strong> {r.reponse}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export default function DepotOffres() {
@@ -127,6 +417,27 @@ export default function DepotOffres() {
           )}
         </section>
 
+        {(ctx.additifs?.length ?? 0) > 0 && (
+          <section aria-label="Modifications du dossier de consultation" className="space-y-2">
+            <h2 className="text-sm font-bold uppercase tracking-wider">Modifications du dossier</h2>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Les pièces ci-dessous ont été modifiées : les versions proposées plus bas sont les dernières.</p>
+            <ul className="rounded-lg divide-y" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+              {ctx.additifs!.map(a => (
+                <li key={a.id} className="px-3 py-2.5 text-sm space-y-1">
+                  <p className="font-semibold">Additif n° {a.numero} du {formaterDate(a.date)}</p>
+                  <p className="whitespace-pre-line break-words">{a.motif}</p>
+                  <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{a.pieces.map(p => `${p.libelle}${p.indice ? ` (indice ${p.indice})` : ''}`).join(' ; ')}</p>
+                  {a.accuse_le && <p className="text-xs flex items-center gap-1.5 text-emerald-800 dark:text-emerald-200"><IconCheck size={13} aria-hidden /> Réception confirmée le {formaterDate(a.accuse_le)}</p>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {ctx.visite && <VisiteDeSite visite={ctx.visite} base={base} onChange={() => void charger()} />}
+
+        {ctx.dossier_zip && <TelechargerDossier base={base} zip={ctx.dossier_zip} />}
+
         {(ctx.dce?.length ?? 0) > 0 && (
           <section aria-label="Dossier de consultation des entreprises" className="space-y-2">
             <h2 className="text-sm font-bold uppercase tracking-wider">Dossier de consultation (DCE)</h2>
@@ -188,6 +499,10 @@ export default function DepotOffres() {
             <p className="text-xs">{recu.accuse_envoye ? 'Un accusé de réception vous a été envoyé par e-mail.' : 'Conservez cette page comme preuve de votre remise : aucun accusé n’a pu être envoyé par e-mail.'}</p>
           </section>
         )}
+
+        {ctx.quantites && <QuantitesAConfirmer base={base} quantites={ctx.quantites} onEnvoyee={() => void charger()} />}
+
+        <QuestionsEntreprise base={base} ctx={ctx} onEnvoyee={() => void charger()} />
 
         <SaisieEnLigne base={base} ctx={ctx} onRecu={r => { setRecu(r); void charger(); }} />
         <DepotFichiers base={base} ctx={ctx} onRecu={r => { setRecu(r); void charger(); }} />

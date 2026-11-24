@@ -17,6 +17,11 @@ export interface EntrepriseSuivi {
   ne_repond_pas?: boolean;
   visite_creneau_id?: string;
   visite_presence?: import('./actVisites').PresenceVisite;
+  /** Créneau cité dans le dernier message de convocation (ou d'envoi du DCE) et date de ce message. */
+  visite_convoquee_creneau_id?: string;
+  visite_convoquee_le?: string;
+  /** Date du message « quantités à confirmer » : la page de dépôt de l'entreprise ouvre alors la confirmation de ses quantités. */
+  quantites_demandees_le?: string;
   observation?: string;
   /**
    * Date d'une remise faite sur l'espace de dépôt et pas encore traitée. Jamais
@@ -36,6 +41,30 @@ export interface LotSuivi {
 export function telephoneEntreprise(e: Pick<EntrepriseSuivi, 'contact_id'>, contacts: Array<{ id: string; phone_work?: string | null; phone_mobile?: string | null; phone_main?: string | null; phone?: string | null }>): string {
   const c = contacts.find(contact => contact.id === e.contact_id);
   return [c?.phone_work, c?.phone_mobile, c?.phone_main, c?.phone].find(value => !!value?.trim())?.trim() || '';
+}
+
+const CHAMPS_TELEPHONE = ['phone_work', 'phone_mobile', 'phone_main', 'phone'] as const;
+type ChampTelephone = typeof CHAMPS_TELEPHONE[number];
+type ChampsTelephoneContact = Partial<Record<ChampTelephone, string | null>>;
+
+/**
+ * Numéro saisi sur la ligne de consultation à reporter sur la fiche contact. Il remplace le
+ * champ qui porte le numéro affiché (`telephoneEntreprise`), à défaut il va dans `phone_work`.
+ * `phone` est aligné quand il portait l'ancien numéro, pour que la liste des contacts reste cohérente.
+ * Rend `null` quand rien ne change ; un champ vidé n'efface jamais la fiche (rien à reporter).
+ */
+export function completerTelephoneContact(
+  contact: ChampsTelephoneContact,
+  saisi: string,
+): Partial<Record<ChampTelephone, string>> | null {
+  const numero = saisi.trim();
+  if (!numero) return null;
+  const actuel = CHAMPS_TELEPHONE.find(k => !!contact[k]?.trim());
+  if (actuel && contact[actuel]!.trim() === numero) return null;
+  const champ: ChampTelephone = actuel ?? 'phone_work';
+  const patch: Partial<Record<ChampTelephone, string>> = { [champ]: numero };
+  if (champ !== 'phone' && (!actuel || contact.phone?.trim() === contact[champ]?.trim())) patch.phone = numero;
+  return patch;
 }
 
 /** En deçà, un lot n'a pas assez d'entreprises consultées pour une mise en concurrence sérieuse. */

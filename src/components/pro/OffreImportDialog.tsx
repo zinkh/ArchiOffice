@@ -10,6 +10,7 @@ import type { OffreDocument, OffreAnomalie, Lot } from '../../types/dpgf';
 import { postesDepuisLignes, totalPostesAjoutes } from '../../lib/postesAjoutes';
 import { parseOffreFile, type DocumentAvecArticles, type ResultatImport, type Rapprochement, type LigneImportee } from '../../lib/bpuImport';
 import { formatCurrency } from '../../lib/utils';
+import { quantitesUtiles } from '../../lib/quantitesEntreprise';
 
 interface Entreprise { id: string; nom: string }
 
@@ -216,12 +217,26 @@ export const OffreImportDialog: React.FC<Props> = ({
         }
       }
 
+      // Quantités remises par l'entreprise : gardées dans l'offre quand elles diffèrent du document (le document n'est
+      // pas modifié). Un poste sans quantité au document (bordereau de prix) n'en a pas : rien n'est comparé.
+      const saisies: Record<string, number | null> = {};
+      for (const r of retenus) saisies[r.articleId] = r.source.quantite;
+      if (resultat) {
+        for (const [idx, articleId] of manuels) {
+          if (articleId === CREER || ignorees.has(idx)) continue;
+          const src = resultat.nonAppariees[idx];
+          if (src) saisies[articleId] = src.quantite;
+        }
+      }
+      const quantites = quantitesUtiles(saisies, quantiteParArticle);
+
       await onConfirm?.({
         entrepriseId, entrepriseNom: entrepriseNom.trim(),
         dateReception, fichierNom: fichier.name,
         documentVersion: doc.version,
         prix: prixFinal, anomalies,
         ...(postesCrees.length ? { postesAjoutes: postesCrees } : {}),
+        ...(Object.keys(quantites).length ? { quantites } : {}),
         totalOffreHT: totalOffre + totalPostes,
         statut: 'validee',
       });

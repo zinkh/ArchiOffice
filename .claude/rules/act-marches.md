@@ -50,12 +50,43 @@ migration).
   sans doublon (casse ignorée) ; au-delà de quatre adresses, le surplus reste sur la ligne. **Ligne sans fiche** : si
   elle a un nom et une adresse, la fiche d'une entreprise déjà connue est reprise (même adresse, puis même nom exact),
   sinon une fiche « Entreprise » est créée (nom, adresses, corps d'état de la ligne) et liée à la ligne. Aucune migration.
+- **Téléphone et qualification** : la colonne « Qualification » du tableau porte la pastille (`QualificationBadge`) ;
+  sous le nom de l'entreprise, le champ téléphone lit la fiche contact (`telephoneEntreprise`) et, à la sortie du
+  champ, y reporte le numéro saisi (`completerTelephoneContact`, `syncTelephoneToContact` dans `ACTModule.tsx`) :
+  il remplace le champ qui portait le numéro affiché, à défaut `phone_work`. Un champ vidé n'efface jamais la fiche.
+  Sans fiche liée à la ligne, le champ est grisé. Aucune migration, rien n'est copié dans la consultation.
 - **Envoi du DCE** : le bouton de ligne ouvre `MailComposeModal` (prop
   `initial`) prérempli avec les lots de l'entreprise et les pièces du DCE qui
   la concernent ; à l'envoi, `dce_transmis_le` est posée. Les pièces du DCE
   ne sont que des intitulés : les fichiers se joignent dans la fenêtre de
-  message. Pas d'envoi groupé volontairement (chaque entreprise ne doit voir
-  que son propre message).
+  message. Chaque entreprise ne doit voir que son propre message. **L'envoi groupé existe,
+  sans changer ce principe** : un message UNIQUE (objet et corps communs, jetons `{{lots}}`,
+  `{{depot}}`... remplacés entreprise par entreprise) mais un mail INDIVIDUEL par entreprise, jamais de
+  destinataires visibles entre eux. Deux entrées : « Envoyer le DCE… » dans les actions groupées
+  (sélection) et le bandeau « DCE à envoyer » (`entreprisesDceAEnvoyer` : case cochée, DCE non parti, ni
+  « ne répond pas » ni offre reçue). `act/DceEnvoiGroupeDialog.tsx` : aperçu par entreprise,
+  confirmation avant départ, envoi en série, rapport par entreprise, « Relancer les échecs ». Seuls les
+  envois RÉUSSIS posent `dce_transmis_le` (au fil de l'eau, `marquerDceEnvoye` repart de la dernière
+  liste). Écartées avec motif : sans adresse, sans lot, « ne répond pas » (`planEnvoiGroupe`) ; décochée
+  d'office une entreprise qui a déjà reçu le DCE (un nouvel envoi révoque son lien de dépôt). Logique
+  pure testée : `src/lib/dceEnvoiMessage.ts` (modèle et jetons, le même que le mail d'une seule
+  entreprise : `DceMailDialog` l'utilise aussi), `dceEnvoiGroupe.ts` (plan) ; préparation des fichiers et
+  du lien de dépôt dans `dceEnvoiPreparation.ts` ; envoi sans fenêtre dans `mailEnvoiDirect.ts` (mêmes
+  routes que `MailComposeModal` pour un nouveau message : si l'une change, l'autre aussi). Les pièces du
+  marché sont générées une fois pour tout l'envoi. Plafond de 25 Mo par message : une entreprise trop
+  lourde échoue seule, avec le motif. Pas de bloc « dossier partagé » dans le message groupé : ces
+  pièces restent sur la page de dépôt.
+- **Visite de site dans les messages** : `consultation.visite_site { lieu, consignes }` (jsonb, saisi sous
+  « Créneaux de visites ») et, par entreprise, `visite_convoquee_creneau_id` / `visite_convoquee_le`
+  (jsonb, aucune migration). Le jeton `{{visite}}` du mail du DCE (individuel et groupé) cite le créneau
+  affecté à l'entreprise, à défaut les créneaux À VENIR à choisir (`visitePourMessage`, `actVisites.ts`) ;
+  sans créneau citable, rien n'est annoncé (un lieu seul ne suffit pas). Un mail du DCE qui cite le
+  créneau affecté vaut convocation (`marquageEnvoi` : seulement si le texte envoyé contient bien le bloc,
+  l'architecte pouvant l'avoir retiré du modèle). **Convocation dédiée** : bouton « Convoquer à la
+  visite » (mode `visite` de `DceEnvoiGroupeDialog`, modèle `MODELE_CORPS_VISITE`, aucune pièce jointe ni
+  lien de dépôt). Un créneau modifié depuis la dernière convocation affiche « à renotifier »
+  (`aRenotifier`) et l'entreprise redevient cochée ; une entreprise déjà convoquée pour son créneau
+  actuel est décochée d'office. La page de dépôt n'affiche pas encore la visite (livraison suivante).
 - **Ajout d'une entreprise** (`EntrepriseAddForm.tsx`, bouton « Ajouter » de l'en-tête) : un mini
   formulaire au-dessus du tableau (entreprise choisie dans les contacts ou créée sur place, email,
   corps d'état, lots, dates, DCE à envoyer) remplace l'ancienne ligne vide ajoutée tout en bas. À
@@ -89,6 +120,17 @@ L'import des offres a quitté l'onglet PRO : le DPGF et le DQE/BPU n'ont plus ni
 - **Saisie** (`act/OffrePostesDialog.tsx`) : un P.U. par article en regard de l'estimation et de l'écart, « pour mémoire » (`null`, jamais 0), postes ajoutés par l'entreprise, collage d'une colonne de tableur, Entrée passe à la ligne suivante. `repartirSaisie` (`src/lib/comparatifPrix.ts`, testé) range chaque prix **dans l'offre qui le porte** (la plus récente), les prix nouveaux dans l'offre « Saisie manuelle », un prix effacé disparaît de toutes. Plusieurs fichiers d'une même entreprise se superposent (`prixEntreprise`, le plus récent gagne). L'import d'un bordereau (`OffreImportDialog`) passe en « postes » les lots de l'entreprise qu'il chiffre.
 - **Comparatif** (`act/ComparatifPrixUnitaires.tsx`, logique pure `construireLot`) : par lot, colonne **Estimation** (P.U. du document) puis un P.U. par entreprise, médiane, meilleur prix (au moins deux entreprises), écart à l'estimation (rouge au-delà de +15 %, ambre en dessous de -15 %), total du lot calculé (base seulement, options et PSE comparées mais non comptées), classement. Une entreprise au total seul reste dans les totaux et le classement, colonne hachurée sans détail. Filtre « écarts de plus de 10 % ou pour mémoire ». Sous 768 px, une carte par article.
 - **`consultation.comparatif` se dérive des offres** pour les lots rattachés au document (`comparatifDepuisOffres`, via `versComparatif`) : l'analyse, la négociation, le RAO et l'export Excel le lisent par `consultationCourante`. Les lots sans lot de document gardent le tableau manuel (« Comparatif manuel »).
+- **Saisie par poste depuis le MCP** (`set_postes`, voir `agents-mcp.md`) : mêmes données que « Saisir les postes » (offre
+  « Saisie manuelle » du DPGF, `postesAjoutes`), même total déduit ; `consultationPostes.ts` recopie `chapitresDuLot`,
+  `totalLotPostes` et `repartirSaisie` de `comparatifPrix.ts` : **toute évolution de l'un se répercute sur l'autre**.
+- **Offre partielle** (`Offre.partielle`, `Offre.perimetre`, jsonb, aucune migration) : un devis qui ne chiffre
+  qu'une partie du lot (spécialiste en chape, par exemple) se coche « Partielle » dans la collecte des offres, avec
+  son périmètre en clair. Elle reste visible (badge ambre, périmètre sous le nom, RAO et comparatif) mais n'est
+  **jamais classée, notée ni prise pour moins-disante** : `offresComparables` (`actNegociation.ts`, donc `reperesLot`,
+  la synthèse économique et la moyenne), l'analyse de `ACTModule` et le RAO (`actAnalysisExport.ts`) l'écartent. Un lot
+  qui n'a que des offres partielles est donc compté à son estimation dans les totaux. Elle peut encore être attribuée
+  (bouton « Attribuer »), ce qui ne dit rien du reste du lot. Écrite par le MCP avec `set_offre` (`partielle`, `perimetre`).
+  Pas encore fait : le comparatif des P.U. (`comparatifPrix.ts`) et l'export Excel du comparatif ne la distinguent pas.
 - **Pas encore fait** : la négociation travaille toujours sur les totaux et les lignes d'option, pas sur les P.U. ; l'export Excel du comparatif n'a pas de colonnes de P.U. par entreprise (il exporte les montants par article) ; interface non vérifiée dans un navigateur réel.
 - Tests : `src/lib/__tests__/comparatifPrix.test.ts`.
 
@@ -298,6 +340,87 @@ restent lisibles par le cabinet.
   Aucune migration, rien à cocher. Le téléchargement (`.../pieces/:docId`) n'accepte qu'un fichier de
   ces pièces ou une pièce complémentaire cochée dans les réglages (`published_document_ids`, visible
   par toutes les entreprises) : un fichier du DCE d'un autre lot est refusé (404).
+- **Tout le dossier en une archive** (`GET /api/public/depot/:token/dossier.zip`,
+  `server/consultationDepot/dossierZip.ts`, testé) : le bouton « Télécharger tout le dossier en une fois (zip) » de
+  la page rassemble EXACTEMENT ce que l'entreprise peut déjà télécharger pièce par pièce (pièces du DCE de ses lots,
+  documents publiés, sans doublon), un dossier par pièce (« Documents complémentaires » pour les publiés), accents
+  conservés et noms assainis (`segmentArchive`, `cheminsUniques`). Les liens externes (https seulement) vont dans
+  `Liens externes.txt`, un fichier illisible dans `Fichiers non ajoutés.txt` : il n'arrête pas l'archive. Construite
+  EN MÉMOIRE, donc bornée : 150 Mo et 300 fichiers (413 au-delà, jamais d'archive tronquée), 2 constructions
+  simultanées (503 + `Retry-After`) et un limiteur dédié `depotZipLimiter` (`DEPOT_ZIP_LIMIT`, 10 par 15 min et par
+  IP). Mêmes gardes que les autres routes (jeton, plan, marché privé, stockage). Le bouton télécharge par `fetch` pour
+  afficher l'erreur en clair au lieu d'une page JSON. Les pièces générées à l'envoi (RC, CCAP, acte d'engagement) n'y
+  sont pas : elles ne sont jointes qu'au mail. Le contexte porte `dossier_zip` (nombre et taille connue), absent
+  quand il n'y a aucun fichier.
+- **Visite de site sur la page** (`visite` du contexte, lue dans `consultation` : `creneaux_visite`, `visite_site`,
+  `visite_creneau_id` de l'entreprise) : son créneau, à défaut les créneaux à venir à choisir, avec lieu et consignes.
+  Les dates restent celles du chantier, sans fuseau. Une entreprise ne voit jamais les créneaux ni les noms des autres.
+  **Confirmer ma présence** (`POST /api/public/depot/:token/visite/confirmer`) pose `visite_confirmee_le` sur
+  l'INVITATION (`consultation_depot_invites`), jamais dans la consultation : l'architecte reste maître du pointage
+  (`visite_presence`). Une notification part au cabinet, la liste des liens l'expose.
+- **Additifs au DCE** (`consultation.dce_revisions`, jsonb ; `src/lib/dceRevisions.ts`, testé ; `act/DceAdditifPanel.tsx`
+  sous les pièces du DCE) : « Publier une modification » consigne QUELLES pièces ont changé (indice lu sur la fiche du
+  document, modifiable) et le motif ; elle ne touche à aucun fichier (mettre d'abord le document de l'affaire à jour).
+  Sont à prévenir (`entreprisesConcernees`) les seules entreprises qui ONT REÇU le DCE (`dce_transmis_le`, les autres le
+  recevront à jour), qui répondent, et dont un lot (ou tous) est touché. Envoi = mode `additif` de `DceEnvoiGroupeDialog`
+  (message unique, un mail par entreprise) : seuls les fichiers des pièces modifiées sont joints, le tableau d'indices
+  reste complet, ni pièces du marché ni NOUVEAU lien de dépôt (créer un lien révoquerait celui que l'entreprise a déjà).
+  `notifiee_a` / `notifiee_le` évitent les renvois ; l'écran suit « prévenues / confirmées ». **Lien « j'ai bien reçu »** :
+  `POST /api/projects/:id/depot/additifs/:revisionId/liens` rend un lien SIGNÉ par entreprise (HMAC sans état,
+  `server/consultationDepot/accuseAdditif.ts`, clé `MAIL_ENCRYPTION_KEY` avec séparation de domaine, 180 jours) vers
+  `GET /api/public/additif/accuse/:ticket` : page HTML sans script où le lien ne fait qu'AFFICHER, la confirmation est un
+  POST (un anti-virus de messagerie qui ouvre le lien ne confirme donc rien). L'accusé est écrit dans
+  `consultation_additif_accuses` (migration `supabase/migrate_consultation_additif_accuses.sql`, index unique : le premier
+  accusé fait foi), PAS dans la consultation, pour ne pas être écrasé par l'enregistrement automatique de l'écran. Le
+  ticket ne vaut que pour la consultation de SON cabinet (l'affaire est relue avec `tenant_id`). La page de dépôt liste
+  les additifs de l'entreprise (`additifs` du contexte) avec la date de son accusé, sans ceux des autres lots.
+- **Quantités des entreprises** (colonne « Qté entreprise », `src/lib/quantitesEntreprise.ts`, testé) : une entreprise peut chiffrer
+  sur d'autres quantités que le DPGF ou le DQE. Elles vivent dans l'OFFRE (`OffreDocument.quantites`, article -> quantité, et
+  `quantitesAcceptees`, jsonb de `dpgfs.offres` / `bpu_data.offres`, aucune migration, les routes d'offres enregistrent le corps tel
+  quel) : le document n'est JAMAIS modifié. Seules les quantités qui DIFFÈRENT du document sont gardées (absence = même quantité) ;
+  l'alerte n'a AUCUN seuil, la moindre différence compte « à la virgule près » (`quantitesDifferent`, seul le bruit flottant est
+  écarté). Un poste sans quantité au document n'est pas comparé : pas de colonne utile sur un BPU pur, mais le DQE (bordereau avec
+  quantités estimatives) et le DPGF en profitent. **Deux bases** au choix (`consultation.base_quantites`, jsonb, bouton du comparatif) :
+  `moe` (défaut : quantités du maître d'œuvre, SAUF celles que l'architecte a acceptées pour cette entreprise) ou `entreprise`
+  (les quantités de chaque entreprise). La base pilote le total et le rang du comparatif (`construireLotQuantites`) ET le
+  `montant_base` des offres « poste par poste » que lit l'analyse (`totalPostesLot`, recalculé par l'effet de lecture quand la base
+  change) ; les deux totaux restent lisibles sous chaque total. **Accepter une quantité ne modifie que l'offre** : case par poste
+  dans le panneau « Quantités modifiées par les entreprises » (trié par effet en euros, écart, effet total) ou « Retenir » dans la
+  saisie poste par poste. Saisie : colonne « Qté entreprise » de `OffrePostesDialog`, import du bordereau (`OffreImportDialog` reprend
+  la quantité du fichier quand elle diffère), `set_postes` du MCP (`quantite` par poste). `repartirSaisie` pose la quantité dans l'offre
+  qui porte déjà le prix de l'article (à défaut « Saisie manuelle ») et ne touche aux quantités enregistrées que si l'appel en fournit.
+  **Export et comparatif enregistré** : `versComparatif` / `comparatifDepuisOffres` prennent la base (`quantitesOffre.ts`, module
+  SANS dépendance, pour ne pas fermer de cercle avec `comparatifPrix.ts`) : les montants par article et le sous-total suivent la base,
+  et chaque article porte `ecartsQuantites` (quantité, acceptée ou non, P.U.). L'export Excel du comparatif
+  (`generateComparatifExcel`) dit la base dans le sous-titre, ajoute « Qté document » et « Qté entreprise » à la feuille d'une
+  entreprise qui a changé des quantités (les autres feuilles sont inchangées) et une feuille « Quantités modifiées » (écart, P.U., effet
+  HT, acceptée, du plus lourd au plus léger : `lignesEcartsQuantites`) ; sans écart, le classeur est celui d'avant.
+  **Quantités à confirmer** (`src/lib/quantitesConfirmation.ts`, testé ; migration `supabase/migrate_consultation_quantites_reponses.sql`) :
+  le bouton « Demander confirmation aux entreprises » du panneau des écarts ouvre `DceEnvoiGroupeDialog` en mode `quantites`
+  (une entreprise par ligne, seulement celles qui ont des écarts NON acceptés ; `ContexteEnvoiDce.quantites`, jeton `{{quantites}}`,
+  modèle `MODELE_*_QUANTITES`, aucune pièce jointe, un nouveau lien de dépôt personnel qui remplace le précédent). Chaque envoi réussi
+  pose `quantites_demandees_le` sur l'entreprise (`marquageEnvoi`) : c'est ce drapeau qui ouvre la section « Quantités à confirmer » de
+  `/depot/:token` (`quantites` du contexte, calculé côté serveur par `server/consultationDepot/quantitesAConfirmer.ts` depuis le DPGF,
+  le BPU/DQE et SES offres : jamais les prix ni les quantités des autres). L'entreprise répond poste par poste (reprend le dossier,
+  maintient la sienne, propose une autre) par `POST /api/public/depot/:token/quantites` : la réponse est écrite dans
+  `consultation_quantites_reponses` (une ligne courante par `(invite_id, ligne_id)`, la dernière remplace la précédente, postes
+  validés contre ceux réellement à confirmer, quantité positive ou nulle) et le cabinet est notifié. Elle ne change JAMAIS l'offre :
+  `GET /api/projects/:id/depot/quantites/reponses` alimente la colonne « Réponse » du panneau et le bouton « Appliquer les réponses »
+  (`appliquerReponsesQuantites` dans `ACTModule`, via `quantitesApresReponses` puis `enregistrerSaisie` : seule l'offre bouge, les
+  acceptations sont conservées). « Maintient » n'a rien à appliquer.
+- **Questions des entreprises** (`POST /api/public/depot/:token/questions`, `src/lib/depotQuestions.ts`, testé ;
+  migration `supabase/migrate_consultation_depot_questions.sql`) : la question arrive dans la boîte de réception
+  `consultation_depot_questions` (jamais publiée d'office, jamais dans la consultation par la route), 2000 caractères
+  au plus, 20 par entreprise, lot contrôlé, refusée après `consultation.date_limite_questions` (jsonb, réglée sous
+  « Questions / Réponses »). `ACTModule` reprend chaque question dans `consultation.questions` à l'ouverture et au
+  retour sur l'onglet, par IDENTIFIANT (rejouable, `questionsAReprendre`) ; supprimer une question reprise la retire
+  aussi de la boîte (`DELETE /api/projects/:id/depot/questions/:id`), sinon elle serait reprise. La réponse, saisie
+  dans l'ACT, FAIT FOI et s'affiche sur la page de l'entreprise ; la case « Réponse communiquée à toutes les
+  entreprises du lot » la rend publique SANS le nom de l'auteur, aux seules entreprises du lot visé (à toutes si la
+  question est générale). **Diffusion par mail** : bouton « Diffuser par mail » d'une réponse publique, mode `reponse`
+  de `DceEnvoiGroupeDialog` (message unique, un mail par entreprise du lot, auteur de la question compris, aucune
+  pièce jointe) ; `diffusee_a` / `diffusee_le` sur la question évitent de renvoyer à qui l'a déjà reçue, une
+  entreprise ajoutée ensuite reste à prévenir (`entreprisesDeLaReponse`, `marquerDiffusee`).
 - **Dossier partagé** (bouton « Ajouter un dossier (zip, lien) » de la fenêtre d'envoi du DCE,
   `act/DossierPartageDialog.tsx`, logique pure `src/lib/dossierPartageMail.ts`, testée) : un zip ou autre
   fichier téléversé (`POST /api/documents`, 50 Mo au plus, catégorie DCE, rangé dans les documents de l'affaire),

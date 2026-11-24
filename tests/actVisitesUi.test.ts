@@ -13,19 +13,29 @@ it('affecte un rendez-vous, pointe la présence et protège un créneau utilisé
   const host = document.createElement('div'); document.body.append(host);
   const root = createRoot(host);
   const lots = [{ id: 'go', lot_number: '01', lot_title: 'Gros œuvre' }];
+  const syncTelephone = vi.fn();
   function Harness() {
     const [entreprises, setEntreprises] = useState<any[]>([{ id: 'a', contact_id: 'contact-a', nom: 'Entreprise A', email: 'a@example.fr', lots_ids: ['go'], envoyer_dce: false }]);
     const [creneaux, setCreneaux] = useState([{ id: 'slot', date_heure: '2026-11-23T09:30' }]);
     return React.createElement(ACTEntreprisesTable, {
       projectName: 'Projet', lots: lots as any, entreprises, onChange: setEntreprises,
       creneauxVisite: creneaux, onChangeCreneaux: setCreneaux, dcePieces: [], entrepriseContacts: [], corpsEtatOptions: [], lotOptions: [],
-      contactsTelephone: [{ id: 'contact-a', phone_work: '03 83 00 00 01' }],
+      contactsTelephone: [{ id: 'contact-a', phone_work: '03 83 00 00 01' }], onSyncTelephone: syncTelephone,
       onChangeCorpsEtat: () => {}, onSelectContact: () => {}, onCreateContact: () => {}, corpsEtatCodesFromContact: () => [],
     });
   }
   try {
     await act(async () => root.render(React.createElement(Harness)));
-    expect(host.querySelector('a[href="tel:0383000001"]')?.textContent).toContain('03 83 00 00 01');
+    // Le téléphone vient de la fiche contact et la saisie y est reportée à la sortie du champ.
+    const telephone = host.querySelector<HTMLInputElement>('input[aria-label="Téléphone de Entreprise A"]')!;
+    expect(telephone.value).toBe('03 83 00 00 01');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(telephone, '03 83 00 00 02');
+      telephone.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(syncTelephone).not.toHaveBeenCalled();
+    await act(async () => { telephone.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
+    expect(syncTelephone).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }), '03 83 00 00 02');
     const visiteButton = host.querySelector<HTMLButtonElement>('button[aria-label^="Gérer la visite de Entreprise A"]')!;
     await act(async () => visiteButton.click());
     const select = host.querySelector<HTMLSelectElement>('[aria-label="Rendez-vous de visite de Entreprise A"]')!;
