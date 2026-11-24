@@ -422,6 +422,82 @@ describe('avec le détail : intitulé et position sur le plan d\'une réserve (i
       expect((await get(reader.token, url(projectId, 'reserves/options'))).status).toBe(403);
     });
 
+    describe('fiche réduite des entreprises (identifiants et coordonnées, jamais la fiche complète)', () => {
+      function withContacts(tenantId: string, projectId: string) {
+        withResponsables(tenantId, projectId);
+        Object.assign(fakeSupabaseAdmin.getTable('project_lots').find(l => l.id === `${tenantId}-l1`)!, { contact_id: `${tenantId}-c1` });
+        Object.assign(fakeSupabaseAdmin.getTable('marches_entreprises').find(m => m.id === `${tenantId}-m1`)!, { contact_id: `${tenantId}-c2` });
+        fakeSupabaseAdmin.seed('contacts', [
+          {
+            id: `${tenantId}-c1`, tenant_id: tenantId, first_name: 'Ana', last_name: 'Roy', company_name: 'Alpha Bâtiment', job_title: 'Conductrice de travaux',
+            email_work: 'ana@alpha.test', email_home: 'ana.perso@example.test', phone_mobile: '06 00 00 00 01', phone_home: '01 99 99 99 99',
+            address_work_street: '1 rue du Chantier', address_work_zip: '54000', address_work_city: 'Nancy', address_home_street: '9 rue Privée',
+            siret: '123 456 789 00012', vat_number: 'FR00123456789',
+            notes: 'Ne jamais appeler le lundi, litige en cours avec l\'agence', tags: 'litige', category: 'Entreprise', birthday: '1980-01-01',
+            market_amount_base: 987654, relation_status: 'à surveiller',
+          },
+          { id: `${tenantId}-c2`, tenant_id: tenantId, first_name: 'Luc', last_name: 'Pic', company_name: 'Béta Menuiserie', email: 'luc@beta.test', is_personal: true },
+          { id: `${tenantId}-c3`, tenant_id: 'autre-cabinet', first_name: 'X', last_name: 'Y', company_name: 'Alpha Bâtiment', email_work: 'etranger@example.test' },
+        ]);
+      }
+
+      it('avec le détail : nom, identifiants, coordonnées de travail ; jamais notes, étiquettes, coordonnées privées ni montants', async () => {
+        const { tenantId, admin, projectId } = setup();
+        withContacts(tenantId, projectId);
+        const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write', detail: true }]);
+        const res = await get(guest.token, url(projectId, 'reserves/options'));
+        expect(res.status).toBe(200);
+        expect(res.body.fiches['Alpha Bâtiment']).toEqual({
+          contact_id: `${tenantId}-c1`, nom: 'Alpha Bâtiment', personne: 'Ana Roy', fonction: 'Conductrice de travaux', email: 'ana@alpha.test',
+          telephones: ['06 00 00 00 01'], adresse: '1 rue du Chantier, 54000 Nancy', siret: '123 456 789 00012', tva: 'FR00123456789',
+        });
+        const raw = JSON.stringify(res.body);
+        for (const secret of ['litige', 'Ne jamais appeler', 'perso@example', '01 99 99', 'Privée', '1980', '987654', 'surveiller', 'etranger@example']) {
+          expect(raw).not.toContain(secret);
+        }
+        // Un contact personnel d'un collaborateur n'a pas de fiche, l'entreprise reste proposée par son nom.
+        expect(res.body.entreprises).toContain('Béta Menuiserie');
+        expect(res.body.fiches['Béta Menuiserie']).toBeUndefined();
+      });
+
+      it('sans le détail : des noms seulement, aucune fiche', async () => {
+        const { tenantId, admin, projectId } = setup();
+        withContacts(tenantId, projectId);
+        const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }]);
+        const res = await get(guest.token, url(projectId, 'reserves/options'));
+        expect(res.body.fiches).toEqual({});
+        expect(JSON.stringify(res.body)).not.toContain('ana@alpha.test');
+        expect(JSON.stringify(res.body)).not.toContain(`${tenantId}-c1`);
+      });
+
+      it('trace la consultation des coordonnées au journal du cabinet, une fois par demi-heure', async () => {
+        const { tenantId, admin, projectId } = setup();
+        withContacts(tenantId, projectId);
+        const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write', detail: true }]);
+        await get(guest.token, url(projectId, 'reserves/options'));
+        await get(guest.token, url(projectId, 'reserves/options'));
+        await new Promise(r => setTimeout(r, 10));
+        const entries = fakeSupabaseAdmin.getTable('activities').filter(a => a.tenant_id === tenantId && String(a.action).includes('Consultation des coordonnées'));
+        expect(entries).toHaveLength(1);
+        expect(entries[0].action).toContain('confrère externe');
+      });
+
+      it('ACT avec le détail : la fiche réduite du contact rattaché, jamais sa fiche complète', async () => {
+        const { tenantId, admin, projectId } = setup();
+        withContacts(tenantId, projectId);
+        const act = fakeSupabaseAdmin.getTable('act_data').find(a => a.id === `${tenantId}-act`)!;
+        act.consultation.entreprises[0].contact_id = `${tenantId}-c1`;
+        const guest = await invite(admin.token, projectId, WITH_DETAIL);
+        const view = (await get(guest.token, `/api/shared/projects/${projectId}/act`)).body;
+        expect(view.entreprises[0].fiche).toMatchObject({ contact_id: `${tenantId}-c1`, nom: 'Alpha Bâtiment', siret: '123 456 789 00012', telephones: ['06 00 00 00 01'] });
+        expect(JSON.stringify(view)).not.toContain('Ne jamais appeler');
+        const plain = await invite(admin.token, projectId, NO_DETAIL);
+        const without = (await get(plain.token, `/api/shared/projects/${projectId}/act`)).body;
+        expect(without.entreprises[0]).not.toHaveProperty('fiche');
+        expect(JSON.stringify(without)).not.toContain(`${tenantId}-c1`);
+      });
+    });
+
     it('crée une réserve avec son lot et son entreprise, rangés comme le cabinet', async () => {
       const { tenantId, admin, projectId } = setup();
       withResponsables(tenantId, projectId);

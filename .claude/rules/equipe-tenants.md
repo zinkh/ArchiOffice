@@ -420,7 +420,13 @@ Autres types : voir ROADMAP.md.
   confrère les **choisit**, il ne les saisit pas : `GET .../reserves|gpa-reserves/options` (droit d'**écriture** requis, c'est son
   seul usage) rend les lots de l'affaire (numéro et intitulé), les entreprises de leurs fiches (`project_lots.contact_name`) et de ses
   marchés (`marches_entreprises`, hors avenants `subsequent` et marchés résiliés) et l'entreprise de chaque lot : **des noms
-  seulement, jamais d'identifiant ni de fiche contact**. `lots` et `entreprises` s'écrivent en liste de chaînes (rangées en texte JSON
+  seulement sans le détail** de l'atelier. **Avec le détail**, chaque entreprise rattachée à un contact porte une **fiche réduite**
+  (`fiches`, `server/projectShares/contactCard.ts`, `guestContactCard`) : identifiant du contact, raison sociale, personne et fonction,
+  e-mail de travail, téléphones (mobile, travail, standard, général), adresse de travail (à défaut l'adresse générale), SIRET et TVA.
+  **Liste blanche champ par champ** : jamais `notes` (commentaires personnels à l'agence), étiquettes, catégorie, suivi de la relation,
+  montants de marché, anniversaire, e-mails, téléphones et adresses privés, ni un contact `is_personal` ; un contact d'un autre
+  cabinet n'est jamais lu. La consultation est **tracée avant la réponse** (« Consultation des coordonnées des entreprises », une fois
+  par demi-heure). La même fiche réduite est jointe, avec le détail, aux entreprises de la consultation ACT (`fiche`, par `contact_id`). `lots` et `entreprises` s'écrivent en liste de chaînes (rangées en texte JSON
   comme le cabinet, lot par intitulé, entreprise par nom), revalidées contre ces listes, doublons et casse normalisés ; une valeur
   **déjà portée par la réserve** reste acceptée (saisie libre ancienne), tout autre nom est refusé en 400, sans rien écrire. À
   l'écran, choisir un lot ajoute l'entreprise de sa fiche si elle n'est pas déjà en charge, comme la fiche du cabinet. La colonne

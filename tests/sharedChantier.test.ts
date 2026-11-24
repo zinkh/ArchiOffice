@@ -267,6 +267,26 @@ describe('Détail accordé par le cabinet (issue #688)', () => {
         expect(container.querySelector('button[aria-label^="shared_responsable_remove"]')).toBeNull();
       });
 
+      it('avec la fiche réduite : coordonnées des entreprises en charge, avec liens, et rappel RGPD ; sans fiche, rien', async () => {
+        const fiche = { contact_id: 'c1', nom: 'Alpha Bâtiment', personne: 'Ana Roy', fonction: 'Conductrice de travaux', email: 'ana@alpha.test', telephones: ['06 00 00 00 01'], adresse: '1 rue du Chantier, 54000 Nancy', siret: '123 456 789 00012', tva: null };
+        apiFetch.mockImplementation(async (url: string) => (url.endsWith('/options') ? { ...OPTIONS, fiches: { 'Alpha Bâtiment': fiche } } : url.endsWith('/reserves') ? [reserve({ entreprises: JSON.stringify(['Alpha Bâtiment', 'Béta Peinture']) })] : []));
+        await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true, detail: true }));
+        await ouvrirReserve();
+        const bloc = container.querySelector('[role="group"][aria-label="shared_contacts_title"]') as HTMLElement;
+        expect(bloc.textContent).toContain('Ana Roy, Conductrice de travaux');
+        expect(bloc.textContent).toContain('1 rue du Chantier, 54000 Nancy');
+        expect(bloc.textContent).toContain('shared_contact_siret 123 456 789 00012');
+        expect(bloc.textContent).not.toContain('Béta Peinture'); // pas de fiche pour elle
+        expect(bloc.querySelector('a[href="mailto:ana@alpha.test"]')).not.toBeNull();
+        expect(bloc.querySelector('a[href="tel:0600000001"]')).not.toBeNull();
+        expect(bloc.textContent).toContain('shared_contacts_note');
+        await act(async () => root.unmount()); container.remove();
+        listeur({ entreprises: JSON.stringify(['Alpha Bâtiment']) });
+        await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true }));
+        await ouvrirReserve();
+        expect(container.querySelector('[aria-label="shared_contacts_title"]')).toBeNull();
+      });
+
       it('le formulaire de création envoie le lot et l\'entreprise choisis', async () => {
         listeur();
         await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true }));
@@ -338,6 +358,17 @@ describe('Détail accordé par le cabinet (issue #688)', () => {
       await act(async () => { bouton('shared_plan_remove').click(); });
       expect(JSON.parse((puts()[0][1] as any).body)).toEqual({ plan_id: null, x: null, y: null });
     });
+  });
+
+  it('ACT avec le détail : la fiche réduite de l\'entreprise (identifiants, coordonnées) s\'affiche', async () => {
+    const fiche = { contact_id: 'c1', nom: 'Alpha Bâtiment', personne: 'Ana Roy', fonction: null, email: null, telephones: [], adresse: null, siret: '123 456 789 00012', tva: 'FR00123456789' };
+    const act1 = { ...ACT, entreprises: [{ ...ACT.entreprises[0], email: null, emails_supplementaires: null, fiche }] };
+    apiFetch.mockImplementation(async (url: string) => (url.endsWith('/act') ? act1 : []));
+    await monter(React.createElement(SharedAct, { projectId: 'p', canPropose: false, detail: true }));
+    const texte = container.textContent ?? '';
+    expect(texte).toContain('Ana Roy');
+    expect(texte).toContain('shared_contact_siret 123 456 789 00012');
+    expect(texte).toContain('shared_contact_vat FR00123456789');
   });
 
   it('avec le détail : adresses des entreprises et rappel que la fiche reste au cabinet ; sans détail, rien', async () => {

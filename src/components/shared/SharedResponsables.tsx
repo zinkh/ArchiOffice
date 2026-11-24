@@ -3,11 +3,14 @@
 // revalide chaque valeur, l'écran ne propose que ce qu'il connaît. Choisir un lot ajoute l'entreprise de sa fiche, comme le cabinet.
 import { useTranslation } from 'react-i18next';
 import { IconX } from '@tabler/icons-react';
+import type { SharedContact } from './SharedContactCard';
 
 export interface ResponsableOptions {
   lots: Array<{ title: string; number: string | null }>;
   entreprises: string[];
   lotEntreprise: Record<string, string>;
+  /** Fiche réduite par nom d'entreprise, avec le détail de l'atelier seulement. */
+  fiches?: Record<string, SharedContact>;
 }
 export interface Responsables { lots: string[]; entreprises: string[] }
 

@@ -15,6 +15,7 @@ import SharedKpis from './shared/SharedKpis';
 import SharedPhoto from './shared/SharedPhoto';
 import SharedReservePlan from './shared/SharedReservePlan';
 import SharedResponsables, { type ResponsableOptions } from './shared/SharedResponsables';
+import SharedContactCard, { type SharedContact } from './shared/SharedContactCard';
 import { parseJsonList } from '../lib/jsonList';
 import { RESERVE_STATUSES, isReserveClosed, isReserveForRecord, reserveOverdueDays, reserveStatusKey, statusPillClass } from './pro/reserveShared';
 
@@ -502,6 +503,17 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
                                 options={options} disabled={!canWrite}
                                 onChange={next => patchQuiet(item, { lots: next.lots, entreprises: next.entreprises })}
                               />
+                              {(() => {
+                                // Coordonnées des entreprises en charge : fiche réduite, avec le détail de l'atelier seulement.
+                                const fiches = parseJsonList(item.entreprises).map(nom => options?.fiches?.[nom]).filter((f): f is SharedContact => !!f);
+                                return fiches.length > 0 && (
+                                  <div className="mt-3 space-y-1" role="group" aria-label={t('shared_contacts_title')}>
+                                    <p className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('shared_contacts_title')}</p>
+                                    <div className="grid gap-2 sm:grid-cols-2">{fiches.map(f => <SharedContactCard key={f.contact_id} contact={f} />)}</div>
+                                    <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{t('shared_contacts_note')}</p>
+                                  </div>
+                                );
+                              })()}
                             </div>
                             {detail && <div className="mt-3"><SharedReservePlan path={path} reserve={item} canWrite={canWrite} onSave={position => patch(item, { ...position })} /></div>}
                             {detail && (item.photos?.length ?? 0) > 0 && (
@@ -534,7 +546,7 @@ interface SharedActView {
   lots: Array<{ id: string; name: string | null }>;
   documents: Array<{ id: string; nom: string | null; type_doc: string | null }>;
   /** `email` et `emails_supplementaires` avec le détail de l'atelier seulement. */
-  entreprises: Array<{ id: string; nom: string | null; lots_ids: string[]; dce_transmis_le: string | null; relance_le: string | null; offre_recue_le: string | null; ne_repond_pas: boolean; email?: string | null; emails_supplementaires?: string | null }>;
+  entreprises: Array<{ id: string; nom: string | null; lots_ids: string[]; dce_transmis_le: string | null; relance_le: string | null; offre_recue_le: string | null; ne_repond_pas: boolean; email?: string | null; emails_supplementaires?: string | null; fiche?: SharedContact | null }>;
   offres: Array<{ id: string; lot_id: string | null; entreprise_id: string | null; montant_base: number | null; note_technique: number | null; conforme: boolean; motif_nc: string | null }>;
   attributions: Array<{ lot_id: string | null; entreprise_id: string | null; montant: number | null; directe: boolean }>;
   questions: Array<{ id: string; question: string | null; reponse: string | null; date_question: string | null }>;
@@ -647,8 +659,9 @@ export function SharedAct({ projectId, canPropose, detail = false }: { projectId
                   : e.dce_transmis_le ? t('shared_act_dce_sent', { date: e.dce_transmis_le }) : ''}
               </td>
               {detail && (
-                <td className="px-3 py-2 align-top text-[var(--tblr-muted)]">
-                  {[e.email, e.emails_supplementaires].filter(Boolean).join(' ; ')}
+                <td className="px-3 py-2 align-top text-[var(--tblr-muted)] space-y-1">
+                  {[e.email, e.emails_supplementaires].filter(Boolean).length > 0 && <p>{[e.email, e.emails_supplementaires].filter(Boolean).join(' ; ')}</p>}
+                  {e.fiche && <SharedContactCard contact={e.fiche} />}
                 </td>
               )}
               {canPropose && (

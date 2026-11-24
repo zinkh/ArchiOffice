@@ -22,6 +22,7 @@ import { guestActView } from '../projectShares/actView';
 import { guestAttendance, guestLotTracking } from '../projectShares/reportDetailView';
 import { linkForTenantFile } from '../projectShares/fileAccess';
 import { hasResponsableKeys, loadResponsableOptions, readResponsables } from '../projectShares/reserveResponsables';
+import { loadContactCards, type GuestContactCard } from '../projectShares/contactCard';
 import { isProjectArchived } from './projectArchive';
 
 export interface RouteDeps {
@@ -365,7 +366,14 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
           await auditConsultation(share, req, 'Consultation des coordonnées des entreprises de l\'ACT', 'ACT', 'act_contacts', 'ACT');
         } catch (traceError) { console.error('[GET /api/shared/projects/:id/act] trace', traceError); }
       }
-      res.json(guestActView(row ?? null, marches || [], { detail: !!req.shareDetail }));
+      // Avec le détail, une entreprise rattachée à un contact porte sa fiche RÉDUITE (jamais la fiche complète).
+      let contacts: Map<string, GuestContactCard> | undefined;
+      if (req.shareDetail) {
+        const consultation = typeof row?.consultation === 'string' ? (() => { try { return JSON.parse(row.consultation); } catch { return {}; } })() : row?.consultation;
+        const wanted = (Array.isArray(consultation?.entreprises) ? consultation.entreprises : []).map((e: any) => e?.contact_id).filter(Boolean);
+        contacts = await loadContactCards(supabaseAdmin, share.tenant_id, wanted);
+      }
+      res.json(guestActView(row ?? null, marches || [], { detail: !!req.shareDetail, contacts }));
     } catch (e: any) { fail(res, '[GET /api/shared/projects/:id/act]', e); }
   });
 
@@ -520,7 +528,14 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
       try {
         const share = await guard(req, res, set.kind, 'write');
         if (!share) return;
-        res.json(await loadResponsableOptions(supabaseAdmin, share.tenant_id, share.project_id));
+        // Avec le détail, chaque entreprise porte une fiche RÉDUITE (identifiants, coordonnées de travail) : données personnelles,
+        // dont la consultation est tracée avant la réponse (meilleur effort : un journal en panne ne prive pas le confrère de sa vue).
+        if (req.shareDetail) {
+          try {
+            await auditConsultation(share, req, `Consultation des coordonnées des entreprises (${set.label})`, set.label, `${set.type}_contacts`, set.category);
+          } catch (traceError) { console.error(`[GET /api/shared/projects/:id/${set.path}/options] trace`, traceError); }
+        }
+        res.json(await loadResponsableOptions(supabaseAdmin, share.tenant_id, share.project_id, { withContacts: !!req.shareDetail }));
       } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${set.path}/options]`, e); }
     });
 
