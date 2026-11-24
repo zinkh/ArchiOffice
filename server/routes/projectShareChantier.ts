@@ -38,8 +38,13 @@ const SHORT_MAX = 200;
 const REPORT_FIELDS = ['id', 'report_number', 'date', 'statut', 'meteo', 'temperature', 'effectif_total'] as const;
 /** Une rubrique : jamais `photos` (stockage privé), ni les colonnes historiques inutilisées. */
 const NOTE_FIELDS = ['id', 'category', 'note_number', 'responsible_company', 'issue_date', 'due_date', 'realization_date', 'status', 'text'] as const;
-/** Une réserve : jamais la position sur le plan, ni les photos (stockage privé), ni la nature des cerfas d'OPR. */
+/** Une réserve : jamais les photos (stockage privé), ni la nature des cerfas d'OPR ; la position sur le plan seulement avec le détail. */
 const RESERVE_FIELDS = ['id', 'number', 'title', 'batiment', 'local', 'status', 'lots', 'entreprises', 'created_at', 'due_date', 'description', 'reponse'] as const;
+const RESERVE_DETAIL_FIELDS = [...RESERVE_FIELDS, 'plan_id', 'x', 'y'] as const;
+/** Les plans du cabinet visibles pour placer un repère : ceux de l'AOR, comme le suivi des réserves du cabinet. */
+const planIsAor = (p: any) => !p?.category || p.category === 'AOR';
+/** Jamais l'adresse du fichier : seulement de quoi choisir le plan et savoir s'il se lit comme un PDF ou comme une image. */
+const planView = (p: any) => ({ id: p.id, name: p.name ?? '', pdf: /\.pdf(\?|$)/i.test(String(p.file_url ?? '')) });
 
 /** Même vocabulaire que le suivi des réserves du cabinet (src/components/pro/reserveShared.tsx). */
 export const RESERVE_STATUSES = [
@@ -106,9 +111,33 @@ export function readReportFields(body: any): { fields: Record<string, any> } | {
   return { fields };
 }
 
-/** Champs d'une réserve qu'un confrère peut écrire : le suivi, jamais l'identité de la réserve (intitulé, lot, plan). */
-export function readReserveFields(body: any): { fields: Record<string, any> } | { error: string } {
+/** Les champs de position sur le plan : ils ne s'écrivent qu'avec le détail accordé (le plan n'est lisible qu'avec lui). */
+const POSITION_KEYS = ['plan_id', 'x', 'y'] as const;
+export const hasPositionKeys = (body: any) => POSITION_KEYS.some(k => body?.[k] !== undefined);
+
+/**
+ * Champs d'une réserve qu'un confrère peut écrire : le suivi, l'intitulé (issue #687) et, avec le détail, la position
+ * sur le plan. Jamais le lot, les entreprises ni les bâtiments : ils restent au cabinet.
+ */
+export function readReserveFields(body: any, options: { detail?: boolean } = {}): { fields: Record<string, any> } | { error: string } {
   const fields: Record<string, any> = {};
+  if (body?.title !== undefined) {
+    if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > SHORT_MAX) return { error: `title invalide (1 à ${SHORT_MAX} caractères).` };
+    fields.title = body.title.trim();
+  }
+  if (hasPositionKeys(body)) {
+    if (!options.detail) return { error: 'La position sur le plan n\'est pas modifiable sans le détail du suivi.' };
+    if (body.plan_id === null) {
+      // Retirer le repère : plan et coordonnées s'effacent ensemble.
+      Object.assign(fields, { plan_id: null, x: null, y: null });
+    } else {
+      const inPlan = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100;
+      if (typeof body.plan_id !== 'string' || !body.plan_id || body.plan_id.length > 100 || !inPlan(body.x) || !inPlan(body.y)) {
+        return { error: 'Position invalide : plan_id, x et y (0 à 100 %) sont attendus ensemble.' };
+      }
+      Object.assign(fields, { plan_id: body.plan_id, x: body.x, y: body.y });
+    }
+  }
   if (body?.status !== undefined) {
     if (!(RESERVE_STATUSES as readonly string[]).includes(body.status)) return { error: 'Statut inconnu.' };
     fields.status = body.status;
@@ -364,7 +393,7 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
             }
           }
         }
-        const view = (r: any) => (req.shareDetail ? { ...pick(r, RESERVE_FIELDS), photos: photosByReserve.get(r.id) ?? [] } : pick(r, RESERVE_FIELDS));
+        const view = (r: any) => (req.shareDetail ? { ...pick(r, RESERVE_DETAIL_FIELDS), photos: photosByReserve.get(r.id) ?? [] } : pick(r, RESERVE_FIELDS));
         res.json((data || []).map(view).sort((a: any, b: any) => Number(a.number) - Number(b.number)));
       } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${set.path}]`, e); }
     });
@@ -392,9 +421,19 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
       try {
         const share = await guard(req, res, set.kind, 'write');
         if (!share) return;
-        const parsed = readReserveFields(req.body);
+        // Déplacer un repère suppose de voir le plan : sans le détail accordé, c'est un refus net et non une erreur de saisie.
+        if (hasPositionKeys(req.body) && !req.shareDetail) {
+          return res.status(403).json({ error: 'Le détail de ce suivi n\'est pas partagé avec vous.', code: 'SHARE_DETAIL_FORBIDDEN' });
+        }
+        const parsed = readReserveFields(req.body, { detail: req.shareDetail });
         if ('error' in parsed) return res.status(400).json({ error: parsed.error });
         if (!Object.keys(parsed.fields).length) return res.status(400).json({ error: 'Aucune modification.' });
+        // Le plan visé doit être un plan AOR de CETTE affaire et de CE cabinet : celui d'une autre affaire est introuvable.
+        if (parsed.fields.plan_id) {
+          const { data: plan } = await supabaseAdmin.from('plans').select('id, category')
+            .eq('id', parsed.fields.plan_id).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
+          if (!plan || !planIsAor(plan)) return res.status(404).json({ error: 'Plan introuvable.' });
+        }
         // La réserve doit appartenir à CETTE affaire partagée : celle d'une autre affaire du cabinet est introuvable.
         const { data: reserve } = await supabaseAdmin.from(set.table).select('id, number, title, status')
           .eq('id', req.params.reserveId).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
@@ -403,7 +442,9 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
           .eq('id', reserve.id).eq('tenant_id', share.tenant_id).select('*').single();
         if (isMissingReponseColumn(error)) return res.status(503).json({ error: 'Le suivi des réserves n\'est pas disponible : migration à appliquer.' });
         if (error) throw error;
-        await audit(share, req, `Modification de ${set.label} N° ${reserve.number} "${reserve.title || ''}"`, reserve.title || '', reserve.id, set.type, set.category);
+        const renamed = parsed.fields.title && parsed.fields.title !== reserve.title ? ` (nouvel intitulé : "${parsed.fields.title}")` : '';
+        const moved = 'plan_id' in parsed.fields ? (parsed.fields.plan_id ? ' (repère déplacé sur le plan)' : ' (repère retiré du plan)') : '';
+        await audit(share, req, `Modification de ${set.label} N° ${reserve.number} "${reserve.title || ''}"${renamed}${moved}`, reserve.title || '', reserve.id, set.type, set.category);
         // Comme le PUT du cabinet : lever une réserve d'OPR prévient les webhooks du cabinet.
         const status = parsed.fields.status;
         if (set.kind === 'reserves' && status && CLOSED_RESERVE_STATUSES.includes(status) && !CLOSED_RESERVE_STATUSES.includes(reserve.status)) {
@@ -411,8 +452,34 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
             id: reserve.id, title: reserve.title, status, project_id: share.project_id, number: reserve.number ?? null,
           });
         }
-        res.json(pick(data, RESERVE_FIELDS));
+        res.json(pick(data, req.shareDetail ? RESERVE_DETAIL_FIELDS : RESERVE_FIELDS));
       } catch (e: any) { fail(res, `[PUT /api/shared/projects/:id/${set.path}/:reserveId]`, e); }
+    });
+
+    /** Les plans où poser un repère (identifiant et nom seulement) : exige le détail, sans lequel le plan n'est pas montré. */
+    app.get(`/api/shared/projects/:id/${set.path}/plans`, async (req: any, res: any) => {
+      try {
+        const share = await guard(req, res, set.kind, 'read', { detail: true });
+        if (!share) return;
+        const { data, error } = await supabaseAdmin.from('plans').select('id, name, category, file_url')
+          .eq('project_id', share.project_id).eq('tenant_id', share.tenant_id);
+        if (error) throw error;
+        res.json((data || []).filter(planIsAor).map(planView));
+      } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${set.path}/plans]`, e); }
+    });
+
+    /** Lien (qui expire) vers le fichier d'UN plan AOR de l'affaire : partage, détail et rattachement revérifiés. */
+    app.get(`/api/shared/projects/:id/${set.path}/plans/:planId/file`, async (req: any, res: any) => {
+      try {
+        const share = await guard(req, res, set.kind, 'read', { detail: true });
+        if (!share) return;
+        const { data: plan } = await supabaseAdmin.from('plans').select('id, file_url, category')
+          .eq('id', req.params.planId).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
+        if (!plan?.file_url || !planIsAor(plan)) return res.status(404).json({ error: 'Plan introuvable.' });
+        const link = await linkForTenantFile(supabaseAdmin, share.tenant_id, plan.file_url);
+        if (!link.ok) return res.status(link.status).json({ error: link.error });
+        res.json({ url: link.url, expiresIn: link.expiresIn });
+      } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${set.path}/plans/:planId/file]`, e); }
     });
   }
 }

@@ -13,6 +13,7 @@ import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import SharedKpis from './shared/SharedKpis';
 import SharedPhoto from './shared/SharedPhoto';
+import SharedReservePlan from './shared/SharedReservePlan';
 import { RESERVE_STATUSES, isReserveClosed, isReserveForRecord, reserveOverdueDays, reserveStatusKey, statusPillClass } from './pro/reserveShared';
 
 interface SharedAttendee { name: string | null; role: string | null; status: string | null; present: boolean; excused: boolean }
@@ -36,8 +37,9 @@ interface SharedNote {
 interface SharedReserve {
   id: string; number: number | null; title: string; batiment: string | null; local: string | null; status: string | null;
   lots: string | null; entreprises: string | null; due_date: string | null; description: string | null; reponse: string | null;
-  /** Avec le détail de l'atelier seulement. */
+  /** Avec le détail de l'atelier seulement : photos et position sur le plan (x et y en % du plan). */
   photos?: Array<{ id: string; caption: string | null; has_thumb: boolean }>;
+  plan_id?: string | null; x?: number | string | null; y?: number | string | null;
 }
 
 const PRESENCE_CLASS: Record<string, string> = {
@@ -304,13 +306,16 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
     apiFetch<SharedReserve[]>(path).then(setItems).catch(e => setError(e?.message || t('share_error')));
   }, [path, t]);
 
-  const patch = async (item: SharedReserve, fields: Record<string, string>) => {
+  const patch = async (item: SharedReserve, fields: Record<string, string | number | null>) => {
     try {
       const saved = await apiFetch<SharedReserve>(`${path}/${item.id}`, { method: 'PUT', body: JSON.stringify(fields) });
-      setItems(list => (list ?? []).map(r => (r.id === saved.id ? saved : r)));
+      // Fusion : la réponse ne porte pas les photos, que la liste garde.
+      setItems(list => (list ?? []).map(r => (r.id === saved.id ? { ...r, ...saved } : r)));
       setError(null);
-    } catch (e: any) { setError(e?.message || t('share_error')); }
+    } catch (e: any) { setError(e?.message || t('share_error')); throw e; }
   };
+  // Les saisies de champ n'ont pas à gérer l'échec : l'erreur s'affiche déjà.
+  const patchQuiet = (item: SharedReserve, fields: Record<string, string | number | null>) => { patch(item, fields).catch(() => {}); };
 
   const counts = useMemo(() => {
     const list = items ?? [];
@@ -410,10 +415,12 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
                         <tr>
                           <td colSpan={COLS} className="px-4 py-3" style={{ background: 'var(--tblr-surface-2)' }}>
                             <div className="grid gap-3 sm:grid-cols-2">
-                              <CommitField key={`d-${item.id}-${item.description}`} value={item.description} label={t('shared_reserve_description')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patch(item, { description: v })} />
-                              <CommitField key={`r-${item.id}-${item.reponse}`} value={item.reponse} label={t('shared_reserve_response')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patch(item, { reponse: v })} />
-                              <CommitField key={`e-${item.id}-${item.due_date}`} value={item.due_date} label={t('shared_reserve_due')} disabled={!canWrite} type="date" onCommit={v => patch(item, { due_date: v })} />
+                              <CommitField key={`t-${item.id}-${item.title}`} value={item.title} label={t('shared_reserve_title')} disabled={!canWrite} maxLength={200} onCommit={v => { if (v) patchQuiet(item, { title: v }); }} />
+                              <CommitField key={`e-${item.id}-${item.due_date}`} value={item.due_date} label={t('shared_reserve_due')} disabled={!canWrite} type="date" onCommit={v => patchQuiet(item, { due_date: v })} />
+                              <CommitField key={`d-${item.id}-${item.description}`} value={item.description} label={t('shared_reserve_description')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patchQuiet(item, { description: v })} />
+                              <CommitField key={`r-${item.id}-${item.reponse}`} value={item.reponse} label={t('shared_reserve_response')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patchQuiet(item, { reponse: v })} />
                             </div>
+                            {detail && <div className="mt-3"><SharedReservePlan path={path} reserve={item} canWrite={canWrite} onSave={position => patch(item, { ...position })} /></div>}
                             {detail && (item.photos?.length ?? 0) > 0 && (
                               <div className="flex flex-wrap gap-2 mt-3" role="group" aria-label={t('shared_photos_label')}>
                                 {item.photos!.map(p => (

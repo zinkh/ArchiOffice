@@ -397,9 +397,19 @@ Autres types : voir ROADMAP.md.
   **tracée avant la réponse** dans le journal d'activité (« confrère externe », `auditConsultation`, au plus une fois par demi-heure
   et par personne, en mémoire du processus, un journal en panne ne prive pas le confrère de sa vue) et l'écran rappelle que la fiche
   reste au cabinet. Écrans : case « Détail » sous chaque atelier concerné dans `ProjectSharesPanel.tsx`, `SharedPhoto.tsx` (lien
-  demandé à l'affichage, qui expire), `AttendanceTable` et `LotTrackingTable` dans `SharedChantier.tsx`. **Pas encore fait** : plan et
-  position des réserves, coordonnées des intervenants des comptes rendus (une ligne de présence ne porte que `contact_id`), contact des
-  entreprises des lots (atelier `lots`), trace des téléchargements de photos. Pas vérifié dans un navigateur.
+  demandé à l'affichage, qui expire), `AttendanceTable` et `LotTrackingTable` dans `SharedChantier.tsx`. **Pas encore fait** : coordonnées des
+  intervenants des comptes rendus (une ligne de présence ne porte que `contact_id`), contact des entreprises des lots (atelier
+  `lots`), trace des téléchargements de photos. Pas vérifié dans un navigateur.
+- **Intitulé et position sur plan d'une réserve** (issue #687, `readReserveFields(body, { detail })`, `SharedReservePlan.tsx`,
+  `tests/projectShareDetail.test.ts`). **Intitulé** : il s'écrit avec le droit d'écriture (modification directe, 1 à 200 caractères,
+  jamais vide), tracé au journal avec le nouvel intitulé ; le lot, les entreprises et le bâtiment restent au cabinet. **Position** :
+  `plan_id`, `x`, `y` (pourcentage de 0 à 100 du plan) ne se lisent et ne s'écrivent qu'avec **le détail** de l'atelier (le plan n'est
+  montré qu'avec lui) : sans détail, une position envoyée est refusée en 403 `SHARE_DETAIL_FORBIDDEN` et rien n'est écrit. Le plan se
+  choisit parmi les plans de l'affaire de catégorie AOR ou sans catégorie (comme le suivi du cabinet) : `GET .../reserves|gpa-reserves/plans`
+  (id, nom, `pdf`, jamais l'adresse du fichier) et `GET .../plans/:planId/file` (lien qui expire, `linkForTenantFile`) ; un plan d'une autre
+  affaire ou d'une autre catégorie est introuvable, y compris à l'écriture. `plan_id: null` retire le repère (plan et coordonnées
+  ensemble). `PlanAnnotator` accepte `resolveUrl` et `isPdf` pour lire un plan par une route du partage. Pas vérifié dans un navigateur
+  réel (le double de `PlanAnnotator` remplace pdf.js dans les tests).
 - **Pas encore fait** : création d'une réserve ou d'un compte rendu par un confrère, commentaires sur les ateliers autres que CCTP et DPGF.
 
 **Documents** : le droit couvre les documents de l'affaire (`resource_type =

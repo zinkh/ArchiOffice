@@ -61,8 +61,17 @@ describe('droits de suivi de chantier : fonctions pures', () => {
   });
 
   it('ne retient que les champs autorisés d\'une réserve et valide leurs formats', () => {
-    expect(readReserveFields({ status: 'Levée', reponse: ' Fait ', title: 'Autre', lots: 'x', plan_id: 'p', tenant_id: 'autre' }))
-      .toEqual({ fields: { status: 'Levée', reponse: 'Fait' } });
+    // L'intitulé est écrit (issue #687) ; le lot, l'entreprise et le cabinet jamais ; le plan seulement avec le détail.
+    expect(readReserveFields({ status: 'Levée', reponse: ' Fait ', title: ' Autre ', lots: 'x', tenant_id: 'autre' }))
+      .toEqual({ fields: { status: 'Levée', reponse: 'Fait', title: 'Autre' } });
+    expect('error' in readReserveFields({ title: '   ' })).toBe(true);
+    expect('error' in readReserveFields({ title: 'x'.repeat(201) })).toBe(true);
+    expect('error' in readReserveFields({ plan_id: 'p', x: 10, y: 20 })).toBe(true); // sans le détail
+    expect(readReserveFields({ plan_id: 'p', x: 10, y: 20 }, { detail: true })).toEqual({ fields: { plan_id: 'p', x: 10, y: 20 } });
+    expect(readReserveFields({ plan_id: null }, { detail: true })).toEqual({ fields: { plan_id: null, x: null, y: null } });
+    for (const bad of [{ plan_id: 'p', x: 101, y: 5 }, { plan_id: 'p', x: -1, y: 5 }, { plan_id: 'p', x: '10', y: 5 }, { plan_id: 'p', x: 10 }, { x: 10, y: 5 }]) {
+      expect('error' in readReserveFields(bad, { detail: true })).toBe(true);
+    }
     expect('error' in readReserveFields({ status: 'Inventé' })).toBe(true);
     expect('error' in readReserveFields({ due_date: '13/11/2026' })).toBe(true);
     expect(readReserveFields({ due_date: '' })).toEqual({ fields: { due_date: null } });
@@ -211,15 +220,21 @@ describe('réserves AOR et GPA partagées', () => {
     expect(put.status).toBe(403);
   });
 
-  it('met à jour le suivi d\'une réserve, jamais son identité', async () => {
+  it('met à jour le suivi et l\'intitulé d\'une réserve, jamais son lot ni son plan sans le détail', async () => {
     const { admin, projectId, tenantId } = setup();
     const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }, { kind: 'gpa', access: 'write' }]);
-    const aor = await request(app).put(`/api/shared/projects/${projectId}/reserves/${tenantId}-a1`).set(authHeader(guest.token))
-      .send({ status: 'Levée', reponse: 'Repris', due_date: '2026-12-01', title: 'Piraté', plan_id: 'x' });
+    const url = `/api/shared/projects/${projectId}/reserves/${tenantId}-a1`;
+    const aor = await request(app).put(url).set(authHeader(guest.token))
+      .send({ status: 'Levée', reponse: 'Repris', due_date: '2026-12-01', title: 'Fissure du refend', lots: 'piraté' });
     expect(aor.status).toBe(200);
-    expect(aor.body).toMatchObject({ status: 'Levée', reponse: 'Repris', due_date: '2026-12-01', title: 'Fissure cloison' });
+    expect(aor.body).toMatchObject({ status: 'Levée', reponse: 'Repris', due_date: '2026-12-01', title: 'Fissure du refend' });
+    // Sans le détail, le plan n'est pas montré : une position envoyée est refusée net, rien n'est écrit.
+    const moved = await request(app).put(url).set(authHeader(guest.token)).send({ status: 'En cours', plan_id: 'x', x: 1, y: 1 });
+    expect(moved.status).toBe(403);
     const stored = fakeSupabaseAdmin.getTable('reserves').find((r: any) => r.id === `${tenantId}-a1`);
     expect(stored?.plan_id).toBe('plan-secret');
+    expect(stored?.status).toBe('Levée');
+    expect(stored?.lots).not.toBe('piraté');
     const gpa = await request(app).put(`/api/shared/projects/${projectId}/gpa-reserves/${tenantId}-g1`).set(authHeader(guest.token)).send({ status: 'En cours' });
     expect(gpa.status).toBe(200);
     expect(gpa.body.status).toBe('En cours');
