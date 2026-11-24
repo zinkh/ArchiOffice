@@ -593,10 +593,11 @@ export function TenderRssWatch() {
                     className="shrink-0"
                   />
                   <div className="flex flex-1 min-w-0 flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0" style={m.status === 'read' ? { opacity: 0.55 } : undefined}>
                       <div className="flex items-center gap-2 flex-wrap">
                         {m.status === 'new' && <StatusBadge status={m.status} t={t} />}
-                        <p className="font-medium text-sm truncate" style={{ color: 'var(--tblr-text)' }}>{m.title}</p>
+                        {/* Annonce déjà lue : titre en gris et ligne atténuée, les nouvelles restent en pleine couleur. */}
+                        <p className={`text-sm truncate ${m.status === 'read' ? 'font-normal' : 'font-medium'}`} style={{ color: m.status === 'read' ? 'var(--tblr-muted)' : 'var(--tblr-text)' }}>{m.title}</p>
                       </div>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
                         {m.source_name || '---'}
