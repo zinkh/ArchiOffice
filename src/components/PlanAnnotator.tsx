@@ -37,6 +37,10 @@ interface PlanAnnotatorProps {
   fitWidth?: boolean;
   /** Marges réduites autour du plan : la vue par plan veut chaque pixel. */
   compact?: boolean;
+  /** Lien de lecture du plan, quand `fileUrl` n'est pas une référence de stockage du cabinet (confrère invité : route du partage). */
+  resolveUrl?: (fileUrl: string) => Promise<string>;
+  /** Nature du plan quand elle ne se lit pas dans `fileUrl` (PDF ou image). */
+  isPdf?: boolean;
 }
 
 export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
@@ -49,6 +53,8 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
   selectedMarkerId = null,
   fitWidth = false,
   compact = false,
+  resolveUrl = resolveSignedUrl,
+  isPdf: isPdfProp,
 }) => {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
@@ -79,7 +85,7 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
   // Checked against the stable stored reference, not the resolved signed URL
   // (whose token query string doesn't change the file extension it's built
   // from, but there's no reason to wait on the resolve just to know this).
-  const isPdf = fileUrl.includes('application/pdf') || /\.pdf(\?|$)/i.test(fileUrl);
+  const isPdf = isPdfProp ?? (fileUrl.includes('application/pdf') || /\.pdf(\?|$)/i.test(fileUrl));
 
   // The `plans` bucket is private — fileUrl is a stable reference, not a
   // directly fetchable URL, so it's exchanged for a short-lived signed URL
@@ -88,11 +94,11 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
   useEffect(() => {
     let cancelled = false;
     setResolvedUrl(null);
-    resolveSignedUrl(fileUrl)
+    resolveUrl(fileUrl)
       .then((url) => { if (!cancelled) setResolvedUrl(url); })
       .catch((err) => console.error('[PlanAnnotator] Failed to resolve plan URL:', err));
     return () => { cancelled = true; };
-  }, [fileUrl]);
+  }, [fileUrl, resolveUrl]);
 
   // Ramène le repère sélectionné au centre de la zone défilante. Le défilement est calculé à la main :
   // scrollIntoView ferait aussi défiler la page entière quand le plan est dans un volet.

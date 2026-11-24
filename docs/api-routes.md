@@ -4,7 +4,7 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-873 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+874 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
@@ -492,9 +492,9 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/projects/:id/share-proposals/:proposalId/approve` | [server/routes/projectShareProposals.ts:363](../server/routes/projectShareProposals.ts#L363) |
 | POST | `/api/projects/:id/share-proposals/:proposalId/reject` | [server/routes/projectShareProposals.ts:437](../server/routes/projectShareProposals.ts#L437) |
 | GET | `/api/projects/:id/shares` | [server/routes/projectShares.ts:151](../server/routes/projectShares.ts#L151) |
-| POST | `/api/projects/:id/shares` | [server/routes/projectShares.ts:174](../server/routes/projectShares.ts#L174) |
-| DELETE | `/api/projects/:id/shares/:shareId` | [server/routes/projectShares.ts:305](../server/routes/projectShares.ts#L305) |
-| PUT | `/api/projects/:id/shares/:shareId` | [server/routes/projectShares.ts:291](../server/routes/projectShares.ts#L291) |
+| POST | `/api/projects/:id/shares` | [server/routes/projectShares.ts:175](../server/routes/projectShares.ts#L175) |
+| DELETE | `/api/projects/:id/shares/:shareId` | [server/routes/projectShares.ts:306](../server/routes/projectShares.ts#L306) |
+| PUT | `/api/projects/:id/shares/:shareId` | [server/routes/projectShares.ts:292](../server/routes/projectShares.ts#L292) |
 | PUT | `/api/projects/:id/stakeholders` | [server/routes/projectStakeholders.ts:41](../server/routes/projectStakeholders.ts#L41) |
 | POST | `/api/projects/:id/unarchive` | [server/routes/projectArchive.ts:302](../server/routes/projectArchive.ts#L302) |
 | GET | `/api/projects/:projectId/act` | [server/routes/actData.ts:13](../server/routes/actData.ts#L13) |
@@ -674,27 +674,28 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/settings/tenant-deletion` | [server/routes/settings.ts:242](../server/routes/settings.ts#L242) |
 | POST | `/api/settings/tenant-deletion` | [server/routes/settings.ts:253](../server/routes/settings.ts#L253) |
 | GET | `/api/settings/tenant-export` | [server/routes/settings.ts:226](../server/routes/settings.ts#L226) |
-| GET | `/api/shared/projects` | [server/routes/projectShares.ts:343](../server/routes/projectShares.ts#L343) |
-| GET | `/api/shared/projects/:id` | [server/routes/projectShares.ts:368](../server/routes/projectShares.ts#L368) |
-| GET | `/api/shared/projects/:id/act` | [server/routes/projectShareChantier.ts:256](../server/routes/projectShareChantier.ts#L256) |
+| GET | `/api/shared/projects` | [server/routes/projectShares.ts:344](../server/routes/projectShares.ts#L344) |
+| GET | `/api/shared/projects/:id` | [server/routes/projectShares.ts:369](../server/routes/projectShares.ts#L369) |
+| GET | `/api/shared/projects/:id/act` | [server/routes/projectShareChantier.ts:354](../server/routes/projectShareChantier.ts#L354) |
 | GET | `/api/shared/projects/:id/act-proposals` | [server/routes/projectShareActProposals.ts:177](../server/routes/projectShareActProposals.ts#L177) |
 | POST | `/api/shared/projects/:id/act-proposals` | [server/routes/projectShareActProposals.ts:187](../server/routes/projectShareActProposals.ts#L187) |
 | DELETE | `/api/shared/projects/:id/act-proposals/:proposalId` | [server/routes/projectShareActProposals.ts:231](../server/routes/projectShareActProposals.ts#L231) |
 | GET | `/api/shared/projects/:id/comments` | [server/routes/projectShareDocuments.ts:118](../server/routes/projectShareDocuments.ts#L118) |
 | POST | `/api/shared/projects/:id/comments` | [server/routes/projectShareDocuments.ts:133](../server/routes/projectShareDocuments.ts#L133) |
-| GET | `/api/shared/projects/:id/documents` | [server/routes/projectShares.ts:391](../server/routes/projectShares.ts#L391) |
-| GET | `/api/shared/projects/:id/documents/:docId/download` | [server/routes/projectShares.ts:406](../server/routes/projectShares.ts#L406) |
+| GET | `/api/shared/projects/:id/documents` | [server/routes/projectShares.ts:395](../server/routes/projectShares.ts#L395) |
+| GET | `/api/shared/projects/:id/documents/:docId/download` | [server/routes/projectShares.ts:410](../server/routes/projectShares.ts#L410) |
 | GET | `/api/shared/projects/:id/proposals` | [server/routes/projectShareProposals.ts:254](../server/routes/projectShareProposals.ts#L254) |
 | POST | `/api/shared/projects/:id/proposals` | [server/routes/projectShareProposals.ts:175](../server/routes/projectShareProposals.ts#L175) |
 | DELETE | `/api/shared/projects/:id/proposals/:proposalId` | [server/routes/projectShareProposals.ts:269](../server/routes/projectShareProposals.ts#L269) |
-| GET | `/api/shared/projects/:id/reports` | [server/routes/projectShareChantier.ts:169](../server/routes/projectShareChantier.ts#L169) |
-| PUT | `/api/shared/projects/:id/reports/:reportId` | [server/routes/projectShareChantier.ts:192](../server/routes/projectShareChantier.ts#L192) |
-| GET | `/api/shared/projects/:id/reports/:reportId/notes` | [server/routes/projectShareChantier.ts:180](../server/routes/projectShareChantier.ts#L180) |
-| POST | `/api/shared/projects/:id/reports/:reportId/notes` | [server/routes/projectShareChantier.ts:210](../server/routes/projectShareChantier.ts#L210) |
-| PUT | `/api/shared/projects/:id/reports/:reportId/notes/:noteId` | [server/routes/projectShareChantier.ts:233](../server/routes/projectShareChantier.ts#L233) |
-| GET | `/api/shared/projects/:id/tasks` | [server/routes/projectShares.ts:427](../server/routes/projectShares.ts#L427) |
-| POST | `/api/shared/projects/:id/tasks` | [server/routes/projectShares.ts:456](../server/routes/projectShares.ts#L456) |
-| PUT | `/api/shared/projects/:id/tasks/:taskId` | [server/routes/projectShares.ts:474](../server/routes/projectShares.ts#L474) |
+| GET | `/api/shared/projects/:id/reports` | [server/routes/projectShareChantier.ts:236](../server/routes/projectShareChantier.ts#L236) |
+| PUT | `/api/shared/projects/:id/reports/:reportId` | [server/routes/projectShareChantier.ts:290](../server/routes/projectShareChantier.ts#L290) |
+| GET | `/api/shared/projects/:id/reports/:reportId/notes` | [server/routes/projectShareChantier.ts:258](../server/routes/projectShareChantier.ts#L258) |
+| POST | `/api/shared/projects/:id/reports/:reportId/notes` | [server/routes/projectShareChantier.ts:308](../server/routes/projectShareChantier.ts#L308) |
+| PUT | `/api/shared/projects/:id/reports/:reportId/notes/:noteId` | [server/routes/projectShareChantier.ts:331](../server/routes/projectShareChantier.ts#L331) |
+| GET | `/api/shared/projects/:id/reports/:reportId/notes/:noteId/photos/:index` | [server/routes/projectShareChantier.ts:274](../server/routes/projectShareChantier.ts#L274) |
+| GET | `/api/shared/projects/:id/tasks` | [server/routes/projectShares.ts:431](../server/routes/projectShares.ts#L431) |
+| POST | `/api/shared/projects/:id/tasks` | [server/routes/projectShares.ts:460](../server/routes/projectShares.ts#L460) |
+| PUT | `/api/shared/projects/:id/tasks/:taskId` | [server/routes/projectShares.ts:478](../server/routes/projectShares.ts#L478) |
 | PUT | `/api/signatures/config` | [server/routes/signatures.ts:52](../server/routes/signatures.ts#L52) |
 | GET | `/api/signatures/status` | [server/routes/signatures.ts:45](../server/routes/signatures.ts#L45) |
 | POST | `/api/situations` | [server/routes/situations.ts:112](../server/routes/situations.ts#L112) |
@@ -919,7 +920,12 @@ Ces expressions ne sont pas transformées en endpoints supposés.
 | POST | \`${BASE}/nodes/:id/restore\` | [server/routes/desktopSync.ts:499](../server/routes/desktopSync.ts#L499) |
 | POST | \`${BASE}/nodes/:id/bump-indice\` | [server/routes/desktopSync.ts:512](../server/routes/desktopSync.ts#L512) |
 | POST | \`${BASE}/nodes/:id/link\` | [server/routes/desktopSync.ts:524](../server/routes/desktopSync.ts#L524) |
-| GET | \`/api/shared/projects/:id/${set.path}\` | [server/routes/projectShareChantier.ts:276](../server/routes/projectShareChantier.ts#L276) |
-| PUT | \`/api/shared/projects/:id/${set.path}/:reserveId\` | [server/routes/projectShareChantier.ts:290](../server/routes/projectShareChantier.ts#L290) |
+| GET | \`/api/shared/projects/:id/${set.path}\` | [server/routes/projectShareChantier.ts:388](../server/routes/projectShareChantier.ts#L388) |
+| GET | \`/api/shared/projects/:id/${set.path}/:reserveId/photos/:photoId\` | [server/routes/projectShareChantier.ts:420](../server/routes/projectShareChantier.ts#L420) |
+| POST | \`/api/shared/projects/:id/${set.path}\` | [server/routes/projectShareChantier.ts:443](../server/routes/projectShareChantier.ts#L443) |
+| PUT | \`/api/shared/projects/:id/${set.path}/:reserveId\` | [server/routes/projectShareChantier.ts:478](../server/routes/projectShareChantier.ts#L478) |
+| GET | \`/api/shared/projects/:id/${set.path}/options\` | [server/routes/projectShareChantier.ts:527](../server/routes/projectShareChantier.ts#L527) |
+| GET | \`/api/shared/projects/:id/${set.path}/plans\` | [server/routes/projectShareChantier.ts:543](../server/routes/projectShareChantier.ts#L543) |
+| GET | \`/api/shared/projects/:id/${set.path}/plans/:planId/file\` | [server/routes/projectShareChantier.ts:555](../server/routes/projectShareChantier.ts#L555) |
 | GET | \`/api/shared/projects/:id/${mode}\` | [server/routes/projectShareDocuments.ts:97](../server/routes/projectShareDocuments.ts#L97) |
 | POST | \`/api/tender-rss-sources/${connector}/preview\` | [server/routes/tenderRss.ts:158](../server/routes/tenderRss.ts#L158) |
