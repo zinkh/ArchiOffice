@@ -117,7 +117,11 @@ sans IA restent ouverts à tous (`server/routes/proposalFeasibility.ts`).
 (`Proposals.tsx`, `ResourceAttachments` avec `resourceType="proposals"`, classement
 « Dossier »), donc `documents` avec `resource_type='proposals'` : consultables par
 l'équipe et lues par les deux gestes IA (même lecture `extractCombinedText`). Aucune
-migration. **Réunions liées** : `server/feasibilityMeetings.ts`
+migration. **Liens vers des sites** : bouton « Lien » de `ResourceAttachments` (toutes les fiches
+rattachables sauf les affaires), `POST /api/documents/link` (`normalizeWebLink` : http(s) seulement) ;
+une ligne `documents` avec `storage_backend = 'link'`, `mime_type = 'text/uri-list'` et l'adresse dans
+`file_url`, sans fichier, version ni quota. Les gestes IA ne lisent pas les liens
+(`tests/documentLinks.test.ts`). **Réunions liées** : `server/feasibilityMeetings.ts`
 (`loadProposalMeetingsText`, `formatMeetingsForPrompt`, testés par
 `tests/proposalFeasibility.test.ts`) lit les réunions dont `meetings.proposal_id`
 désigne la proposition (titre, date, participants, notes réduites à du texte, pièces
@@ -237,7 +241,7 @@ Section 04 de la modale (`Proposals.tsx`, composant `src/components/proposal/Ter
   `projectRowFromProposal`, testé par `tests/proposalToProject.test.ts`) : les champs communs aux deux tables (`COPIED_FIELDS` : client
   et `client_id`, coordonnées, terrain et parcelles, nature de l'opération, surfaces existante, réhabilitée et d'extension, ERP, plans et
   photos, MAF...) sont recopiés ; la ligne enregistrée complète le corps de la requête, un champ absent du formulaire n'est pas perdu.
-  `proposals.amount` (net HT des **honoraires**) devient `projects.remuneration`, le **budget** est le montant des travaux
+  **Le numéro d'affaire (`project_code`) est attribué à la conversion**, à la suite du plus grand numéro de l'année, au format réglé dans /settings (`server/projectCode.ts`, partagé avec la création d'une affaire, `tests/projectCode.test.ts`) ; la référence de la proposition n'est pas reprise. `proposals.amount` (net HT des **honoraires**) devient `projects.remuneration`, le **budget** est le montant des travaux
   (`construction_cost`) à défaut les honoraires, `projects.surface` reprend `surface_plancher`, `nature_travaux_maf` se déduit de la
   nature de l'opération. Une valeur absente est omise, rien n'est inventé. `projects.source_proposal_id` garde le lien : honoraires,
   planning, étude de faisabilité, pièces jointes et suivi de signature restent lisibles sur la proposition d'origine (archivée, jamais

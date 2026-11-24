@@ -14,6 +14,7 @@ import { serializeProposalIllustrations } from '../../src/lib/proposalIllustrati
 import { dispatchWebhookEvent } from '../webhookDispatch';
 
 import { projectRowFromProposal } from '../../src/lib/proposalToProject';
+import { nextProjectCode } from '../projectCode';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -124,9 +125,11 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
         }
         // Toutes les informations de la proposition passent dans l'affaire (src/lib/proposalToProject.ts).
         // La ligne enregistrée complète le corps de la requête : un champ absent du formulaire n'est pas perdu.
-        const { error: projErr } = await supabaseAdmin.from('projects').insert(
-          projectRowFromProposal({ ...oldProposal, ...p, id }, { projectId, tenantId, clientName, today: new Date() }),
-        );
+        // Le numéro d'affaire est attribué ici, à la suite du dernier numéro du cabinet (server/projectCode.ts) :
+        // celui que la proposition porte éventuellement (`project_code`) n'est qu'une référence de devis.
+        const projectRow = projectRowFromProposal({ ...oldProposal, ...p, id }, { projectId, tenantId, clientName, today: new Date() });
+        projectRow.project_code = await nextProjectCode(supabaseAdmin, tenantId);
+        const { error: projErr } = await supabaseAdmin.from('projects').insert(projectRow);
         if (projErr) throw projErr;
         // Les réunions préparées sur la proposition rejoignent l'affaire (le lien à la proposition reste).
         await supabaseAdmin.from('meetings').update({ project_id: projectId }).eq('proposal_id', id).eq('tenant_id', tenantId).is('project_id', null);

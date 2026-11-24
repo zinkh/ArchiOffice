@@ -7,7 +7,7 @@
 // Documents d'une affaire (qui reste sur project_id), pour rester utilisable
 // depuis n'importe quelle fiche sans y importer tout ProjectDetail.tsx.
 import React, { useEffect, useRef, useState } from 'react';
-import { IconFile, IconTrash, IconUpload, IconLoader2 } from '@tabler/icons-react';
+import { IconFile, IconLink, IconTrash, IconUpload, IconLoader2 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { getAccessToken } from '../lib/authToken';
@@ -28,6 +28,21 @@ export type AttachableResourceType =
   | 'receptions' | 'reserves' | 'contrats_moe' | 'ordres_de_service' | 'visas'
   | 'notes_honoraires' | 'marches_entreprises' | 'tasks' | 'milestones' | 'agents'
   | 'agency_library' | 'ftm' | 'devis_travaux_modificatifs';
+
+/** Doit rester aligné sur LINK_MIME_TYPE (server/routes/documents.ts) : une pièce jointe sans fichier, qui est un lien web. */
+export const LINK_MIME_TYPE = 'text/uri-list';
+
+export function isLinkAttachment(doc: { mime_type: string | null }): boolean {
+  return doc.mime_type === LINK_MIME_TYPE;
+}
+
+/** Ouvre un lien enregistré, seulement s'il est en http(s) (jamais javascript: ni data:). */
+function openLink(url: string): void {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+  } catch { /* adresse illisible : rien à ouvrir */ }
+}
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return '';
@@ -73,6 +88,10 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
+  const [linkFormOpen, setLinkFormOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkName, setLinkName] = useState('');
+  const [savingLink, setSavingLink] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -107,6 +126,27 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
       setError(e?.message || "Échec de l'envoi.");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleAddLink(e: React.FormEvent) {
+    e.preventDefault();
+    if (!linkUrl.trim()) return;
+    setSavingLink(true);
+    setError(null);
+    try {
+      await apiFetch('/api/documents/link', {
+        method: 'POST',
+        body: JSON.stringify({ resource_type: resourceType, resource_id: resourceId, url: linkUrl.trim(), name: linkName.trim() || undefined }),
+      });
+      setLinkUrl('');
+      setLinkName('');
+      setLinkFormOpen(false);
+      await load();
+    } catch (err: any) {
+      setError(err?.message || "Impossible d'ajouter le lien.");
+    } finally {
+      setSavingLink(false);
     }
   }
 
@@ -154,18 +194,53 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
     >
       <div className="flex items-center justify-between">
         <span className="text-xs font-bold uppercase text-[var(--tblr-muted)]">Pièces jointes</span>
-        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold cursor-pointer transition">
-          {uploading ? <IconLoader2 size={13} className="animate-spin" /> : <IconUpload size={13} />}
-          Ajouter
-          <input type="file" multiple className="hidden" disabled={uploading} onChange={e => handleUpload(e.target.files)} />
-        </label>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setLinkFormOpen(open => !open)}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition"
+          >
+            <IconLink size={13} />
+            Lien
+          </button>
+          <label className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold cursor-pointer transition">
+            {uploading ? <IconLoader2 size={13} className="animate-spin" /> : <IconUpload size={13} />}
+            Ajouter
+            <input type="file" multiple className="hidden" disabled={uploading} onChange={e => handleUpload(e.target.files)} />
+          </label>
+        </div>
       </div>
+      {linkFormOpen && (
+        <form onSubmit={handleAddLink} className="flex flex-wrap items-center gap-2 p-2 border border-[var(--tblr-border)] rounded-lg">
+          <input
+            type="text"
+            inputMode="url"
+            value={linkUrl}
+            onChange={e => setLinkUrl(e.target.value)}
+            placeholder="https://www.exemple.fr/page"
+            aria-label="Adresse du site"
+            className="flex-1 min-w-[12rem] px-2 py-1 text-xs bg-transparent border border-[var(--tblr-border)] rounded"
+            autoFocus
+          />
+          <input
+            type="text"
+            value={linkName}
+            onChange={e => setLinkName(e.target.value)}
+            placeholder="Titre (facultatif)"
+            aria-label="Titre du lien"
+            className="flex-1 min-w-[8rem] px-2 py-1 text-xs bg-transparent border border-[var(--tblr-border)] rounded"
+          />
+          <button type="submit" disabled={savingLink || !linkUrl.trim()} className="px-2.5 py-1 text-xs font-bold bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900 rounded-lg disabled:opacity-50">
+            {savingLink ? 'Ajout…' : 'Enregistrer le lien'}
+          </button>
+        </form>
+      )}
       {error && <p className="text-xs text-red-500">{error}</p>}
       {loading ? (
         <p className="text-xs text-[var(--tblr-muted)] italic">Chargement…</p>
       ) : docs.length === 0 ? (
         <p className="text-xs text-[var(--tblr-muted)] italic">
-          {dragOver ? 'Déposez les fichiers ici…' : 'Aucune pièce jointe. Glissez-déposez des fichiers ici.'}
+          {dragOver ? 'Déposez les fichiers ici…' : 'Aucune pièce jointe. Glissez-déposez des fichiers ici ou ajoutez un lien.'}
         </p>
       ) : (
         <div className="space-y-1">
@@ -173,14 +248,18 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
             <div key={doc.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
               <button
                 type="button"
-                onClick={() => openSignedUrl(doc.file_url)}
+                onClick={() => (isLinkAttachment(doc) ? openLink(doc.file_url) : openSignedUrl(doc.file_url))}
                 className="flex items-center gap-2 min-w-0 text-left hover:underline"
-                title="Ouvrir"
+                title={isLinkAttachment(doc) ? doc.file_url : 'Ouvrir'}
               >
-                <IconFile size={14} className="shrink-0 text-[var(--tblr-muted)]" />
+                {isLinkAttachment(doc)
+                  ? <IconLink size={14} className="shrink-0 text-[var(--tblr-muted)]" />
+                  : <IconFile size={14} className="shrink-0 text-[var(--tblr-muted)]" />}
                 <span className="text-xs truncate">{doc.name}</span>
                 {doc.category && <span className="text-[0.6875rem] uppercase font-bold text-[var(--tblr-muted)] shrink-0">{doc.category}</span>}
-                <span className="text-[0.6875rem] text-[var(--tblr-muted)] shrink-0">{formatSize(doc.size_bytes)}</span>
+                {isLinkAttachment(doc)
+                  ? <span className="text-[0.6875rem] text-[var(--tblr-muted)] truncate">{doc.file_url.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                  : <span className="text-[0.6875rem] text-[var(--tblr-muted)] shrink-0">{formatSize(doc.size_bytes)}</span>}
               </button>
               <button
                 type="button"
