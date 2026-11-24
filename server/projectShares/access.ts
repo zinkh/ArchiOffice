@@ -36,6 +36,13 @@ export const WRITABLE_KINDS: readonly ShareKind[] = ['tasks', 'cctp', 'dpgf', 'a
 /** Types qu'un invité peut commenter (sans rien modifier). */
 export const COMMENTABLE_KINDS: readonly ShareKind[] = ['cctp', 'dpgf'];
 /**
+ * Ateliers de chantier qui s'ouvrent en DÉTAIL (issue #688) : un indicateur `detail` posé par le cabinet, qui se combine à
+ * la lecture comme à la modification. `reports` : présences, suivi par lot et pénalités, photos des rubriques et coordonnées
+ * des intervenants ; `reserves` et `gpa` : photos ; `act` : coordonnées des entreprises consultées. Sans l'indicateur, rien de
+ * cela ne sort : un partage déjà en place ne montre jamais plus qu'avant.
+ */
+export const DETAIL_KINDS: readonly ShareKind[] = ['reports', 'reserves', 'gpa', 'act'];
+/**
  * Plus aucun droit par lot : un atelier est accordé en entier. Les droits par lot d'avant (CCTP, DPGF)
  * sont convertis par supabase/migrate_project_share_ateliers.sql, et la lecture ignore toute ligne qui
  * porte encore un lot (refus par défaut : jamais un accès plus large que celui qui avait été accordé).
@@ -48,7 +55,7 @@ const ACCESS_RANK: Record<ShareAccess, number> = { read: 0, comment: 1, write: 2
 /** Limites de la gratuité : invités actifs par affaire, et par cabinet (personnes distinctes). */
 export const SHARE_LIMITS = { guestsPerProject: 3, guestsPerTenant: 10 } as const;
 
-export interface ShareGrant { kind: ShareKind; access: ShareAccess }
+export interface ShareGrant { kind: ShareKind; access: ShareAccess; /** Détail de l'atelier accordé (voir DETAIL_KINDS). Absent = non. */ detail?: boolean }
 
 export interface ShareRow {
   id: string;
@@ -90,10 +97,30 @@ export function normalizeGrants(input: unknown): { grants: ShareGrant[] } | { er
     if (access === 'comment' && !COMMENTABLE_KINDS.includes(kind)) {
       return { error: `Les commentaires ne sont pas disponibles pour ${kind} : accordez la lecture.` };
     }
+    // Le détail n'existe que sur les ateliers de chantier, et seulement en booléen : un autre atelier refuse plutôt que
+    // d'ignorer en silence une demande que le cabinet croirait appliquée.
+    const detail = raw?.detail;
+    if (detail !== undefined && detail !== null && typeof detail !== 'boolean') return { error: `Le détail de ${kind} doit être vrai ou faux.` };
+    if (detail === true && !DETAIL_KINDS.includes(kind)) {
+      return { error: `Le détail n'est pas disponible pour ${kind}.` };
+    }
     const current = byKind.get(kind);
-    if (!current || ACCESS_RANK[access] > ACCESS_RANK[current.access]) byKind.set(kind, { kind, access });
+    const next: ShareGrant = { kind, access, ...(detail === true ? { detail: true } : {}) };
+    if (!current) byKind.set(kind, next);
+    else {
+      // Un atelier n'y figure qu'une fois : le niveau le plus haut l'emporte, le détail est gardé s'il a été demandé.
+      const keepDetail = current.detail === true || next.detail === true;
+      const level = ACCESS_RANK[access] > ACCESS_RANK[current.access] ? access : current.access;
+      byKind.set(kind, { kind, access: level, ...(keepDetail ? { detail: true } : {}) });
+    }
   }
   return { grants: [...byKind.values()] };
+}
+
+/** Le détail de cet atelier est-il accordé ? Vrai seulement si l'atelier l'est ET que le cabinet a coché le détail. */
+export function allowsDetail(grants: readonly ShareGrant[], kind: ShareKind): boolean {
+  if (!DETAIL_KINDS.includes(kind)) return false;
+  return grants.some(g => g.kind === kind && g.detail === true);
 }
 
 /**
@@ -125,10 +152,18 @@ export async function lotIdsForAtelier(
 export async function loadGrants(supabaseAdmin: any, shareIds: string[]): Promise<Map<string, ShareGrant[]>> {
   const byShare = new Map<string, ShareGrant[]>();
   if (!shareIds.length) return byShare;
-  const { data, error } = await supabaseAdmin
+  let { data, error } = await supabaseAdmin
     .from('project_share_grants')
-    .select('share_id, resource_kind, access, project_lot_id')
+    .select('share_id, resource_kind, access, project_lot_id, detail')
     .in('share_id', shareIds);
+  // Colonne `detail` absente (instance non migrée, supabase/migrate_project_share_detail.sql) : on relit sans elle.
+  // Les droits d'atelier restent ceux qu'ils étaient, et aucun détail ne s'ouvre : jamais « tout », jamais « rien ».
+  if (error && (error.code === '42703' || error.code === 'PGRST204')) {
+    ({ data, error } = await supabaseAdmin
+      .from('project_share_grants')
+      .select('share_id, resource_kind, access, project_lot_id')
+      .in('share_id', shareIds));
+  }
   if (error) return byShare;
   for (const row of data || []) {
     if (!SHARE_KINDS.includes(row.resource_kind)) continue;
@@ -136,10 +171,15 @@ export async function loadGrants(supabaseAdmin: any, shareIds: string[]): Promis
     // (migrate_project_share_ateliers.sql) ne l'a pas converti, plutôt que d'ouvrir tout l'atelier par erreur.
     if (row.project_lot_id) continue;
     const access: ShareAccess = row.access === 'write' ? 'write' : row.access === 'comment' ? 'comment' : 'read';
+    // Le détail ne vaut que sur un atelier qui le prévoit (une ligne forcée en base sur un autre atelier n'ouvre rien).
+    const detail = row.detail === true && DETAIL_KINDS.includes(row.resource_kind);
     const list = byShare.get(row.share_id) ?? [];
     const current = list.find(g => g.kind === row.resource_kind);
-    if (!current) list.push({ kind: row.resource_kind, access });
-    else if (ACCESS_RANK[access] > ACCESS_RANK[current.access]) current.access = access;
+    if (!current) list.push({ kind: row.resource_kind, access, ...(detail ? { detail: true } : {}) });
+    else {
+      if (ACCESS_RANK[access] > ACCESS_RANK[current.access]) current.access = access;
+      if (detail) current.detail = true;
+    }
     byShare.set(row.share_id, list);
   }
   return byShare;
@@ -204,6 +244,8 @@ export async function replaceGrants(
     grants.map(g => ({
       id: crypto.randomUUID(), share_id: share.id, tenant_id: share.tenant_id,
       resource_kind: g.kind, access: g.access, project_lot_id: null,
+      // Seulement quand il est accordé : sur une instance non migrée, l'écriture des autres droits reste possible.
+      ...(g.detail === true ? { detail: true } : {}),
     })),
   );
   if (error) throw error;

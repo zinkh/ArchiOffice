@@ -23,7 +23,7 @@ import {
   addMembership, getMemberRole, listMemberships, removeMembership,
 } from '../tenantMemberships';
 import {
-  COMMENTABLE_KINDS, GUEST_ROLE_LABEL, GUEST_SYSTEM_ROLE, SHARE_KINDS, SHARE_LIMITS, WRITABLE_KINDS,
+  COMMENTABLE_KINDS, DETAIL_KINDS, GUEST_ROLE_LABEL, GUEST_SYSTEM_ROLE, SHARE_KINDS, SHARE_LIMITS, WRITABLE_KINDS,
   activeShareFor, activeSharesOfTenant, allows, checkShareLimits, loadGrants,
   normalizeGrants, replaceGrants,
   type ShareGrant, type ShareRow,
@@ -166,6 +166,7 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
         kinds: SHARE_KINDS,
         writableKinds: WRITABLE_KINDS,
         commentableKinds: COMMENTABLE_KINDS,
+        detailKinds: DETAIL_KINDS,
         lots: (lots || []).map((l: any) => pick(l, LOT_FIELDS)),
       });
     } catch (e: any) { fail(res, '[GET /api/projects/:id/shares]', e); }
@@ -378,8 +379,11 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
         const { data } = await supabaseAdmin.from('project_lots').select('id, lot_number, lot_title').eq('project_id', share.project_id).eq('tenant_id', share.tenant_id);
         lots = data || [];
       }
+      // Le nom du cabinet que la liste des affaires partagées montre déjà : l'en-tête de la fiche le reprend.
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name').eq('id', share.tenant_id).maybeSingle();
       res.json({
         project: pick(project, PROJECT_FIELDS), grants,
+        tenantName: tenant?.name ?? null,
         archived: await isProjectArchived(supabaseAdmin, share.tenant_id, share.project_id),
         ...(lots ? { lots: lots.map(l => pick(l, LOT_FIELDS)) } : {}),
       });

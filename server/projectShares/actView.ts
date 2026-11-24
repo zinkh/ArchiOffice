@@ -3,9 +3,12 @@
 // n'apparaît que si elle est ajoutée ici (même principe que documentView.ts pour le CCTP et le DPGF).
 //
 // Ce que voit le confrère : le suivi de la consultation (entreprises consultées et leur avancement), les
-// critères, les offres et leurs montants, les attributions, les marchés constitués. Jamais : adresses
-// e-mail et fiches contact des entreprises, fichiers du DCE et des offres, négociations détaillées,
-// signatures, ni les colonnes financières des marchés (retenue, avance, révision).
+// critères, les offres et leurs montants, les attributions, les marchés constitués. Jamais : fiches contact des
+// entreprises, fichiers du DCE et des offres, négociations détaillées, signatures, ni les colonnes financières des
+// marchés (retenue, avance, révision). Les adresses e-mail des entreprises consultées ne sortent qu'avec le détail de
+// l'atelier (`options.detail`, issue #688), avec une fiche RÉDUITE du contact rattaché (`contactCard.ts` : nom, identifiants,
+// coordonnées de travail ; jamais ses notes ni le reste de la fiche).
+import type { GuestContactCard } from './contactCard';
 
 type Rec = Record<string, unknown>;
 
@@ -32,7 +35,8 @@ export interface GuestActView {
   lots: Array<{ id: string; name: string | null }>;
   criteres: Array<{ id: string; nom: string | null; poids: number | null }>;
   documents: Array<{ id: string; nom: string | null; type_doc: string | null; tous_lots: boolean; lots_ids: string[] }>;
-  entreprises: Array<{ id: string; nom: string | null; lots_ids: string[]; dce_transmis_le: string | null; relance_le: string | null; offre_recue_le: string | null; ne_repond_pas: boolean }>;
+  /** `email` et `emails_supplementaires` seulement quand le cabinet a coché le détail de l'ACT (issue #688), sinon absents. */
+  entreprises: Array<{ id: string; nom: string | null; lots_ids: string[]; dce_transmis_le: string | null; relance_le: string | null; offre_recue_le: string | null; ne_repond_pas: boolean; email?: string | null; emails_supplementaires?: string | null; fiche?: GuestContactCard | null }>;
   offres: Array<{ id: string; lot_id: string | null; entreprise_id: string | null; montant_base: number | null; note_technique: number | null; conforme: boolean; motif_nc: string | null }>;
   attributions: Array<{ lot_id: string | null; entreprise_id: string | null; montant: number | null; directe: boolean }>;
   questions: Array<{ id: string; question: string | null; date_question: string | null; reponse: string | null; date_reponse: string | null }>;
@@ -40,7 +44,7 @@ export interface GuestActView {
 }
 
 /** La vue ACT d'un confrère. `row` est la ligne `act_data` de l'affaire (ou null), `marches` ses lignes `marches_entreprises`. */
-export function guestActView(row: unknown, marches: readonly unknown[]): GuestActView {
+export function guestActView(row: unknown, marches: readonly unknown[], options: { detail?: boolean; contacts?: ReadonlyMap<string, GuestContactCard> } = {}): GuestActView {
   const act = isRec(row) ? row : {};
   const consultation = readConsultation(act.consultation);
   return {
@@ -50,11 +54,17 @@ export function guestActView(row: unknown, marches: readonly unknown[]): GuestAc
     documents: list(consultation.dce_documents).map(d => ({
       id: String(d.id ?? ''), nom: text(d.nom, 300), type_doc: text(d.type_doc, 40), tous_lots: bool(d.tous_lots), lots_ids: ids(d.lots_ids),
     })).filter(d => d.id),
-    // Jamais `email`, `emails_supplementaires` ni `contact_id` : la fiche de l'entreprise reste au cabinet.
+    // Jamais la fiche complète du contact : seulement `fiche`, sa version réduite, et seulement avec le détail de l'ACT (issue
+    // #688). La consultation de ces coordonnées est tracée par la route (RGPD).
     entreprises: list(consultation.entreprises).map(e => ({
       id: String(e.id ?? ''), nom: text(e.nom, 200), lots_ids: ids(e.lots_ids),
       dce_transmis_le: text(e.dce_transmis_le, 30), relance_le: text(e.relance_le, 30), offre_recue_le: text(e.offre_recue_le, 30),
       ne_repond_pas: bool(e.ne_repond_pas),
+      ...(options.detail ? {
+        email: text(e.email, 200), emails_supplementaires: text(e.emails_supplementaires, 500),
+        // Fiche réduite (nom, identifiants, coordonnées de travail) du contact rattaché : jamais la fiche complète.
+        fiche: (typeof e.contact_id === 'string' ? options.contacts?.get(e.contact_id) : undefined) ?? null,
+      } : {}),
     })).filter(e => e.id),
     offres: list(consultation.offres).map(o => ({
       id: String(o.id ?? ''), lot_id: text(o.lot_id, 100), entreprise_id: text(o.entreprise_id, 100),

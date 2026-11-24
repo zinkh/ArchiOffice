@@ -976,6 +976,8 @@ CREATE TABLE IF NOT EXISTS project_share_grants (
   access        TEXT NOT NULL DEFAULT 'read',
   -- project_lots.id pour les droits par lot (CCTP, DPGF), supabase/migrate_project_share_lots_comments.sql.
   project_lot_id TEXT,
+  -- Détail de l'atelier de chantier accordé (photos, présences, pénalités, coordonnées), supabase/migrate_project_share_detail.sql.
+  detail        BOOLEAN NOT NULL DEFAULT FALSE,
   CONSTRAINT project_share_grants_access_check CHECK (access IN ('read', 'comment', 'write'))
 );
 CREATE INDEX IF NOT EXISTS idx_project_share_grants_share ON project_share_grants(share_id);

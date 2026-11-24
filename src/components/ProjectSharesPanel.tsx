@@ -14,7 +14,7 @@ import ShareActProposalsInbox from './ShareActProposalsInbox';
 type Access = 'none' | 'read' | 'comment' | 'write';
 /** Un atelier de l'affaire : un droit par atelier, jamais par lot. */
 type Atelier = 'lots' | 'tasks' | 'documents' | 'cctp' | 'dpgf' | 'act' | 'reports' | 'reserves' | 'gpa';
-interface Grant { kind: Atelier; access: 'read' | 'comment' | 'write' }
+interface Grant { kind: Atelier; access: 'read' | 'comment' | 'write'; /** Détail de l'atelier accordé (photos, présences, pénalités, coordonnées). */ detail?: boolean }
 interface Share { id: string; email: string; name: string | null; contactId?: string | null; grants: Grant[] }
 /** Fiche de l'annuaire du cabinet, réduite à ce qui sert à choisir un confrère. */
 interface ContactOption { id: string; name: string; email: string; company: string }
@@ -24,6 +24,8 @@ interface SharesPayload {
   usage: { project: number; tenant: number };
   writableKinds: string[];
   commentableKinds?: string[];
+  /** Ateliers qui s'ouvrent en détail (issue #688). */
+  detailKinds?: string[];
   lots: InboxLot[];
 }
 
@@ -37,6 +39,11 @@ const PROPOSAL_ATELIERS: Atelier[] = ['cctp', 'dpgf', 'act'];
 /** Niveaux de repli quand le serveur ne dit pas ce qui est modifiable ou commentable (instance plus ancienne). */
 const FALLBACK_WRITABLE: Atelier[] = ['tasks', 'cctp', 'dpgf', 'act', 'reports', 'reserves', 'gpa'];
 const FALLBACK_COMMENTABLE: Atelier[] = ['cctp', 'dpgf'];
+const FALLBACK_DETAIL: Atelier[] = ['reports', 'reserves', 'gpa', 'act'];
+
+/** Le détail coché, atelier par atelier : il ne vaut que sur un atelier accordé. */
+type DetailState = Partial<Record<Atelier, boolean>>;
+const detailOf = (grants: Grant[]): DetailState => Object.fromEntries(grants.filter(g => g.detail).map(g => [g.kind, true]));
 
 const emptyState = (): GrantState => ({ lots: 'read', tasks: 'read', documents: 'none', cctp: 'none', dpgf: 'none', act: 'none', reports: 'none', reserves: 'none', gpa: 'none' });
 
@@ -46,8 +53,8 @@ function stateOf(grants: Grant[]): GrantState {
   return state;
 }
 
-function grantsOf(state: GrantState): Grant[] {
-  return ATELIERS.flatMap(kind => (state[kind] === 'none' ? [] : [{ kind, access: state[kind] as Grant['access'] }]));
+function grantsOf(state: GrantState, detail: DetailState = {}): Grant[] {
+  return ATELIERS.flatMap(kind => (state[kind] === 'none' ? [] : [{ kind, access: state[kind] as Grant['access'], ...(detail[kind] ? { detail: true } : {}) }]));
 }
 
 const asText = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
@@ -89,39 +96,57 @@ function optionsFor(kind: Atelier, writable: Atelier[], commentable: Atelier[]):
   return levels;
 }
 
-function GrantsEditor({ state, onChange, writableKinds, commentableKinds }: {
+function GrantsEditor({ state, onChange, writableKinds, commentableKinds, detail, onDetailChange, detailKinds }: {
   state: GrantState; onChange: (next: GrantState) => void; writableKinds: string[]; commentableKinds: string[];
+  detail: DetailState; onDetailChange: (next: DetailState) => void; detailKinds: string[];
 }) {
   const { t } = useTranslation();
   const writable = (writableKinds.length ? writableKinds : FALLBACK_WRITABLE) as Atelier[];
   const commentable = (commentableKinds.length ? commentableKinds : FALLBACK_COMMENTABLE) as Atelier[];
+  const detailable = (detailKinds.length ? detailKinds : FALLBACK_DETAIL) as Atelier[];
   return (
     <div className="space-y-1.5">
       <div className="text-xs font-bold text-[var(--tblr-text)]">{t('share_ateliers_title')}</div>
       {ATELIERS.map(kind => (
-        <AccessSelect
-          key={kind} label={t(`share_kind_${kind}`)} value={state[kind]}
-          writeKey={PROPOSAL_ATELIERS.includes(kind) ? 'share_access_write_propose' : 'share_access_write'}
-          options={optionsFor(kind, writable, commentable)}
-          onChange={v => onChange({ ...state, [kind]: v })}
-        />
+        <div key={kind} className="space-y-1">
+          <AccessSelect
+            label={t(`share_kind_${kind}`)} value={state[kind]}
+            writeKey={PROPOSAL_ATELIERS.includes(kind) ? 'share_access_write_propose' : 'share_access_write'}
+            options={optionsFor(kind, writable, commentable)}
+            onChange={v => onChange({ ...state, [kind]: v })}
+          />
+          {/* Le détail ouvre ce que l'atelier cache encore (photos, présences, pénalités, coordonnées) : il ne se règle que sur un atelier accordé. */}
+          {detailable.includes(kind) && state[kind] !== 'none' && (
+            <label className="flex items-start gap-2 pl-3 text-xs text-[var(--tblr-muted)]">
+              <input
+                type="checkbox" className="mt-0.5" checked={!!detail[kind]}
+                onChange={e => onDetailChange({ ...detail, [kind]: e.target.checked })}
+              />
+              <span>
+                <span className="font-medium text-[var(--tblr-text)]">{t('share_detail_label')}</span>
+                {' : '}{t(`share_detail_hint_${kind}`)}
+              </span>
+            </label>
+          )}
+        </div>
       ))}
       <p className="text-xs text-[var(--tblr-muted)]">{t('share_ateliers_hint')}</p>
     </div>
   );
 }
 
-function ShareRow({ projectId, share, writableKinds, commentableKinds, onChanged, onMessage }: {
-  projectId: string; share: Share; writableKinds: string[]; commentableKinds: string[];
+function ShareRow({ projectId, share, writableKinds, commentableKinds, detailKinds, onChanged, onMessage }: {
+  projectId: string; share: Share; writableKinds: string[]; commentableKinds: string[]; detailKinds: string[];
   onChanged: () => void; onMessage: (text: string, isError?: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [state, setState] = useState<GrantState>(() => stateOf(share.grants));
+  const [detail, setDetail] = useState<DetailState>(() => detailOf(share.grants));
   const [busy, setBusy] = useState(false);
   const label = share.name || share.email;
 
   const save = async () => {
-    const grants = grantsOf(state);
+    const grants = grantsOf(state, detail);
     if (!grants.length) { onMessage(t('share_pick_one'), true); return; }
     setBusy(true);
     try {
@@ -156,7 +181,10 @@ function ShareRow({ projectId, share, writableKinds, commentableKinds, onChanged
           <IconTrash size={16} />
         </button>
       </div>
-      <GrantsEditor state={state} onChange={setState} writableKinds={writableKinds} commentableKinds={commentableKinds} />
+      <GrantsEditor
+        state={state} onChange={setState} writableKinds={writableKinds} commentableKinds={commentableKinds}
+        detail={detail} onDetailChange={setDetail} detailKinds={detailKinds}
+      />
       <button
         type="button" onClick={save} disabled={busy}
         className="px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] disabled:opacity-50"
@@ -176,6 +204,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
   const [contactId, setContactId] = useState('');
   const [query, setQuery] = useState('');
   const [invite, setInvite] = useState<GrantState>(emptyState);
+  const [inviteDetail, setInviteDetail] = useState<DetailState>({});
   const [busy, setBusy] = useState(false);
 
   const say = useCallback((text: string, isError = false) => setMessage({ text, isError }), []);
@@ -201,7 +230,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const grants = grantsOf(invite);
+    const grants = grantsOf(invite, inviteDetail);
     if (!grants.length) { say(t('share_pick_one'), true); return; }
     setBusy(true);
     setMessage(null);
@@ -220,6 +249,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
   if (hidden) return null;
   const writableKinds = data?.writableKinds ?? [];
   const commentableKinds = data?.commentableKinds ?? [];
+  const detailKinds = data?.detailKinds ?? [];
   const lots = data?.lots ?? [];
   const invitedIds = new Set((data?.shares ?? []).map(share => share.contactId).filter(Boolean));
   const invitedEmails = new Set((data?.shares ?? []).map(share => share.email.toLowerCase()));
@@ -251,8 +281,8 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
         <ul>
           {data.shares.map(share => (
             <ShareRow
-              key={`${share.id}-${share.grants.map(g => `${g.kind}${g.access}`).join('')}`}
-              projectId={projectId} share={share} writableKinds={writableKinds} commentableKinds={commentableKinds}
+              key={`${share.id}-${share.grants.map(g => `${g.kind}${g.access}${g.detail ? 'd' : ''}`).join('')}`}
+              projectId={projectId} share={share} writableKinds={writableKinds} commentableKinds={commentableKinds} detailKinds={detailKinds}
               onChanged={load} onMessage={say}
             />
           ))}
@@ -294,7 +324,10 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
           </ul>
         )}
         {chosen && <p className="text-xs text-[var(--tblr-muted)]">{chosen.email}</p>}
-        <GrantsEditor state={invite} onChange={setInvite} writableKinds={writableKinds} commentableKinds={commentableKinds} />
+        <GrantsEditor
+          state={invite} onChange={setInvite} writableKinds={writableKinds} commentableKinds={commentableKinds}
+          detail={inviteDetail} onDetailChange={setInviteDetail} detailKinds={detailKinds}
+        />
         <button
           type="submit" disabled={busy || !chosen}
           className="px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-50"
