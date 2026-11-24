@@ -12,6 +12,7 @@ import { assertTenantEntity } from '../assertTenantEntity';
 import { attachReservePhotos } from '../reservePhotos';
 import { attachLastOpenedAt, recordProjectOpened } from '../projectRecentViews';
 import { dispatchWebhookEvent } from '../webhookDispatch';
+import { nextProjectCode } from '../projectCode';
 import { applyTemplateToProject } from '../projectTemplateApply';
 import { isProjectArchived } from './projectArchive';
 import { OPERATION_LABELS } from '../../src/lib/projectTemplates';
@@ -174,30 +175,8 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
           || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
-      // Generate project code — format PREFIX[-]YEAR[-]NNN, each dash and the
-      // digit count of NNN independently configurable per tenant (Onboarding
-      // wizard / Settings: num_prefix_affaire, num_affaire_sep_prefix,
-      // num_affaire_sep_seq, num_affaire_digits). The two separator columns are
-      // left NULL until a tenant explicitly configures them, so an unconfigured
-      // tenant keeps the legacy format it always had: PREFIX-YEAR-NNN when a
-      // prefix is set, bare YEARNNN otherwise.
-      const { data: affaireSettings } = await supabaseAdmin.from('settings')
-        .select('num_prefix_affaire, num_affaire_sep_prefix, num_affaire_sep_seq, num_affaire_digits')
-        .eq('tenant_id', tenantId).maybeSingle();
-      const affairePrefix = (affaireSettings as any)?.num_prefix_affaire?.trim() || '';
-      const sepPrefixRaw = (affaireSettings as any)?.num_affaire_sep_prefix;
-      const sepSeqRaw = (affaireSettings as any)?.num_affaire_sep_seq;
-      const digitsRaw = (affaireSettings as any)?.num_affaire_digits;
-      const sepPrefix = sepPrefixRaw == null ? true : !!sepPrefixRaw;
-      const sepSeq = sepSeqRaw == null ? !!affairePrefix : !!sepSeqRaw;
-      const digits = Number.isInteger(digitsRaw) && digitsRaw >= 1 && digitsRaw <= 6 ? digitsRaw : 3;
-      const year = new Date().getFullYear().toString().slice(-2);
-      const yearPartPattern = sepSeq ? `${year}-%` : `${year}%`;
-      const likePattern = affairePrefix ? `${affairePrefix}${sepPrefix ? '-' : ''}${yearPartPattern}` : yearPartPattern;
-      const { count: countVal } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId).like('project_code', likePattern).then((r: any) => ({ count: r.count || 0 }));
-      const seq = ((countVal as number) + 1).toString().padStart(digits, '0');
-      const yearPart = sepSeq ? `${year}-${seq}` : `${year}${seq}`;
-      const project_code = affairePrefix ? `${affairePrefix}${sepPrefix ? '-' : ''}${yearPart}` : yearPart;
+      // Numéro d'affaire : à la suite du plus grand numéro de l'année, format réglé dans /settings (server/projectCode.ts).
+      const project_code = await nextProjectCode(supabaseAdmin, tenantId);
       const id = bodyId || crypto.randomUUID();
       const { error: pe } = await supabaseAdmin.from('projects').insert({
         id, tenant_id: tenantId, name, client, client_id: client_id || null, status: status || 'Planning', budget: budget || 0,

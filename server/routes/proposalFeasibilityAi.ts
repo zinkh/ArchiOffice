@@ -54,6 +54,8 @@ async function extractCombinedText(supabaseAdmin: any, tenantId: string, docs: A
     // Les extraits de cartes de l'étude sont des images rattachées à la
     // proposition : ni texte à lire, ni OCR à payer.
     if (doc.mime_type?.startsWith('image/')) continue;
+    // Un lien web n'est pas un fichier : rien à télécharger ni à lire.
+    if (doc.mime_type === 'text/uri-list') continue;
     const text = await extractKnowledgeDocText(supabaseAdmin, tenantId, doc as any).catch(() => null);
     if (text) combined += `\n\n--- ${doc.name} ---\n${text.slice(0, MAX_DOC_CHARS - combined.length)}`;
   }
