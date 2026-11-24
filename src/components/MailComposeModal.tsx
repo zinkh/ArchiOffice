@@ -138,47 +138,88 @@ function removeCcAddress(cc: string, address: string | null | undefined): string
 
 const formatSize = (bytes: number): string => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} Ko` : `${(bytes / (1024 * 1024)).toFixed(1)} Mo`);
 
+const MAX_SUGGESTIONS = 6;
+
+const normalise = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+/** Dernier fragment saisi (après la dernière virgule ou point-virgule) : celui qu'on complète. */
+function currentToken(value: string): string {
+  return value.split(/[,;]/).pop()?.trim() ?? '';
+}
+
+/** Contacts de l'agence correspondant au fragment saisi (nom, société ou adresse), hors adresses déjà présentes. */
+function suggestContacts(contacts: ContactOption[], value: string): ContactOption[] {
+  const token = normalise(currentToken(value));
+  if (token.length < 1) return [];
+  const present = splitAddresses(value).slice(0, -1).map(a => (a.match(/<([^>]+)>/)?.[1] || a).trim().toLowerCase());
+  return contacts
+    .filter(c => !present.includes(c.email.toLowerCase()) && normalise(c.label).includes(token))
+    .slice(0, MAX_SUGGESTIONS);
+}
+
+/** Remplace le fragment en cours de saisie par l'adresse du contact choisi. */
+function applyContact(value: string, email: string): string {
+  const head = value.split(/[,;]/).slice(0, -1).map(s => s.trim()).filter(Boolean);
+  return [...head, email].join(', ');
+}
+
 function RecipientField({ label, value, onChange, disabled, required, contacts }: {
   label: string; value: string; onChange: (v: string) => void; disabled?: boolean; required?: boolean; contacts: ContactOption[];
 }) {
-  const { t } = useTranslation();
-  const [picked, setPicked] = useState('');
-  const listId = `mail-contacts-${label}`;
-  const add = (raw: string) => {
-    const match = contacts.find(c => c.label === raw);
-    if (!match) { setPicked(raw); return; }
-    const current = value.split(',').map(a => a.trim()).filter(Boolean);
-    if (!current.some(a => a.toLowerCase() === match.email.toLowerCase())) onChange([...current, match.email].join(', '));
-    setPicked('');
-  };
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const suggestions = useMemo(() => (open && !disabled ? suggestContacts(contacts, value) : []), [open, disabled, contacts, value]);
+  const listId = `mail-suggest-${label.replace(/\W+/g, '-')}`;
+  const choose = (c: ContactOption) => { onChange(applyContact(value, c.email)); setOpen(false); setActive(0); };
   return (
-    <div className="space-y-1.5">
+    <div className="relative">
       <input
         required={required}
         type="text"
+        role="combobox"
         aria-label={label}
+        aria-expanded={suggestions.length > 0}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        autoComplete="off"
         placeholder={label}
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={e => { onChange(e.target.value); setOpen(true); setActive(0); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={e => {
+          if (suggestions.length === 0) return;
+          if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => (i + 1) % suggestions.length); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => (i - 1 + suggestions.length) % suggestions.length); }
+          else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(suggestions[active] ?? suggestions[0]); }
+          else if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
+        }}
         disabled={disabled}
         className="w-full p-2 rounded-lg text-sm disabled:opacity-60"
         style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
       />
-      {!disabled && contacts.length > 0 && (
-        <>
-          <input
-            list={listId}
-            aria-label={`${label} : ${t('mail_compose_add_contact')}`}
-            placeholder={t('mail_compose_add_contact') as string}
-            value={picked}
-            onChange={e => add(e.target.value)}
-            className="w-full p-1.5 rounded-lg text-xs"
-            style={{ background: 'var(--tblr-bg)', border: '1px dashed var(--tblr-border)', color: 'var(--tblr-text)' }}
-          />
-          <datalist id={listId}>
-            {contacts.map(c => <option key={c.id} value={c.label} />)}
-          </datalist>
-        </>
+      {suggestions.length > 0 && (
+        <ul
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 z-10 mt-1 rounded-lg shadow-lg overflow-hidden"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+        >
+          {suggestions.map((c, i) => (
+            <li
+              key={c.id}
+              role="option"
+              aria-selected={i === active}
+              // mousedown (et non click) : le champ perdrait le focus, donc la liste, avant le clic.
+              onMouseDown={e => { e.preventDefault(); choose(c); }}
+              onMouseEnter={() => setActive(i)}
+              className="px-3 py-1.5 text-sm cursor-pointer truncate"
+              style={i === active ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' } : { color: 'var(--tblr-text)' }}
+            >
+              {c.label}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -277,6 +318,14 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
     [files, forwardAttachments, forwardIds],
   );
   const overLimit = totalBytes > MAX_EMAIL_TOTAL_BYTES;
+
+  // Fermer sans envoyer (clic à l'extérieur, croix) perdrait le message et ses pièces jointes :
+  // on demande confirmation dès qu'il y a quelque chose à perdre.
+  const requestClose = () => {
+    const hasContent = !!(to.trim() || subject.trim() || body.trim()) || files.length > 0;
+    if (hasContent && !window.confirm(t('mail_compose_discard_confirm') as string)) return;
+    onClose();
+  };
 
   const toggleForward = (id: string) => setForwardIds(prev => {
     const next = new Set(prev);
@@ -389,7 +438,7 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={requestClose}>
       <form
         onSubmit={send}
         className="rounded-xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col"
@@ -398,7 +447,7 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
       >
         <div className="p-4 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
           <h3 className="text-base font-bold" style={{ color: 'var(--tblr-text)' }}>{heading}</h3>
-          <button type="button" onClick={onClose} aria-label={t('btn_close') as string} style={{ color: 'var(--tblr-muted)' }}><IconX size={18} /></button>
+          <button type="button" onClick={requestClose} aria-label={t('btn_close') as string} style={{ color: 'var(--tblr-muted)' }}><IconX size={18} /></button>
         </div>
 
         <div className="p-4 space-y-3 flex-1 overflow-y-auto">

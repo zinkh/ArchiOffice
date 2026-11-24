@@ -356,6 +356,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   ed_report_header TEXT, custom_building TEXT, custom_architect TEXT,
   custom_client TEXT, fee_distribution TEXT, construction_cost_num NUMERIC,
   construction_cost NUMERIC DEFAULT 0, ratio_rehab NUMERIC DEFAULT 0, ratio_extension NUMERIC DEFAULT 0,
+  ratio_comment TEXT,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, exe_fee_percent NUMERIC,
   comp_fee_percent NUMERIC, vat_rate NUMERIC, decimal_precision INTEGER,
   miqcp_assessment TEXT, parcelles_selection TEXT, is_erp BOOLEAN, illustrations TEXT,

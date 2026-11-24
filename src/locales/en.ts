@@ -4617,6 +4617,7 @@ export default {
       "mail_compose_forward_title": "Forward message",
       "mail_compose_cc": "Cc",
       "mail_compose_add_contact": "Add a contact…",
+      "mail_compose_discard_confirm": "Close without sending? The message and its attachments will be lost.",
       "mail_forward_attachments": "Attach the original attachments (tick the ones to forward)",
       "mail_forward_attachment_error": "Could not retrieve the attachment “{{name}}”: the message was not sent.",
       "mail_task_button": "Task",

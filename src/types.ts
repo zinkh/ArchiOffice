@@ -1312,6 +1312,8 @@ export interface Proposal {
   construction_cost?: number;
   ratio_rehab?: number;
   ratio_extension?: number;
+  /** Commentaire accompagnant les ratios (€/m²), imprimé dans l'export PDF. */
+  ratio_comment?: string | null;
   complexity_rate?: number;
   base_fee_percent?: number;
   exe_fee_percent?: number;
