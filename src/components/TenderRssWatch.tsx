@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, lazy, Suspense, FormEvent } from 'react';
 import {
   IconPlus, IconRss, IconTrash, IconEdit, IconX, IconRefresh, IconExternalLink,
   IconCheck, IconEye, IconEyeOff, IconAlertTriangle, IconInbox, IconSearch
@@ -15,6 +15,9 @@ import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { useSettings } from '../hooks/useSettings';
 import { MatchDetailContent, StatusBadge, type TFn } from './tenderRss/MatchDetailContent';
 import type { TenderRssSource, TenderRssMatch, TenderSourceType, BoampTypeMarche } from '../types';
+
+// MapLibre est lourd : la carte de situation ne se charge qu'à la première annonce ouverte.
+const MatchLocationMap = lazy(() => import('./tenderRss/MatchLocationMap'));
 
 const DISMISS_UNDO_MS = 10000;
 const WATCH_UNDO_MS = 10000;
@@ -644,8 +647,9 @@ export function TenderRssWatch() {
         </div>
 
         {/* Detail panel — large screens only */}
+        <div className="hidden lg:flex lg:flex-col gap-4 w-[380px] shrink-0 self-start sticky top-[calc(var(--tblr-navbar-h)+1rem)] max-h-[calc(100dvh-var(--tblr-navbar-h)-2rem)]">
         <div
-          className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-[calc(var(--tblr-navbar-h)+1rem)] max-h-[calc(100dvh-var(--tblr-navbar-h)-2rem)] rounded-lg overflow-hidden"
+          className="flex flex-col min-h-0 rounded-lg overflow-hidden"
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
         >
           {selectedMatch ? (
@@ -665,6 +669,12 @@ export function TenderRssWatch() {
               <p className="text-sm">{t('tender_rss_select_hint')}</p>
             </div>
           )}
+        </div>
+        {selectedMatch && (
+          <Suspense fallback={null}>
+            <MatchLocationMap location={selectedMatch.ville_execution} />
+          </Suspense>
+        )}
         </div>
       </div>
 
