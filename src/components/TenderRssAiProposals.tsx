@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { IconSparkles, IconLock, IconEye, IconEyeOff, IconExternalLink, IconAdjustments, IconX, IconInbox } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { fetchJson, apiFetch } from '../lib/api';
@@ -7,6 +7,9 @@ import { Toast } from './ui/Toast';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { MatchDetailContent } from './tenderRss/MatchDetailContent';
 import type { TenderRssMatch } from '../types';
+
+// MapLibre est lourd : la carte de situation ne se charge qu'à la première annonce ouverte.
+const MatchLocationMap = lazy(() => import('./tenderRss/MatchLocationMap'));
 
 interface ScanSummary {
   scanned: number;
@@ -263,8 +266,9 @@ export function TenderRssAiProposals() {
           )}
         </div>
 
+        <div className="hidden lg:flex lg:flex-col gap-4 w-[380px] shrink-0 self-start sticky top-[calc(var(--tblr-navbar-h)+1rem)] max-h-[calc(100dvh-var(--tblr-navbar-h)-2rem)]">
         <div
-          className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100dvh-2rem)] rounded-lg overflow-hidden"
+          className="flex flex-col min-h-0 rounded-lg overflow-hidden"
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
         >
           {selected ? (
@@ -285,6 +289,12 @@ export function TenderRssAiProposals() {
               <p className="text-sm">{t('tender_rss_select_hint')}</p>
             </div>
           )}
+        </div>
+        {selected && (
+          <Suspense fallback={null}>
+            <MatchLocationMap location={selected.ville_execution} />
+          </Suspense>
+        )}
         </div>
       </div>
 

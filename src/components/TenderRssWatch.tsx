@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, useEffect, lazy, Suspense, FormEvent } from 'react';
 import {
   IconPlus, IconRss, IconTrash, IconEdit, IconX, IconRefresh, IconExternalLink,
   IconCheck, IconEye, IconEyeOff, IconAlertTriangle, IconInbox, IconSearch
@@ -15,6 +15,9 @@ import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { useSettings } from '../hooks/useSettings';
 import { MatchDetailContent, StatusBadge, type TFn } from './tenderRss/MatchDetailContent';
 import type { TenderRssSource, TenderRssMatch, TenderSourceType, BoampTypeMarche } from '../types';
+
+// MapLibre est lourd : la carte de situation ne se charge qu'à la première annonce ouverte.
+const MatchLocationMap = lazy(() => import('./tenderRss/MatchLocationMap'));
 
 const DISMISS_UNDO_MS = 10000;
 const WATCH_UNDO_MS = 10000;
@@ -593,10 +596,11 @@ export function TenderRssWatch() {
                     className="shrink-0"
                   />
                   <div className="flex flex-1 min-w-0 flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0" style={m.status === 'read' ? { opacity: 0.55 } : undefined}>
                       <div className="flex items-center gap-2 flex-wrap">
                         {m.status === 'new' && <StatusBadge status={m.status} t={t} />}
-                        <p className="font-medium text-sm truncate" style={{ color: 'var(--tblr-text)' }}>{m.title}</p>
+                        {/* Annonce déjà lue : titre en gris et ligne atténuée, les nouvelles restent en pleine couleur. */}
+                        <p className={`text-sm truncate ${m.status === 'read' ? 'font-normal' : 'font-medium'}`} style={{ color: m.status === 'read' ? 'var(--tblr-muted)' : 'var(--tblr-text)' }}>{m.title}</p>
                       </div>
                       <p className="text-xs mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
                         {m.source_name || '---'}
@@ -643,8 +647,9 @@ export function TenderRssWatch() {
         </div>
 
         {/* Detail panel — large screens only */}
+        <div className="hidden lg:flex lg:flex-col gap-4 w-[380px] shrink-0 self-start sticky top-[calc(var(--tblr-navbar-h)+1rem)] max-h-[calc(100dvh-var(--tblr-navbar-h)-2rem)]">
         <div
-          className="hidden lg:flex lg:flex-col w-[380px] shrink-0 self-start sticky top-4 max-h-[calc(100dvh-2rem)] rounded-lg overflow-hidden"
+          className="flex flex-col min-h-0 rounded-lg overflow-hidden"
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
         >
           {selectedMatch ? (
@@ -664,6 +669,12 @@ export function TenderRssWatch() {
               <p className="text-sm">{t('tender_rss_select_hint')}</p>
             </div>
           )}
+        </div>
+        {selectedMatch && (
+          <Suspense fallback={null}>
+            <MatchLocationMap location={selectedMatch.ville_execution} />
+          </Suspense>
+        )}
         </div>
       </div>
 
