@@ -39,7 +39,8 @@ export function affaireHead(numbering: AffaireNumbering, year2: string): string 
 /** Plus grand numéro d'ordre porté par `codes` pour ce début ; 0 si aucun. */
 export function highestSequence(codes: Array<string | null | undefined>, head: string): number {
   let highest = 0;
-  for (const code of codes) {
+  for (const raw of codes) {
+    const code = raw?.trim();
     if (!code || !code.startsWith(head)) continue;
     const rest = code.slice(head.length);
     if (/^\d+$/.test(rest)) highest = Math.max(highest, parseInt(rest, 10));
