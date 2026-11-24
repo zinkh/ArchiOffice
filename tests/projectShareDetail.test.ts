@@ -349,6 +349,54 @@ describe('avec le détail : intitulé et position sur le plan d\'une réserve (i
     expect(fakeSupabaseAdmin.getTable('reserves').find(r => r.id === `${tenantId}-a1`)!.plan_id).toBeUndefined();
   });
 
+  it('crée une réserve : numéro suivant de l\'affaire, trace, jamais le lot ni le cabinet choisis par le corps', async () => {
+    const { tenantId, admin, projectId, otherProjectId } = setup();
+    const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }, { kind: 'gpa', access: 'write' }]);
+    const post = (path: string, body: any) => request(app).post(`/api/shared/projects/${projectId}/${path}`).set(authHeader(guest.token)).send(body);
+    const res = await post('reserves', { title: '  Joint fissuré  ', batiment: 'A', local: 'Cuisine', due_date: '2026-12-15', description: 'À reprendre',
+      lots: 'piraté', tenant_id: 'autre', project_id: otherProjectId, number: 99, status: 'Levée', id: 'choisi' });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ title: 'Joint fissuré', batiment: 'A', local: 'Cuisine', number: 2, status: 'Levée' });
+    expect(res.body.id).not.toBe('choisi');
+    const row = fakeSupabaseAdmin.getTable('reserves').find(r => r.id === res.body.id)!;
+    expect(row).toMatchObject({ tenant_id: tenantId, project_id: projectId, number: 2 });
+    expect(row.lots).toBeUndefined();
+    // Une réserve GPA suit sa propre série.
+    const gpa = await post('gpa-reserves', { title: 'Infiltration' });
+    expect(gpa.status).toBe(201);
+    expect(gpa.body.number).toBe(1);
+    expect(gpa.body.status).toBe('A faire');
+    await new Promise(r => setTimeout(r, 10));
+    expect(fakeSupabaseAdmin.getTable('activities').some(a => a.tenant_id === tenantId && String(a.action).includes('Création') && String(a.action).includes('confrère externe'))).toBe(true);
+  });
+
+  it('refuse la création sans intitulé, en lecture seule, ou avec une position sans le détail', async () => {
+    const { tenantId, admin, projectId, otherProjectId } = setup();
+    withPlans(tenantId, projectId, otherProjectId);
+    const writer = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }]);
+    const reader = await invite(admin.token, projectId, WITH_DETAIL);
+    const url = `/api/shared/projects/${projectId}/reserves`;
+    const before = fakeSupabaseAdmin.getTable('reserves').length;
+    expect((await request(app).post(url).set(authHeader(writer.token)).send({ title: '   ' })).status).toBe(400);
+    expect((await request(app).post(url).set(authHeader(writer.token)).send({})).status).toBe(400);
+    expect((await request(app).post(url).set(authHeader(reader.token)).send({ title: 'Lecteur' })).status).toBe(403);
+    const withPos = await request(app).post(url).set(authHeader(writer.token)).send({ title: 'Placée', plan_id: `${tenantId}-pl1`, x: 5, y: 5 });
+    expect(withPos.status).toBe(403);
+    expect(withPos.body.code).toBe('SHARE_DETAIL_FORBIDDEN');
+    expect(fakeSupabaseAdmin.getTable('reserves').length).toBe(before);
+  });
+
+  it('crée une réserve déjà placée sur un plan avec le détail, jamais sur le plan d\'une autre affaire', async () => {
+    const { tenantId, admin, projectId, otherProjectId } = setup();
+    withPlans(tenantId, projectId, otherProjectId);
+    const guest = await invite(admin.token, projectId, WRITE_DETAIL);
+    const url = `/api/shared/projects/${projectId}/reserves`;
+    const ok = await request(app).post(url).set(authHeader(guest.token)).send({ title: 'Placée', plan_id: `${tenantId}-pl1`, x: 30, y: 60 });
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({ plan_id: `${tenantId}-pl1`, x: 30, y: 60 });
+    expect((await request(app).post(url).set(authHeader(guest.token)).send({ title: 'Étrangère', plan_id: `${tenantId}-pl4`, x: 1, y: 1 })).status).toBe(404);
+  });
+
   it('en lecture seule, ni l\'intitulé ni la position ne changent', async () => {
     const { tenantId, admin, projectId } = setup();
     const guest = await invite(admin.token, projectId, WITH_DETAIL);

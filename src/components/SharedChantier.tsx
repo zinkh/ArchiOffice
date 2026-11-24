@@ -293,12 +293,58 @@ function reserveState(item: SharedReserve) {
   return { closed: isReserveClosed(like), forRecord: isReserveForRecord(like), lateDays: reserveOverdueDays(like) };
 }
 
+/** Formulaire de création d'une réserve par le confrère : l'intitulé suffit, le reste se précise ensuite dans la fiche. */
+function NewReserveForm({ onCreate, onCancel }: { onCreate: (fields: Record<string, string>) => Promise<void>; onCancel: () => void }) {
+  const { t } = useTranslation();
+  const [values, setValues] = useState({ title: '', batiment: '', local: '', due_date: '', description: '' });
+  const [saving, setSaving] = useState(false);
+  const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setValues(v => ({ ...v, [key]: e.target.value }));
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!values.title.trim() || saving) return;
+    setSaving(true);
+    try {
+      // Un champ vide n'est pas envoyé : le serveur garde ses valeurs par défaut.
+      await onCreate(Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim())) as Record<string, string>);
+    } catch { /* l'erreur s'affiche déjà au-dessus du tableau */ } finally { setSaving(false); }
+  };
+  return (
+    <form onSubmit={submit} aria-label={t('shared_reserve_new')} className="grid gap-3 sm:grid-cols-2 rounded-lg p-3" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+      <label className="block space-y-0.5 sm:col-span-2">
+        <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('shared_reserve_title')}</span>
+        <input required autoFocus value={values.title} onChange={set('title')} maxLength={200} className={`${fieldClass} w-full`} />
+      </label>
+      <label className="block space-y-0.5">
+        <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('shared_reserve_building')}</span>
+        <input value={values.batiment} onChange={set('batiment')} maxLength={200} className={`${fieldClass} w-full`} />
+      </label>
+      <label className="block space-y-0.5">
+        <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('shared_reserve_room')}</span>
+        <input value={values.local} onChange={set('local')} maxLength={200} className={`${fieldClass} w-full`} />
+      </label>
+      <label className="block space-y-0.5">
+        <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('shared_reserve_due')}</span>
+        <input type="date" value={values.due_date} onChange={set('due_date')} className={`${fieldClass} w-full`} />
+      </label>
+      <label className="block space-y-0.5 sm:col-span-2">
+        <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('shared_reserve_description')}</span>
+        <textarea rows={3} value={values.description} onChange={set('description')} maxLength={5000} className={`${fieldClass} w-full`} />
+      </label>
+      <div className="flex gap-2 sm:col-span-2">
+        <button type="submit" disabled={saving || !values.title.trim()} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-50">{t('shared_reserve_create')}</button>
+        <button type="button" onClick={onCancel} className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[var(--tblr-border)]">{t('shared_plan_cancel')}</button>
+      </div>
+    </form>
+  );
+}
+
 export function SharedReserves({ projectId, kind, canWrite, detail = false }: { projectId: string; kind: 'reserves' | 'gpa'; canWrite: boolean; /** Le cabinet a coché le détail : photos des réserves. */ detail?: boolean }) {
   const { t } = useTranslation();
   const [items, setItems] = useState<SharedReserve[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ReserveFilter>('all');
   const [open, setOpen] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const path = `/api/shared/projects/${projectId}/${kind === 'gpa' ? 'gpa-reserves' : 'reserves'}`;
 
   useEffect(() => {
@@ -312,6 +358,13 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
       // Fusion : la réponse ne porte pas les photos, que la liste garde.
       setItems(list => (list ?? []).map(r => (r.id === saved.id ? { ...r, ...saved } : r)));
       setError(null);
+    } catch (e: any) { setError(e?.message || t('share_error')); throw e; }
+  };
+  const create = async (fields: Record<string, string>) => {
+    try {
+      const created = await apiFetch<SharedReserve>(path, { method: 'POST', body: JSON.stringify(fields) });
+      setItems(list => [...(list ?? []), { ...created, photos: [] }]);
+      setCreating(false); setOpen(created.id); setError(null);
     } catch (e: any) { setError(e?.message || t('share_error')); throw e; }
   };
   // Les saisies de champ n'ont pas à gérer l'échec : l'erreur s'affiche déjà.
@@ -339,8 +392,14 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
 
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-bold text-[var(--tblr-text)]">{t(kind === 'gpa' ? 'shared_gpa_title' : 'shared_reserves_title')}</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-sm font-bold text-[var(--tblr-text)]">{t(kind === 'gpa' ? 'shared_gpa_title' : 'shared_reserves_title')}</h2>
+        {canWrite && !creating && (
+          <button type="button" onClick={() => setCreating(true)} className="ml-auto px-3 py-1 rounded-lg text-xs font-semibold border border-[var(--tblr-border)] hover:bg-[var(--tblr-surface-2)]">{t('shared_reserve_new')}</button>
+        )}
+      </div>
       {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+      {canWrite && creating && <NewReserveForm onCreate={create} onCancel={() => setCreating(false)} />}
       {items.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_reserves_empty')}</p>}
       {items.length > 0 && (
         <>

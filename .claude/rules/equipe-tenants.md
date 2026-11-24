@@ -410,7 +410,13 @@ Autres types : voir ROADMAP.md.
   affaire ou d'une autre catégorie est introuvable, y compris à l'écriture. `plan_id: null` retire le repère (plan et coordonnées
   ensemble). `PlanAnnotator` accepte `resolveUrl` et `isPdf` pour lire un plan par une route du partage. Pas vérifié dans un navigateur
   réel (le double de `PlanAnnotator` remplace pdf.js dans les tests).
-- **Pas encore fait** : création d'une réserve ou d'un compte rendu par un confrère, commentaires sur les ateliers autres que CCTP et DPGF.
+- **Création d'une réserve par un confrère** (`POST /api/shared/projects/:id/reserves|gpa-reserves`, droit d'écriture de l'atelier,
+  `NewReserveForm` dans `SharedChantier.tsx`). Liste blanche : intitulé (obligatoire), bâtiment et local (à la création seulement),
+  échéance, description, statut (« A faire » par défaut) et, avec le détail, la position sur plan. Jamais le lot ni les entreprises, qui
+  restent au cabinet. Le numéro suit la série de l'affaire (une série par jeu, OPR et GPA), l'identifiant, le cabinet et l'affaire
+  viennent du serveur, jamais du corps ; le journal garde « Création de la réserve N° n » avec « confrère externe ». Pas de file hors ligne
+  ni de rejeu idempotent : le bouton se désactive pendant l'envoi. Photos : un confrère ne les ajoute pas encore.
+- **Pas encore fait** : création d'un compte rendu par un confrère, ajout de photos, commentaires sur les ateliers autres que CCTP et DPGF.
 
 **Documents** : le droit couvre les documents de l'affaire (`resource_type =
 'projects'`), pas les pièces de devis, d'appel d'offres ou de bibliothèque

@@ -119,8 +119,17 @@ export const hasPositionKeys = (body: any) => POSITION_KEYS.some(k => body?.[k] 
  * Champs d'une réserve qu'un confrère peut écrire : le suivi, l'intitulé (issue #687) et, avec le détail, la position
  * sur le plan. Jamais le lot, les entreprises ni les bâtiments : ils restent au cabinet.
  */
-export function readReserveFields(body: any, options: { detail?: boolean } = {}): { fields: Record<string, any> } | { error: string } {
+export function readReserveFields(body: any, options: { detail?: boolean; mode?: 'create' | 'update' } = {}): { fields: Record<string, any> } | { error: string } {
   const fields: Record<string, any> = {};
+  if (options.mode === 'create') {
+    // À la création le confrère dit où se trouve la réserve ; ensuite le bâtiment et le local restent au cabinet.
+    if (typeof body?.title !== 'string' || !body.title.trim()) return { error: 'L\'intitulé de la réserve est obligatoire.' };
+    for (const key of ['batiment', 'local'] as const) {
+      const r = readText(body, key, SHORT_MAX);
+      if ('error' in r) return r;
+      if (r.value !== undefined) fields[key] = r.value;
+    }
+  }
   if (body?.title !== undefined) {
     if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > SHORT_MAX) return { error: `title invalide (1 à ${SHORT_MAX} caractères).` };
     fields.title = body.title.trim();
@@ -415,6 +424,40 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
         if (!link.ok) return res.status(link.status).json({ error: link.error });
         res.json({ url: link.url, expiresIn: link.expiresIn });
       } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${set.path}/:reserveId/photos/:photoId]`, e); }
+    });
+
+    /**
+     * Création d'une réserve par un confrère (droit d'écriture de l'atelier). Le corps ne choisit ni le cabinet, ni l'affaire,
+     * ni le numéro (suite de l'affaire, comme le cabinet), ni le lot ni les entreprises (au cabinet). La position sur le plan
+     * exige le détail, comme à la modification. Une réserve créée ici porte la trace « confrère externe ».
+     */
+    app.post(`/api/shared/projects/:id/${set.path}`, async (req: any, res: any) => {
+      try {
+        const share = await guard(req, res, set.kind, 'write');
+        if (!share) return;
+        if (hasPositionKeys(req.body) && !req.shareDetail) {
+          return res.status(403).json({ error: 'Le détail de ce suivi n\'est pas partagé avec vous.', code: 'SHARE_DETAIL_FORBIDDEN' });
+        }
+        const parsed = readReserveFields(req.body, { detail: req.shareDetail, mode: 'create' });
+        if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+        if (parsed.fields.plan_id) {
+          const { data: plan } = await supabaseAdmin.from('plans').select('id, category')
+            .eq('id', parsed.fields.plan_id).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
+          if (!plan || !planIsAor(plan)) return res.status(404).json({ error: 'Plan introuvable.' });
+        }
+        const { data: lastRow } = await supabaseAdmin.from(set.table).select('number')
+          .eq('tenant_id', share.tenant_id).eq('project_id', share.project_id).order('number', { ascending: false }).limit(1).maybeSingle();
+        const number = ((lastRow as any)?.number || 0) + 1;
+        const { data, error } = await supabaseAdmin.from(set.table).insert({
+          status: 'A faire', ...parsed.fields,
+          id: crypto.randomUUID(), tenant_id: share.tenant_id, project_id: share.project_id, number,
+          created_at: new Date().toISOString().slice(0, 10),
+        }).select('*').single();
+        if (isMissingReponseColumn(error)) return res.status(503).json({ error: 'Le suivi des réserves n\'est pas disponible : migration à appliquer.' });
+        if (error) throw error;
+        await audit(share, req, `Création de ${set.label} N° ${number} "${parsed.fields.title}"`, parsed.fields.title, data.id, set.type, set.category);
+        res.status(201).json(pick(data, req.shareDetail ? RESERVE_DETAIL_FIELDS : RESERVE_FIELDS));
+      } catch (e: any) { fail(res, `[POST /api/shared/projects/:id/${set.path}]`, e); }
     });
 
     app.put(`/api/shared/projects/:id/${set.path}/:reserveId`, async (req: any, res: any) => {

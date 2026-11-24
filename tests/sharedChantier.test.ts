@@ -186,6 +186,36 @@ describe('Détail accordé par le cabinet (issue #688)', () => {
       expect(JSON.parse((puts()[0][1] as any).body)).toEqual({ title: 'Fissure du refend' });
     });
 
+    it('crée une réserve depuis le formulaire : intitulé obligatoire, champs vides non envoyés, la ligne apparaît', async () => {
+      setupApi();
+      apiFetch.mockImplementation(async (url: string, init?: any) => {
+        if (init?.method === 'POST') return { ...reserve(), id: 'r9', number: 2, ...JSON.parse(init.body) };
+        if (url.endsWith('/reserves')) return [reserve()];
+        return [];
+      });
+      await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true }));
+      await act(async () => { bouton('shared_reserve_new').click(); });
+      const submit = bouton('shared_reserve_create');
+      expect(submit.disabled).toBe(true); // pas d'intitulé
+      const titre = container.querySelector('form input[required]') as HTMLInputElement;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(titre, 'Joint fissuré');
+        titre.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { bouton('shared_reserve_create').click(); });
+      const post = apiFetch.mock.calls.find(c => (c[1] as any)?.method === 'POST')!;
+      expect(post[0]).toBe('/api/shared/projects/p/reserves');
+      expect(JSON.parse((post[1] as any).body)).toEqual({ title: 'Joint fissuré' });
+      expect(container.textContent).toContain('Joint fissuré');
+      expect(container.querySelector('form')).toBeNull(); // le formulaire se referme
+    });
+
+    it('en lecture seule, pas de bouton de création', async () => {
+      setupApi();
+      await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: false }));
+      expect(bouton('shared_reserve_new')).toBeUndefined();
+    });
+
     it('en lecture seule, l\'intitulé est grisé', async () => {
       setupApi();
       await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: false }));
