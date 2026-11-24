@@ -634,7 +634,10 @@ function ProtectedLayout() {
   return (
     <AgentChatProvider>
     <div
-      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-dvh lg:h-dvh lg:overflow-hidden' : 'min-h-dvh')}
+      // `overflow-x-clip` et non `hidden` : `hidden` fait de cette racine un conteneur de défilement
+      // (l'autre axe passe à `auto`), et tout `position: sticky` de l'application s'y accroche au lieu
+      // de la fenêtre, donc ne colle plus (aperçu de la veille des appels d'offres).
+      className={cn('flex font-sans overflow-x-clip', isFullBleedRoute ? 'min-h-dvh lg:h-dvh lg:overflow-hidden' : 'min-h-dvh')}
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
       onScroll={isFullBleedRoute ? resetStrayScroll : undefined}
       onScrollCapture={isFullBleedRoute ? resetHiddenOverflowScroll : undefined}
