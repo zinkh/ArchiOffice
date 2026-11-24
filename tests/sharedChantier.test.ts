@@ -210,6 +210,80 @@ describe('Détail accordé par le cabinet (issue #688)', () => {
       expect(container.querySelector('form')).toBeNull(); // le formulaire se referme
     });
 
+    describe('lot et entreprise en charge', () => {
+      const OPTIONS = { lots: [{ title: 'Gros œuvre', number: '01' }, { title: 'Peinture', number: '02' }], entreprises: ['Alpha Bâtiment', 'Béta Peinture'], lotEntreprise: { 'Gros œuvre': 'Alpha Bâtiment' } };
+      const listeur = (extra: Record<string, unknown> = {}) => {
+        apiFetch.mockImplementation(async (url: string, init?: any) => {
+          if (init?.method === 'PUT') return { ...reserve(extra), ...JSON.parse(init.body), lots: JSON.stringify(JSON.parse(init.body).lots ?? []), entreprises: JSON.stringify(JSON.parse(init.body).entreprises ?? []) };
+          if (init?.method === 'POST') return { ...reserve(), id: 'r9', number: 2, title: JSON.parse(init.body).title };
+          if (url.endsWith('/options')) return OPTIONS;
+          if (url.endsWith('/reserves')) return [reserve(extra)];
+          return [];
+        });
+      };
+      const choisir = async (label: string, valeur: string) => {
+        const select = container.querySelector(`select[aria-label="${label}"]`) as HTMLSelectElement;
+        await act(async () => {
+          Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(select, valeur);
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      };
+      const ouvrirReserve = async () => {
+        await act(async () => { (container.querySelector('button[aria-expanded]') as HTMLButtonElement).click(); });
+      };
+
+      it('lit les choix à l\'ouverture pour qui peut écrire, jamais en lecture seule', async () => {
+        listeur();
+        await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true }));
+        expect(apiFetch.mock.calls.some(c => lireUrl(c) === '/api/shared/projects/p/reserves/options')).toBe(true);
+        await act(async () => root.unmount()); container.remove();
+        apiFetch.mockClear(); listeur();
+        await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: false }));
+        expect(apiFetch.mock.calls.some(c => lireUrl(c).includes('/options'))).toBe(false);
+      });
+
+      it('choisir un lot enregistre le lot et ajoute l\'entreprise de sa fiche', async () => {
+        listeur();
+        await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true }));
+        await ouvrirReserve();
+        await choisir('shared_responsable_lots', 'Gros œuvre');
+        const [put] = puts();
+        expect(JSON.parse((put[1] as any).body)).toEqual({ lots: ['Gros œuvre'], entreprises: ['Alpha Bâtiment'] });
+        expect(container.textContent).toContain('Gros œuvre · Alpha Bâtiment'); // colonne du tableau, lue depuis le JSON
+        expect(container.textContent).not.toContain('["Gros');
+      });
+
+      it('retire une entreprise, et en lecture seule les choix ne sont pas modifiables', async () => {
+        listeur({ lots: JSON.stringify(['Gros œuvre']), entreprises: JSON.stringify(['Alpha Bâtiment']) });
+        await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true }));
+        await ouvrirReserve();
+        await act(async () => { (container.querySelector('button[aria-label="shared_responsable_remove Alpha Bâtiment"]') as HTMLButtonElement).click(); });
+        expect(JSON.parse((puts()[0][1] as any).body)).toEqual({ lots: ['Gros œuvre'], entreprises: [] });
+        await act(async () => root.unmount()); container.remove();
+        listeur({ lots: JSON.stringify(['Gros œuvre']) });
+        await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: false }));
+        await ouvrirReserve();
+        expect(container.querySelector('select[aria-label="shared_responsable_lots"]')).toBeNull();
+        expect(container.querySelector('button[aria-label^="shared_responsable_remove"]')).toBeNull();
+      });
+
+      it('le formulaire de création envoie le lot et l\'entreprise choisis', async () => {
+        listeur();
+        await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: true }));
+        await act(async () => { bouton('shared_reserve_new').click(); });
+        const titre = container.querySelector('form input[required]') as HTMLInputElement;
+        await act(async () => {
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(titre, 'Enduit');
+          titre.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await choisir('shared_responsable_entreprises', 'Béta Peinture');
+        await choisir('shared_responsable_lots', 'Peinture');
+        await act(async () => { bouton('shared_reserve_create').click(); });
+        const post = apiFetch.mock.calls.find(c => (c[1] as any)?.method === 'POST')!;
+        expect(JSON.parse((post[1] as any).body)).toEqual({ title: 'Enduit', lots: ['Peinture'], entreprises: ['Béta Peinture'] });
+      });
+    });
+
     it('en lecture seule, pas de bouton de création', async () => {
       setupApi();
       await monter(React.createElement(SharedReserves, { projectId: 'p', kind: 'reserves', canWrite: false }));

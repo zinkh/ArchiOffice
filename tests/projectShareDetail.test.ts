@@ -312,12 +312,12 @@ describe('avec le détail : intitulé et position sur le plan d\'une réserve (i
   it('renomme la réserve avec le droit d\'écriture et le trace, sans toucher au lot', async () => {
     const { tenantId, admin, projectId } = setup();
     const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }]);
-    const res = await put(guest.token, `/api/shared/projects/${projectId}/reserves/${tenantId}-a1`, { title: '  Fissure du refend  ', lots: 'piraté' });
+    const res = await put(guest.token, `/api/shared/projects/${projectId}/reserves/${tenantId}-a1`, { title: '  Fissure du refend  ', tenant_id: 'autre' });
     expect(res.status).toBe(200);
     expect(res.body.title).toBe('Fissure du refend');
     const row = fakeSupabaseAdmin.getTable('reserves').find(r => r.id === `${tenantId}-a1`)!;
     expect(row.title).toBe('Fissure du refend');
-    expect(row.lots).toBeUndefined();
+    expect(row.tenant_id).toBe(tenantId);
     await new Promise(r => setTimeout(r, 10));
     expect(fakeSupabaseAdmin.getTable('activities').some(a => a.tenant_id === tenantId && String(a.action).includes('nouvel intitulé'))).toBe(true);
     expect((await put(guest.token, `/api/shared/projects/${projectId}/reserves/${tenantId}-a1`, { title: '   ' })).status).toBe(400);
@@ -354,13 +354,12 @@ describe('avec le détail : intitulé et position sur le plan d\'une réserve (i
     const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }, { kind: 'gpa', access: 'write' }]);
     const post = (path: string, body: any) => request(app).post(`/api/shared/projects/${projectId}/${path}`).set(authHeader(guest.token)).send(body);
     const res = await post('reserves', { title: '  Joint fissuré  ', batiment: 'A', local: 'Cuisine', due_date: '2026-12-15', description: 'À reprendre',
-      lots: 'piraté', tenant_id: 'autre', project_id: otherProjectId, number: 99, status: 'Levée', id: 'choisi' });
+      tenant_id: 'autre', project_id: otherProjectId, number: 99, status: 'Levée', id: 'choisi' });
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({ title: 'Joint fissuré', batiment: 'A', local: 'Cuisine', number: 2, status: 'Levée' });
     expect(res.body.id).not.toBe('choisi');
     const row = fakeSupabaseAdmin.getTable('reserves').find(r => r.id === res.body.id)!;
     expect(row).toMatchObject({ tenant_id: tenantId, project_id: projectId, number: 2 });
-    expect(row.lots).toBeUndefined();
     // Une réserve GPA suit sa propre série.
     const gpa = await post('gpa-reserves', { title: 'Infiltration' });
     expect(gpa.status).toBe(201);
@@ -395,6 +394,84 @@ describe('avec le détail : intitulé et position sur le plan d\'une réserve (i
     expect(ok.status).toBe(201);
     expect(ok.body).toMatchObject({ plan_id: `${tenantId}-pl1`, x: 30, y: 60 });
     expect((await request(app).post(url).set(authHeader(guest.token)).send({ title: 'Étrangère', plan_id: `${tenantId}-pl4`, x: 1, y: 1 })).status).toBe(404);
+  });
+
+  describe('lot et entreprise en charge', () => {
+    function withResponsables(tenantId: string, projectId: string) {
+      Object.assign(fakeSupabaseAdmin.getTable('project_lots').find(l => l.id === `${tenantId}-l1`)!, { contact_name: 'Alpha Bâtiment' });
+      fakeSupabaseAdmin.seed('marches_entreprises', [
+        { id: `${tenantId}-m1`, tenant_id: tenantId, project_id: projectId, entreprise_nom: 'Béta Menuiserie', contact_id: 'fiche-secrete', type_marche: 'base', statut: 'signe' },
+        { id: `${tenantId}-m2`, tenant_id: tenantId, project_id: projectId, entreprise_nom: 'Gamma Résiliée', type_marche: 'base', statut: 'resilie' },
+        { id: `${tenantId}-m3`, tenant_id: tenantId, project_id: projectId, entreprise_nom: 'Delta Avenant', type_marche: 'subsequent', statut: 'signe' },
+        { id: `${tenantId}-m4`, tenant_id: tenantId, project_id: `${projectId}-autre`, entreprise_nom: 'Autre Affaire SA', type_marche: 'base', statut: 'signe' },
+      ]);
+    }
+    const url = (projectId: string, path = 'reserves') => `/api/shared/projects/${projectId}/${path}`;
+
+    it('propose les lots et les entreprises de l\'affaire, en noms seulement, à qui peut écrire', async () => {
+      const { tenantId, admin, projectId } = setup();
+      withResponsables(tenantId, projectId);
+      const writer = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }]);
+      const reader = await invite(admin.token, projectId, NO_DETAIL);
+      const res = await get(writer.token, url(projectId, 'reserves/options'));
+      expect(res.status).toBe(200);
+      expect(res.body.lots).toEqual([{ title: 'Gros œuvre', number: '01' }]);
+      expect(res.body.entreprises).toEqual(['Alpha Bâtiment', 'Béta Menuiserie']); // ni résiliée, ni avenant, ni autre affaire
+      expect(res.body.lotEntreprise).toEqual({ 'Gros œuvre': 'Alpha Bâtiment' });
+      expect(JSON.stringify(res.body)).not.toContain('fiche-secrete');
+      expect((await get(reader.token, url(projectId, 'reserves/options'))).status).toBe(403);
+    });
+
+    it('crée une réserve avec son lot et son entreprise, rangés comme le cabinet', async () => {
+      const { tenantId, admin, projectId } = setup();
+      withResponsables(tenantId, projectId);
+      const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }]);
+      const res = await request(app).post(url(projectId)).set(authHeader(guest.token)).send({ title: 'Enduit', lots: ['gros œuvre'], entreprises: ['Alpha Bâtiment', 'alpha bâtiment', 'Béta Menuiserie'] });
+      expect(res.status).toBe(201);
+      expect(JSON.parse(res.body.lots)).toEqual(['Gros œuvre']); // casse normalisée sur le nom connu
+      expect(JSON.parse(res.body.entreprises)).toEqual(['Alpha Bâtiment', 'Béta Menuiserie']); // sans doublon
+    });
+
+    it('refuse un lot ou une entreprise inconnus, ou mal formés, et n\'écrit rien', async () => {
+      const { tenantId, admin, projectId } = setup();
+      withResponsables(tenantId, projectId);
+      const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }]);
+      const before = fakeSupabaseAdmin.getTable('reserves').length;
+      for (const body of [
+        { title: 'x', lots: ['Inventé'] }, { title: 'x', entreprises: ['Autre Affaire SA'] }, { title: 'x', entreprises: ['Gamma Résiliée'] },
+        { title: 'x', lots: 'Gros œuvre' }, { title: 'x', lots: [''] }, { title: 'x', lots: [1] }, { title: 'x', entreprises: Array(21).fill('Alpha Bâtiment') },
+      ]) {
+        expect((await request(app).post(url(projectId)).set(authHeader(guest.token)).send(body)).status).toBe(400);
+      }
+      expect(fakeSupabaseAdmin.getTable('reserves').length).toBe(before);
+      const put = await request(app).put(url(projectId, `reserves/${tenantId}-a1`)).set(authHeader(guest.token)).send({ lots: ['Inventé'] });
+      expect(put.status).toBe(400);
+      expect(fakeSupabaseAdmin.getTable('reserves').find(r => r.id === `${tenantId}-a1`)!.lots).toBeUndefined();
+    });
+
+    it('change le lot et l\'entreprise d\'une réserve, en gardant une valeur ancienne déjà portée', async () => {
+      const { tenantId, admin, projectId } = setup();
+      withResponsables(tenantId, projectId);
+      Object.assign(fakeSupabaseAdmin.getTable('reserves').find(r => r.id === `${tenantId}-a1`)!, { entreprises: JSON.stringify(['Ancienne SARL']) });
+      const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }]);
+      const target = url(projectId, `reserves/${tenantId}-a1`);
+      // « Ancienne SARL » n'est plus dans les listes mais la réserve la porte : elle reste acceptable.
+      const keep = await request(app).put(target).set(authHeader(guest.token)).send({ lots: ['Gros œuvre'], entreprises: ['Ancienne SARL', 'Alpha Bâtiment'] });
+      expect(keep.status).toBe(200);
+      expect(JSON.parse(keep.body.entreprises)).toEqual(['Ancienne SARL', 'Alpha Bâtiment']);
+      const clear = await request(app).put(target).set(authHeader(guest.token)).send({ entreprises: [] });
+      expect(clear.status).toBe(200);
+      expect(JSON.parse(clear.body.entreprises)).toEqual([]);
+      // Une autre réserve ne peut pas reprendre une valeur étrangère à l'affaire et à elle-même.
+      expect((await request(app).put(target).set(authHeader(guest.token)).send({ entreprises: ['Ancienne SARL', 'Ancienne SARL 2'] })).status).toBe(400);
+    });
+
+    it('en lecture seule, ni création ni changement de lot', async () => {
+      const { tenantId, admin, projectId } = setup();
+      withResponsables(tenantId, projectId);
+      const reader = await invite(admin.token, projectId, WITH_DETAIL);
+      expect((await request(app).put(url(projectId, `reserves/${tenantId}-a1`)).set(authHeader(reader.token)).send({ lots: ['Gros œuvre'] })).status).toBe(403);
+    });
   });
 
   it('en lecture seule, ni l\'intitulé ni la position ne changent', async () => {

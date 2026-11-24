@@ -220,12 +220,12 @@ describe('réserves AOR et GPA partagées', () => {
     expect(put.status).toBe(403);
   });
 
-  it('met à jour le suivi et l\'intitulé d\'une réserve, jamais son lot ni son plan sans le détail', async () => {
+  it('met à jour le suivi et l\'intitulé d\'une réserve, jamais son cabinet ni son plan sans le détail', async () => {
     const { admin, projectId, tenantId } = setup();
     const guest = await invite(admin.token, projectId, [{ kind: 'reserves', access: 'write' }, { kind: 'gpa', access: 'write' }]);
     const url = `/api/shared/projects/${projectId}/reserves/${tenantId}-a1`;
     const aor = await request(app).put(url).set(authHeader(guest.token))
-      .send({ status: 'Levée', reponse: 'Repris', due_date: '2026-12-01', title: 'Fissure du refend', lots: 'piraté' });
+      .send({ status: 'Levée', reponse: 'Repris', due_date: '2026-12-01', title: 'Fissure du refend', tenant_id: 'autre' });
     expect(aor.status).toBe(200);
     expect(aor.body).toMatchObject({ status: 'Levée', reponse: 'Repris', due_date: '2026-12-01', title: 'Fissure du refend' });
     // Sans le détail, le plan n'est pas montré : une position envoyée est refusée net, rien n'est écrit.
@@ -234,7 +234,7 @@ describe('réserves AOR et GPA partagées', () => {
     const stored = fakeSupabaseAdmin.getTable('reserves').find((r: any) => r.id === `${tenantId}-a1`);
     expect(stored?.plan_id).toBe('plan-secret');
     expect(stored?.status).toBe('Levée');
-    expect(stored?.lots).not.toBe('piraté');
+    expect(stored?.tenant_id).toBe(tenantId);
     const gpa = await request(app).put(`/api/shared/projects/${projectId}/gpa-reserves/${tenantId}-g1`).set(authHeader(guest.token)).send({ status: 'En cours' });
     expect(gpa.status).toBe(200);
     expect(gpa.body.status).toBe('En cours');

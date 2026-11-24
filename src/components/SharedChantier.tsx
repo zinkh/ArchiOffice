@@ -14,6 +14,8 @@ import { cn } from '../lib/utils';
 import SharedKpis from './shared/SharedKpis';
 import SharedPhoto from './shared/SharedPhoto';
 import SharedReservePlan from './shared/SharedReservePlan';
+import SharedResponsables, { type ResponsableOptions } from './shared/SharedResponsables';
+import { parseJsonList } from '../lib/jsonList';
 import { RESERVE_STATUSES, isReserveClosed, isReserveForRecord, reserveOverdueDays, reserveStatusKey, statusPillClass } from './pro/reserveShared';
 
 interface SharedAttendee { name: string | null; role: string | null; status: string | null; present: boolean; excused: boolean }
@@ -294,9 +296,10 @@ function reserveState(item: SharedReserve) {
 }
 
 /** Formulaire de création d'une réserve par le confrère : l'intitulé suffit, le reste se précise ensuite dans la fiche. */
-function NewReserveForm({ onCreate, onCancel }: { onCreate: (fields: Record<string, string>) => Promise<void>; onCancel: () => void }) {
+function NewReserveForm({ options, onCreate, onCancel }: { options: ResponsableOptions | null; onCreate: (fields: Record<string, string | string[]>) => Promise<void>; onCancel: () => void }) {
   const { t } = useTranslation();
   const [values, setValues] = useState({ title: '', batiment: '', local: '', due_date: '', description: '' });
+  const [responsables, setResponsables] = useState({ lots: [] as string[], entreprises: [] as string[] });
   const [saving, setSaving] = useState(false);
   const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setValues(v => ({ ...v, [key]: e.target.value }));
   const submit = async (e: React.FormEvent) => {
@@ -305,7 +308,10 @@ function NewReserveForm({ onCreate, onCancel }: { onCreate: (fields: Record<stri
     setSaving(true);
     try {
       // Un champ vide n'est pas envoyé : le serveur garde ses valeurs par défaut.
-      await onCreate(Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim())) as Record<string, string>);
+      const fields: Record<string, string | string[]> = Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim()));
+      if (responsables.lots.length) fields.lots = responsables.lots;
+      if (responsables.entreprises.length) fields.entreprises = responsables.entreprises;
+      await onCreate(fields);
     } catch { /* l'erreur s'affiche déjà au-dessus du tableau */ } finally { setSaving(false); }
   };
   return (
@@ -326,6 +332,7 @@ function NewReserveForm({ onCreate, onCancel }: { onCreate: (fields: Record<stri
         <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('shared_reserve_due')}</span>
         <input type="date" value={values.due_date} onChange={set('due_date')} className={`${fieldClass} w-full`} />
       </label>
+      <div className="sm:col-span-2"><SharedResponsables value={responsables} options={options} disabled={false} onChange={setResponsables} /></div>
       <label className="block space-y-0.5 sm:col-span-2">
         <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('shared_reserve_description')}</span>
         <textarea rows={3} value={values.description} onChange={set('description')} maxLength={5000} className={`${fieldClass} w-full`} />
@@ -352,7 +359,16 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
     apiFetch<SharedReserve[]>(path).then(setItems).catch(e => setError(e?.message || t('share_error')));
   }, [path, t]);
 
-  const patch = async (item: SharedReserve, fields: Record<string, string | number | null>) => {
+  // Lots et entreprises à choisir : lus une fois, seulement pour qui peut écrire (la route est réservée à l'écriture).
+  const [options, setOptions] = useState<ResponsableOptions | null>(null);
+  useEffect(() => {
+    if (!canWrite) return;
+    let cancelled = false;
+    apiFetch<ResponsableOptions>(`${path}/options`).then(o => { if (!cancelled) setOptions(o); }).catch(() => { /* les choix manquent, le reste fonctionne */ });
+    return () => { cancelled = true; };
+  }, [path, canWrite]);
+
+  const patch = async (item: SharedReserve, fields: Record<string, string | number | string[] | null>) => {
     try {
       const saved = await apiFetch<SharedReserve>(`${path}/${item.id}`, { method: 'PUT', body: JSON.stringify(fields) });
       // Fusion : la réponse ne porte pas les photos, que la liste garde.
@@ -360,7 +376,7 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
       setError(null);
     } catch (e: any) { setError(e?.message || t('share_error')); throw e; }
   };
-  const create = async (fields: Record<string, string>) => {
+  const create = async (fields: Record<string, string | string[]>) => {
     try {
       const created = await apiFetch<SharedReserve>(path, { method: 'POST', body: JSON.stringify(fields) });
       setItems(list => [...(list ?? []), { ...created, photos: [] }]);
@@ -368,7 +384,7 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
     } catch (e: any) { setError(e?.message || t('share_error')); throw e; }
   };
   // Les saisies de champ n'ont pas à gérer l'échec : l'erreur s'affiche déjà.
-  const patchQuiet = (item: SharedReserve, fields: Record<string, string | number | null>) => { patch(item, fields).catch(() => {}); };
+  const patchQuiet = (item: SharedReserve, fields: Record<string, string | number | string[] | null>) => { patch(item, fields).catch(() => {}); };
 
   const counts = useMemo(() => {
     const list = items ?? [];
@@ -399,7 +415,7 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
         )}
       </div>
       {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
-      {canWrite && creating && <NewReserveForm onCreate={create} onCancel={() => setCreating(false)} />}
+      {canWrite && creating && <NewReserveForm options={options} onCreate={create} onCancel={() => setCreating(false)} />}
       {items.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_reserves_empty')}</p>}
       {items.length > 0 && (
         <>
@@ -445,7 +461,7 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
                           {detail && (item.photos?.length ?? 0) > 0 && <span className="ml-2 text-xs font-normal text-[var(--tblr-muted)]">{t('shared_photos_count', { count: item.photos!.length })}</span>}
                         </td>
                         <td className="px-3 py-2 align-top text-xs text-[var(--tblr-muted)]">{[item.batiment, item.local].filter(Boolean).join(' · ')}</td>
-                        <td className="px-3 py-2 align-top text-xs text-[var(--tblr-muted)]">{[item.lots, item.entreprises].filter(Boolean).join(' · ')}</td>
+                        <td className="px-3 py-2 align-top text-xs text-[var(--tblr-muted)]">{[...parseJsonList(item.lots), ...parseJsonList(item.entreprises)].join(' · ')}</td>
                         <td className="px-3 py-2 align-top text-xs whitespace-nowrap">
                           <span className="block text-[var(--tblr-text)]">{item.due_date ?? ''}</span>
                           {lateDays > 0 && <span className="block font-semibold text-red-600">{t('shared_late_days', { count: lateDays })}</span>}
@@ -478,6 +494,14 @@ export function SharedReserves({ projectId, kind, canWrite, detail = false }: { 
                               <CommitField key={`e-${item.id}-${item.due_date}`} value={item.due_date} label={t('shared_reserve_due')} disabled={!canWrite} type="date" onCommit={v => patchQuiet(item, { due_date: v })} />
                               <CommitField key={`d-${item.id}-${item.description}`} value={item.description} label={t('shared_reserve_description')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patchQuiet(item, { description: v })} />
                               <CommitField key={`r-${item.id}-${item.reponse}`} value={item.reponse} label={t('shared_reserve_response')} disabled={!canWrite} multiline maxLength={5000} onCommit={v => patchQuiet(item, { reponse: v })} />
+                            </div>
+                            <div className="mt-3">
+                              <SharedResponsables
+                                key={`resp-${item.id}-${item.lots}-${item.entreprises}`}
+                                value={{ lots: parseJsonList(item.lots), entreprises: parseJsonList(item.entreprises) }}
+                                options={options} disabled={!canWrite}
+                                onChange={next => patchQuiet(item, { lots: next.lots, entreprises: next.entreprises })}
+                              />
                             </div>
                             {detail && <div className="mt-3"><SharedReservePlan path={path} reserve={item} canWrite={canWrite} onSave={position => patch(item, { ...position })} /></div>}
                             {detail && (item.photos?.length ?? 0) > 0 && (

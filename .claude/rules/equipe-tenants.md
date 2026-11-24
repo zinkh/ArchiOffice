@@ -412,10 +412,19 @@ Autres types : voir ROADMAP.md.
   réel (le double de `PlanAnnotator` remplace pdf.js dans les tests).
 - **Création d'une réserve par un confrère** (`POST /api/shared/projects/:id/reserves|gpa-reserves`, droit d'écriture de l'atelier,
   `NewReserveForm` dans `SharedChantier.tsx`). Liste blanche : intitulé (obligatoire), bâtiment et local (à la création seulement),
-  échéance, description, statut (« A faire » par défaut) et, avec le détail, la position sur plan. Jamais le lot ni les entreprises, qui
-  restent au cabinet. Le numéro suit la série de l'affaire (une série par jeu, OPR et GPA), l'identifiant, le cabinet et l'affaire
+  échéance, description, statut (« A faire » par défaut), lot et entreprise en charge (voir ci-dessous) et, avec le détail, la position
+  sur plan. Le numéro suit la série de l'affaire (une série par jeu, OPR et GPA), l'identifiant, le cabinet et l'affaire
   viennent du serveur, jamais du corps ; le journal garde « Création de la réserve N° n » avec « confrère externe ». Pas de file hors ligne
   ni de rejeu idempotent : le bouton se désactive pendant l'envoi. Photos : un confrère ne les ajoute pas encore.
+- **Lot et entreprise en charge d'une réserve** (`server/projectShares/reserveResponsables.ts`, `SharedResponsables.tsx`). Le
+  confrère les **choisit**, il ne les saisit pas : `GET .../reserves|gpa-reserves/options` (droit d'**écriture** requis, c'est son
+  seul usage) rend les lots de l'affaire (numéro et intitulé), les entreprises de leurs fiches (`project_lots.contact_name`) et de ses
+  marchés (`marches_entreprises`, hors avenants `subsequent` et marchés résiliés) et l'entreprise de chaque lot : **des noms
+  seulement, jamais d'identifiant ni de fiche contact**. `lots` et `entreprises` s'écrivent en liste de chaînes (rangées en texte JSON
+  comme le cabinet, lot par intitulé, entreprise par nom), revalidées contre ces listes, doublons et casse normalisés ; une valeur
+  **déjà portée par la réserve** reste acceptée (saisie libre ancienne), tout autre nom est refusé en 400, sans rien écrire. À
+  l'écran, choisir un lot ajoute l'entreprise de sa fiche si elle n'est pas déjà en charge, comme la fiche du cabinet. La colonne
+  Lot et entreprise du tableau lit désormais le JSON (elle affichait le texte brut). La couleur de suivi du cabinet suit ces valeurs.
 - **Pas encore fait** : création d'un compte rendu par un confrère, ajout de photos, commentaires sur les ateliers autres que CCTP et DPGF.
 
 **Documents** : le droit couvre les documents de l'affaire (`resource_type =

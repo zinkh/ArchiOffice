@@ -21,6 +21,7 @@ import { activeShareFor, allows, allowsDetail, type ShareKind, type ShareRow } f
 import { guestActView } from '../projectShares/actView';
 import { guestAttendance, guestLotTracking } from '../projectShares/reportDetailView';
 import { linkForTenantFile } from '../projectShares/fileAccess';
+import { hasResponsableKeys, loadResponsableOptions, readResponsables } from '../projectShares/reserveResponsables';
 import { isProjectArchived } from './projectArchive';
 
 export interface RouteDeps {
@@ -440,6 +441,12 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
         }
         const parsed = readReserveFields(req.body, { detail: req.shareDetail, mode: 'create' });
         if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+        // Lot et entreprise : choisis parmi ceux de l'affaire partagée, jamais en texte libre.
+        if (hasResponsableKeys(req.body)) {
+          const resp = readResponsables(req.body, await loadResponsableOptions(supabaseAdmin, share.tenant_id, share.project_id));
+          if ('error' in resp) return res.status(400).json({ error: resp.error });
+          Object.assign(parsed.fields, resp.fields);
+        }
         if (parsed.fields.plan_id) {
           const { data: plan } = await supabaseAdmin.from('plans').select('id, category')
             .eq('id', parsed.fields.plan_id).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
@@ -470,6 +477,16 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
         }
         const parsed = readReserveFields(req.body, { detail: req.shareDetail });
         if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+        // La réserve visée doit appartenir à CETTE affaire partagée : celle d'une autre affaire du cabinet est introuvable.
+        const { data: reserve } = await supabaseAdmin.from(set.table).select('id, number, title, status, lots, entreprises')
+          .eq('id', req.params.reserveId).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
+        if (!reserve) return res.status(404).json({ error: 'Réserve introuvable.' });
+        // Lot et entreprise : choisis parmi ceux de l'affaire (ou déjà portés par la réserve), jamais en texte libre.
+        if (hasResponsableKeys(req.body)) {
+          const resp = readResponsables(req.body, await loadResponsableOptions(supabaseAdmin, share.tenant_id, share.project_id), reserve);
+          if ('error' in resp) return res.status(400).json({ error: resp.error });
+          Object.assign(parsed.fields, resp.fields);
+        }
         if (!Object.keys(parsed.fields).length) return res.status(400).json({ error: 'Aucune modification.' });
         // Le plan visé doit être un plan AOR de CETTE affaire et de CE cabinet : celui d'une autre affaire est introuvable.
         if (parsed.fields.plan_id) {
@@ -477,10 +494,6 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
             .eq('id', parsed.fields.plan_id).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
           if (!plan || !planIsAor(plan)) return res.status(404).json({ error: 'Plan introuvable.' });
         }
-        // La réserve doit appartenir à CETTE affaire partagée : celle d'une autre affaire du cabinet est introuvable.
-        const { data: reserve } = await supabaseAdmin.from(set.table).select('id, number, title, status')
-          .eq('id', req.params.reserveId).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).maybeSingle();
-        if (!reserve) return res.status(404).json({ error: 'Réserve introuvable.' });
         const { data, error } = await supabaseAdmin.from(set.table).update(parsed.fields)
           .eq('id', reserve.id).eq('tenant_id', share.tenant_id).select('*').single();
         if (isMissingReponseColumn(error)) return res.status(503).json({ error: 'Le suivi des réserves n\'est pas disponible : migration à appliquer.' });
@@ -497,6 +510,18 @@ export function registerProjectShareChantierRoutes(app: Express, { supabaseAdmin
         }
         res.json(pick(data, req.shareDetail ? RESERVE_DETAIL_FIELDS : RESERVE_FIELDS));
       } catch (e: any) { fail(res, `[PUT /api/shared/projects/:id/${set.path}/:reserveId]`, e); }
+    });
+
+    /**
+     * Les lots et les entreprises à choisir pour une réserve (noms seulement, jamais l'identifiant ni la fiche d'un contact) :
+     * ceux de l'affaire partagée, comme les propositions de la fiche du cabinet. Réservé à qui peut écrire : c'est le seul usage.
+     */
+    app.get(`/api/shared/projects/:id/${set.path}/options`, async (req: any, res: any) => {
+      try {
+        const share = await guard(req, res, set.kind, 'write');
+        if (!share) return;
+        res.json(await loadResponsableOptions(supabaseAdmin, share.tenant_id, share.project_id));
+      } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${set.path}/options]`, e); }
     });
 
     /** Les plans où poser un repère (identifiant et nom seulement) : exige le détail, sans lequel le plan n'est pas montré. */
