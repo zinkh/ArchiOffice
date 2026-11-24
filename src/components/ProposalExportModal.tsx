@@ -10,6 +10,7 @@ import { useSettings } from '../hooks/useSettings';
 import { useMafCost } from '../hooks/useMafCost';
 import { MafCostBadge } from './MafCostBadge';
 import { SendProposalMail } from './proposal/SendProposalMail';
+import { libelleRatios } from '../lib/ratiosIndicatifs';
 import { loadCotraitantIdentities } from '../lib/pdfLetterhead';
 import { paginateFlow, PAGE_HEIGHT_MM, CONTENT_TOP_MM, CONTENT_BOTTOM_MM } from '../lib/pdfPagination';
 import { resolveSignedUrl } from '../lib/signedStorageUrl';
@@ -397,6 +398,12 @@ const renderObjet: SectionRenderer = (d, t, ctx, newPage) => {
   );
 };
 
+/** Ratio appliqué (€/m²) et commentaire, sous le montant des travaux. Espaces ordinaires : jsPDF imprime l'espace fine « / ». */
+const ratioTexte = (d: ProposalPdfData): string => libelleRatios(
+  { nature: d.nature, ratioRehab: d.ratioRehab, ratioExtension: d.ratioExtension, commentaire: d.ratioCommentaire },
+  n => n.toLocaleString('fr-FR').replace(/[  ]/g, ' '),
+);
+
 const renderSurfaces: SectionRenderer = (d, t, ctx, newPage) => (
   <Section key="surfaces">
     <H2 template={t} newPage={newPage}>{ctx.num}. Surfaces & Programme</H2>
@@ -427,8 +434,8 @@ const renderSurfaces: SectionRenderer = (d, t, ctx, newPage) => (
       <div style={{ fontSize: '18pt', fontWeight: 'bold' }}>{formatCurrency(d.montantTravaux)} HT</div>
       <div style={{ fontSize: '8pt', color: '#666', marginTop: '1mm' }}>
         Taux de complexité {d.tauxComplexite}
-        {(d.ratioRehab > 0 || d.ratioExtension > 0) && `, réhabilitation ${d.ratioRehab} % / extension ${d.ratioExtension} %`}
       </div>
+      {ratioTexte(d) && <div style={{ fontSize: '8pt', color: '#666', marginTop: '1mm' }}>{ratioTexte(d)}</div>}
     </div>
   </Section>
 );

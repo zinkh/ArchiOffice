@@ -46,6 +46,7 @@ import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils'
 import { useMafCost } from '../hooks/useMafCost';
 import { useSettings } from '../hooks/useSettings';
 import { MafCostBadge } from '../components/MafCostBadge';
+import { RATIOS_INDICATIFS, RATIO_MANUEL, ratioCorrespondant, ratiosPour, type RatioKind } from '../lib/ratiosIndicatifs';
 import { operationNature, surfaceExistante, surfaceRehabilitee, coutTravauxParRatios, surfacesApresSaisieRehabilitation } from '../lib/proposalSurfaces';
 import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardModal';
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
@@ -257,6 +258,7 @@ export default function Proposals() {
     construction_cost: 0,
     ratio_rehab: 0,
     ratio_extension: 0,
+    ratio_comment: '',
     complexity_rate: 1,
     base_fee_percent: 0,
     vat_rate: 20,
@@ -1405,6 +1407,42 @@ export default function Proposals() {
                           value={newProposal.ratio_extension}
                           onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_extension: Number(v)}))}
                         />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {([
+                          ...(nature === 'rehabilitation' ? [{ kind: 'rehabilitation' as RatioKind, field: 'ratio_rehab' as const, label: 'Ratios indicatifs : réhabilitation' }] : []),
+                          { kind: (nature === 'neuf' ? 'neuf' : 'extension') as RatioKind, field: 'ratio_extension' as const, label: nature === 'neuf' ? 'Ratios indicatifs : construction neuve' : 'Ratios indicatifs : extension' },
+                        ]).map(({ kind, field, label }) => (
+                          <FormField
+                            key={field}
+                            label={label}
+                            type="select"
+                            options={[
+                              { id: RATIO_MANUEL, name: 'Saisie manuelle' },
+                              ...ratiosPour(kind).map(r => ({ id: r.id, name: `${r.label} : ${r.value.toLocaleString('fr-FR')} €/m²` })),
+                            ]}
+                            value={ratioCorrespondant(kind, newProposal[field])}
+                            onChange={(id: string) => {
+                              const preset = RATIOS_INDICATIFS.find(r => r.id === id);
+                              // « Saisie manuelle » ne touche pas à la valeur : on la corrige dans le champ au-dessus.
+                              if (!preset) return;
+                              setNewProposal(prev => ({
+                                ...prev,
+                                [field]: preset.value,
+                                // Le commentaire garde la main de la personne : on ne l'écrase que s'il est vide.
+                                ratio_comment: (prev.ratio_comment || '').trim() ? prev.ratio_comment : `Ratio indicatif : ${preset.label.toLowerCase()}.`,
+                              }));
+                            }}
+                          />
+                        ))}
+                        <div className="md:col-span-2">
+                          <FormField
+                            label="Commentaire sur les ratios (imprimé sous le montant des travaux)"
+                            type="textarea"
+                            value={newProposal.ratio_comment || ''}
+                            onChange={(v: string) => setNewProposal(prev => ({ ...prev, ratio_comment: v }))}
+                          />
+                        </div>
                       </div>
                       <div className="flex items-center gap-3 mt-1">
                         <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{t('prop_f_works_amount_computed')}</span>

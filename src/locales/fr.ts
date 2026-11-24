@@ -4767,6 +4767,7 @@ export default {
       "mail_compose_forward_title": "Transférer le message",
       "mail_compose_cc": "Cc",
       "mail_compose_add_contact": "Ajouter un contact…",
+      "mail_compose_discard_confirm": "Fermer sans envoyer ? Le message et ses pièces jointes seront perdus.",
       "mail_forward_attachments": "Joindre les pièces jointes d’origine (cochez celles à transférer)",
       "mail_forward_attachment_error": "Impossible de récupérer la pièce jointe « {{name}} » : le message n’a pas été envoyé.",
       "mail_task_button": "Tâche",
