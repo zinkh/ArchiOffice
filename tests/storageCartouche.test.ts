@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-// Cartouche « Stockage » de la barre latérale : ce que voit chaque profil.
+// Cartouche « Stockage » de la barre latérale : discret, il ne porte plus le détail par utilisateur (déplacé
+// dans l'onglet « Stockage » des paramètres, voir storageUsageCard.test.ts) mais y mène d'un clic.
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { StorageCartouche } from '../src/components/StorageCartouche';
+import { StorageCartouche, STORAGE_SETTINGS_PATH } from '../src/components/StorageCartouche';
 import { apiFetch } from '../src/lib/api';
 import type { StorageUsage } from '../src/lib/storageUsage';
 
@@ -37,7 +38,6 @@ const adminUsage: StorageUsage = {
 
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
-  try { localStorage.clear(); } catch { /* sans stockage */ }
   vi.mocked(apiFetch).mockReset();
   host = document.createElement('div');
   document.body.append(host);
@@ -57,10 +57,10 @@ async function show(usage: StorageUsage | Error, collapsed = false) {
   });
 }
 
-const detailsButton = () => host.querySelector('button[aria-expanded]') as HTMLButtonElement | null;
+const settingsLink = () => host.querySelector(`a[href="${STORAGE_SETTINGS_PATH}"]`) as HTMLAnchorElement | null;
 
 describe('StorageCartouche', () => {
-  it('affiche le total, le plafond et une jauge pour le cabinet', async () => {
+  it('affiche le total, le plafond et une jauge fine pour le cabinet', async () => {
     await show(adminUsage);
 
     expect(apiFetch).toHaveBeenCalledWith('/api/billing/storage');
@@ -69,41 +69,30 @@ describe('StorageCartouche', () => {
     expect(bar.getAttribute('aria-valuenow')).toBe('1');
   });
 
-  it('replie le détail par utilisateur par défaut, puis le déplie à la demande', async () => {
+  it('mène aux paramètres en cliquant sur « Stockage », avec le tooltip « Voir le détail par utilisateur »', async () => {
     await show(adminUsage);
-    expect(host.textContent).not.toContain('Samir Benali');
 
-    await act(async () => { detailsButton()!.click(); });
-
-    expect(detailsButton()!.getAttribute('aria-expanded')).toBe('true');
-    expect(host.textContent).toContain('Camille Durand (storage_cartouche_you)');
-    expect(host.textContent).toContain('Samir Benali');
-    expect(host.textContent).toContain('60 Mo');
-    expect(host.textContent).toContain('storage_cartouche_unattributed');
-    expect(host.textContent).toContain('25 Mo');
+    const link = settingsLink()!;
+    expect(link).not.toBeNull();
+    expect(link.getAttribute('href')).toBe('/settings?tab=stockage');
+    expect(link.getAttribute('title')).toBe('storage_cartouche_details_show');
+    expect(link.textContent).toContain('storage_cartouche_title');
   });
 
-  it('retient le choix de dépliage entre deux affichages', async () => {
+  it('ne porte plus de détail par utilisateur ni de bouton de dépliage, quel que soit le profil', async () => {
     await show(adminUsage);
-    await act(async () => { detailsButton()!.click(); });
+    expect(host.textContent).not.toContain('Samir Benali');
+    expect(host.textContent).not.toContain('storage_cartouche_unattributed');
+    expect(host.querySelector('button[aria-expanded]')).toBeNull();
     await act(async () => root.unmount());
     root = createRoot(host);
 
-    await show(adminUsage);
-
-    expect(host.textContent).toContain('Samir Benali');
-  });
-
-  it('ne montre à un collaborateur que sa propre ligne, sans bouton de détail', async () => {
     await show({
       ...adminUsage,
       breakdown: { scope: 'self', users: [{ name: 'Léa Martin', bytes: 8 * MB, files: 2, is_me: true }], unattributed_bytes: null },
     });
-
-    expect(host.textContent).toContain('storage_cartouche_mine');
-    expect(host.textContent).toContain('8 Mo');
-    expect(detailsButton()).toBeNull();
-    expect(host.textContent).not.toContain('Samir');
+    expect(host.textContent).not.toContain('storage_cartouche_mine');
+    expect(host.querySelector('button[aria-expanded]')).toBeNull();
   });
 
   it('propose toujours de changer de forfait, près du plafond comme loin de celui-ci', async () => {
@@ -124,18 +113,12 @@ describe('StorageCartouche', () => {
     expect(host.querySelector('a[href="/billing"]')).not.toBeNull();
   });
 
-  it('garde le total quand la répartition par auteur n\'est pas disponible', async () => {
-    await show({ ...adminUsage, breakdown: null });
-
-    expect(host.textContent).toContain('storage_cartouche_of');
-    expect(detailsButton()).toBeNull();
-  });
-
-  it('se réduit à une icône avec une étiquette accessible quand la barre est repliée', async () => {
+  it('se réduit à une icône vers les paramètres, avec étiquette accessible et tooltip, quand la barre est repliée', async () => {
     await show(adminUsage, true);
 
-    const link = host.querySelector('a[href="/billing"]')!;
+    const link = settingsLink()!;
     expect(link.getAttribute('aria-label')).toContain('storage_cartouche_aria');
+    expect(link.getAttribute('title')).toContain('storage_cartouche_details_show');
     expect(host.querySelector('[role=progressbar]')).toBeNull();
     expect(host.textContent).not.toContain('Samir Benali');
   });

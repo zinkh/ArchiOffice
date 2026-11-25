@@ -73,6 +73,7 @@ import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivity
 import { registerTenderAiRoutes } from "./server/routes/tenderAi";
 import { registerTenderRssAiRoutes } from "./server/routes/tenderRssAi";
 import { registerConsultationDepotRoutes } from "./server/routes/consultationDepots";
+import { registerOffresRecuesRoutes } from "./server/routes/offresRecues";
 import { registerConsultationDepotPublicRoutes } from "./server/routes/consultationDepotPublic";
 import { registerProposalFeasibilityRoutes } from "./server/routes/proposalFeasibility";
 import { registerProposalFeasibilityAiRoutes } from "./server/routes/proposalFeasibilityAi";
@@ -90,6 +91,7 @@ import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
 import { registerSupportRoutes } from "./server/routes/support";
 import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntreprises";
 import { registerMarcheSousTraitantsRoutes } from "./server/routes/marcheSousTraitants";
+import { registerLotIntervenantsRoutes } from "./server/routes/lotIntervenants";
 import { registerTravauxModificatifsRoutes } from "./server/routes/travauxModificatifs";
 import { registerMarchesSubsequentsRoutes } from "./server/routes/marchesSubsequents";
 import { registerAccordCadreConsultationsRoutes } from "./server/routes/accordCadreConsultations";
@@ -1219,6 +1221,7 @@ export async function createApp() {
   // Espace de dépôt des offres (ACT) : réglages et traitement côté cabinet, puis
   // portail public par jeton (préfixe /api/public, exempté de l'authentification).
   registerConsultationDepotRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan });
+  registerOffresRecuesRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan });
   registerConsultationDepotPublicRoutes(app, { supabaseAdmin, getTenantPlan });
   registerProposalFeasibilityRoutes(app, { supabaseAdmin, getTenantId, loadSiteData: loadFeasibilitySiteData });
   registerProposalFeasibilityAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents, loadSiteData: loadFeasibilitySiteData });
@@ -1235,6 +1238,7 @@ export async function createApp() {
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerMarcheSousTraitantsRoutes(app, { supabaseAdmin, getTenantId });
+  registerLotIntervenantsRoutes(app, { supabaseAdmin, getTenantId });
   registerTravauxModificatifsRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMarchesSubsequentsRoutes(app, { supabaseAdmin, getTenantId });
   registerAccordCadreConsultationsRoutes(app, { supabaseAdmin, getTenantId });

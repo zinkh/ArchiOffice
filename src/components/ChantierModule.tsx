@@ -6,7 +6,7 @@ import { Toast } from './ui/Toast';
 import { PillTabs } from './ui/PillTabs';
 import { BottomSheet, SheetOption } from './ui/BottomSheet';
 import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
-import { buildDiffusionRecipients } from '../lib/crDiffusion';
+import { buildDiffusionRecipients, type LotIntervenantInput } from '../lib/crDiffusion';
 import { apiFetch, baseFetchJson, SERVER_UNAVAILABLE_CODE } from '../lib/api';
 import { checkAttachment, MAX_ATTACHMENTS } from '../lib/pdfAttachments';
 import { getAccessToken } from '../lib/authToken';
@@ -18,6 +18,7 @@ import {
   IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX, IconChartBar, IconPencil,
 } from '@tabler/icons-react';
 import PlanningChantierTab from './chantier/PlanningChantierTab';
+import EntreprisesTab from './chantier/EntreprisesTab';
 import { Project, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
 import ObservationsTable from './ObservationsTable';
 import { SignedImage } from './SignedImage';
@@ -451,6 +452,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   }, [allObservations, reportObservations]);
   const previousOpenByLot = useMemo(() => groupObservationsByLot(previousOpenObservations, lots_list), [previousOpenObservations, lots_list]);
 
+  // Intervenants des entreprises (onglet Entreprises) : relus à chaque ouverture de la fenêtre, pour
+  // ne jamais proposer une personne retirée ou une adresse corrigée depuis.
+  const [lotIntervenants, setLotIntervenants] = useState<LotIntervenantInput[]>([]);
+
   const diffusionRecipients = useMemo(
     () => buildDiffusionRecipients({
       lots: lots_list,
@@ -458,11 +463,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       contacts,
       observations: reportObservations,
       previousObservations: includePrevious ? previousOpenObservations : [],
+      intervenants: lotIntervenants,
     }),
-    [lots_list, project.stakeholders_list, contacts, reportObservations, includePrevious, previousOpenObservations],
+    [lots_list, project.stakeholders_list, contacts, reportObservations, includePrevious, previousOpenObservations, lotIntervenants],
   );
 
-  const openDiffusion = () => {
+  const openDiffusion = async () => {
     if (!selectedReport) return;
     if (!navigator.onLine) { showToast('La diffusion nécessite une connexion : reconnectez-vous puis réessayez.', 'error'); return; }
     // Une saisie encore en attente de synchronisation n'est pas sur le serveur : le message partirait sans elle.
@@ -472,6 +478,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     }
     setDiffusionResult(null);
     setDiffusionError(null);
+    // Lecture avant l'ouverture : la fenêtre coche tous les destinataires à l'ouverture, une liste qui arrive
+    // après réinitialiserait la sélection de la personne. Table absente ou lecture en échec : liste vide.
+    const lus = await apiFetch<LotIntervenantInput[]>(`/api/projects/${project.id}/lot-intervenants`).catch(() => []);
+    setLotIntervenants(Array.isArray(lus) ? lus : []);
     setDiffusionOpen(true);
   };
 
@@ -1921,94 +1931,6 @@ function MiniStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg bg-[var(--tblr-surface-2)] p-2.5 text-center">
       <p className="text-lg font-bold text-[var(--tblr-text)]">{value}</p>
       <p className="text-[0.6875rem] uppercase tracking-wider text-[var(--tblr-muted)]">{label}</p>
-    </div>
-  );
-}
-
-interface MarcheLu { id: string; lot_numero?: string | null; act_lot_id?: string | null; entreprise_nom?: string | null; type_marche?: string | null; statut?: string | null }
-interface SousTraitantLu { id: string; marche_id: string; nom: string; objet?: string | null }
-
-const normaliserNumeroLot = (v: unknown) => String(v ?? '').trim().toUpperCase().replace(/^0+(?=\d)/, '');
-
-/**
- * Entreprise de chaque lot : la fiche du lot, à défaut l'attribution de l'ACT,
- * à défaut le marché de travaux du lot. Les sous-traitants viennent des marchés (onglet RDT).
- */
-function EntreprisesTab({ projectId, lots_list, observations }: { projectId: string; lots_list: ProjectLot[]; observations: Observation[] }) {
-  const [marches, setMarches] = useState<MarcheLu[]>([]);
-  const [sousTraitants, setSousTraitants] = useState<SousTraitantLu[]>([]);
-  const [attributions, setAttributions] = useState<{ lot_id: string; entreprise_id: string }[]>([]);
-  const [entreprisesAct, setEntreprisesAct] = useState<{ id: string; nom?: string }[]>([]);
-
-  useEffect(() => {
-    let vivant = true;
-    Promise.all([
-      apiFetch<MarcheLu[]>(`/api/marches-entreprises/${projectId}`).catch(() => []),
-      apiFetch<SousTraitantLu[]>(`/api/projects/${projectId}/sous-traitants`).catch(() => []),
-      apiFetch<any>(`/api/projects/${projectId}/act`).catch(() => null),
-    ]).then(([m, st, act]) => {
-      if (!vivant) return;
-      setMarches(Array.isArray(m) ? m : []);
-      setSousTraitants(Array.isArray(st) ? st : []);
-      setAttributions(Array.isArray(act?.consultation?.attributions) ? act.consultation.attributions : []);
-      setEntreprisesAct(Array.isArray(act?.consultation?.entreprises) ? act.consultation.entreprises : []);
-    });
-    return () => { vivant = false; };
-  }, [projectId]);
-
-  const marchesExecutables = marches.filter(m => m.type_marche !== 'accord_cadre' && m.statut !== 'resilie');
-
-  return (
-    <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-      <div className="overflow-x-auto">
-      <table className="min-w-full text-sm">
-        <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
-          <tr>
-            <th className="px-4 py-3 text-left">Lot</th>
-            <th className="px-4 py-3 text-left">Entreprise</th>
-            <th className="px-4 py-3 text-left">Sous-traitants</th>
-            <th className="px-4 py-3 text-center">Observations (total)</th>
-            <th className="px-4 py-3 text-center">À lever (ouvertes)</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--tblr-border)]">
-          {lots_list.map(lot => {
-            const lotObs = observations.filter(o => o.lot_id === lot.id);
-            const openReserves = lotObs.filter(o => o.type === 'reserve' && o.statut !== 'Levée').length;
-            const marchesLot = marchesExecutables.filter(m =>
-              m.act_lot_id === lot.id
-              || (!m.act_lot_id && normaliserNumeroLot(m.lot_numero) !== '' && normaliserNumeroLot(m.lot_numero) === normaliserNumeroLot(lot.lot_number)));
-            const attribution = attributions.find(a => a.lot_id === lot.id);
-            const nomAct = attribution ? entreprisesAct.find(e => e.id === attribution.entreprise_id)?.nom : undefined;
-            const entreprises = [...new Set([
-              lot.contact_name || nomAct || '',
-              ...marchesLot.map(m => m.entreprise_nom || ''),
-            ].map(n => n.trim()).filter(Boolean))];
-            const st = sousTraitants.filter(x => marchesLot.some(m => m.id === x.marche_id));
-            return (
-              <tr key={lot.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors align-top">
-                <td className="px-4 py-3 font-semibold text-[var(--tblr-text)]">{lot.lot_number} — {lot.lot_title}</td>
-                <td className="px-4 py-3 text-[var(--tblr-text)]">
-                  {entreprises.length > 0 ? entreprises.map(n => <div key={n}>{n}</div>) : <span className="text-[var(--tblr-muted)]">—</span>}
-                </td>
-                <td className="px-4 py-3 text-[var(--tblr-muted)]">
-                  {st.length > 0
-                    ? st.map(x => <div key={x.id}>{x.nom}{x.objet ? <span className="text-[0.6875rem]"> · {x.objet}</span> : null}</div>)
-                    : '—'}
-                </td>
-                <td className="px-4 py-3 text-center">{lotObs.length}</td>
-                <td className="px-4 py-3 text-center">
-                  {openReserves > 0 ? <span className="text-red-600 dark:text-red-400 font-bold">{openReserves}</span> : '—'}
-                </td>
-              </tr>
-            );
-          })}
-          {lots_list.length === 0 && (
-            <tr><td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun lot renseigné pour ce projet.</td></tr>
-          )}
-        </tbody>
-      </table>
-      </div>
     </div>
   );
 }

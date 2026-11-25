@@ -135,7 +135,7 @@ export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipient
             </div>
           ) : recipients.length === 0 ? (
             <p className="text-sm text-[var(--tblr-muted)]">
-              Aucun destinataire : associez une fiche contact aux lots et aux intervenants de l'opération pour pouvoir diffuser le compte-rendu.
+              Aucun destinataire : associez une fiche contact aux lots et aux intervenants de l'opération, ou saisissez des intervenants avec leur e-mail dans l'onglet Entreprises, pour pouvoir diffuser le compte-rendu.
             </p>
           ) : (
             <>
@@ -173,7 +173,7 @@ export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipient
                         <span className="block text-sm font-semibold text-[var(--tblr-text)] truncate">{r.name}</span>
                         <span className="block text-xs text-[var(--tblr-muted)]">{r.roles.join(' · ')}</span>
                         <span className="block text-xs text-[var(--tblr-muted)]">
-                          {r.email || "Pas d'adresse e-mail sur la fiche contact : ne recevra rien"}
+                          {r.email || "Pas d'adresse e-mail (fiche contact ou intervenant) : ne recevra rien"}
                         </span>
                       </span>
                       <span className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
