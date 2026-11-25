@@ -25,6 +25,8 @@ export interface PendingWrite {
   status: 'pending' | 'error';
   attempts: number;
   lastError?: string;
+  /** Pas de nouvel essai avant cet instant (reprise espacée après un échec transitoire). */
+  nextAttemptAt?: number;
   createdAt: number;
 }
 
