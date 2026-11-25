@@ -14,6 +14,8 @@ import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
 import { useDictation } from './useDictation.js';
 import { useSpeech } from './useSpeech.js';
 import { ChatMarkdown } from './ChatMarkdown.js';
+import { isYesNoQuestion } from './confirmationQuestion.js';
+import { QuickReplyButtons } from './QuickReplyButtons.js';
 import { markdownToPlainText } from './chatMarkdownParser.js';
 import type { Speech } from './useSpeech.js';
 import type { CopilotSuggestion, CopilotSuggestionRaw } from '@/src/lib/copilotSuggestions';
@@ -721,15 +723,17 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     speech.stop();
   }, [speech]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || !activeAgentId || loading || loadingHistory || resetBusy) return;
+  const sendMessage = async (quickReply?: string) => {
+    const fromQuickReply = typeof quickReply === 'string';
+    const text = fromQuickReply ? quickReply : input;
+    if (!text.trim() || !activeAgentId || loading || loadingHistory || resetBusy) return;
     // Le micro ne reste pas ouvert par-dessus un envoi : la suite de la
     // dictée arriverait dans une zone que l'on vient de vider. Une lecture en
     // cours n'a pas non plus sa place pendant qu'une nouvelle réponse arrive.
     if (dictation.status !== 'idle') dictation.stop();
     speech.stop();
     const agentId = activeAgentId;
-    const rawInput = input.trim();
+    const rawInput = text.trim();
     const userMsg: AgentMessage = {
       id: crypto.randomUUID(),
       conversation_id: '',
@@ -739,7 +743,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       created_at: new Date().toISOString(),
     };
     setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    if (!fromQuickReply) setInput('');
     const docsToSend = [...attachedDocs];
     setAttachedDocs([]);
     setLoading(true);
@@ -806,9 +810,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       // reset, not lost: put the message and its attachments back so the
       // user can just hit send again instead of retyping everything.
       setMessages(prev => prev.filter(m => m.id !== userMsg.id));
-      setInput(rawInput);
+      if (!fromQuickReply) {
+        setInput(rawInput);
+        saveDraft(agentId, rawInput);
+      }
       setAttachedDocs(docsToSend);
-      saveDraft(agentId, rawInput);
     } finally {
       clearTimeout(hardTimeout);
       abortControllerRef.current = null;
@@ -1201,6 +1207,9 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   <ConsultedAgentLinks agents={msg.consulted} onOpen={switchAgent} disabled={loading || resetBusy} />
                 </React.Fragment>
               ))}
+              {!loading && !loadingHistory && !resetBusy && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && isYesNoQuestion(messages[messages.length - 1].content) && (
+                <QuickReplyButtons onReply={sendMessage} />
+              )}
               {loading && <ChatRequestStatus onStop={cancelRequest} />}
               {errorMsg === 'enterprise' && (
                 <div className="mx-2 p-3 rounded-lg border text-[12px]" style={{ background: '#fff4e6', borderColor: '#ffd8a8', color: '#f76707' }}>
@@ -1324,7 +1333,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   disabled={loading || resetBusy}
                 />
                 <button
-                  onClick={sendMessage}
+                  onClick={() => sendMessage()}
                   disabled={!input.trim() || loading || loadingHistory || resetBusy}
                   className="w-11 h-11 shrink-0 rounded-lg transition-colors flex items-center justify-center"
                   style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading || loadingHistory || resetBusy ? 0.5 : 1 }}

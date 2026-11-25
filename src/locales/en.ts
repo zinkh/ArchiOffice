@@ -3101,6 +3101,8 @@ export default {
       "agent_chat_thinking_long": "This is taking longer than usual. The agent may be preparing a long reply.",
       "agent_chat_timeout": "The service is taking too long to respond. Please try again.",
       "agent_chat_cancel": "Cancel",
+      "agent_chat_quick_yes": "Yes",
+      "agent_chat_quick_no": "No",
       "agent_chat_cancelled": "You stopped waiting. An action already started may continue on the server. Check the history before sending your request again.",
       "agent_chat_drop_hint": "Drop a document here to attach it",
       "agent_chat_uploading": "Uploading {{name}}…",

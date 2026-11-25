@@ -3165,6 +3165,8 @@ export default {
       "agent_chat_thinking_long": "Cela prend plus de temps que d'habitude. L'agent traite peut-être une réponse longue.",
       "agent_chat_timeout": "Le service met trop de temps à répondre. Veuillez réessayer.",
       "agent_chat_cancel": "Annuler",
+      "agent_chat_quick_yes": "Oui",
+      "agent_chat_quick_no": "Non",
       "agent_chat_cancelled": "L’attente a été interrompue. Une action déjà engagée peut continuer côté serveur. Vérifiez l’historique avant de renvoyer votre demande.",
       "agent_chat_drop_hint": "Déposez un document ici pour le joindre",
       "agent_chat_uploading": "Envoi de {{name}}…",
