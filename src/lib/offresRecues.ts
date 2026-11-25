@@ -7,6 +7,12 @@ import JSZip from 'jszip';
 export const EXTENSIONS_PIECES = ['pdf', 'docx', 'xlsx', 'xls', 'ods', 'odt', 'csv'] as const;
 export const EXTENSIONS_TABLEURS = ['xlsx', 'xls', 'ods', 'csv'] as const;
 
+/** Catégorie des documents de l'affaire créés par ce dépôt ; la route de lecture des montants n'accepte que celle-là. */
+export const CATEGORIE_OFFRES_RECUES = 'Consultation - offres reçues';
+
+/** Formats dont le texte se lit côté serveur (PDF, Word, Excel, ODS, ODT) : les seuls pour « Lire les montants ». */
+export const EXTENSIONS_LISIBLES = ['pdf', 'docx', 'xlsx', 'ods', 'odt'] as const;
+
 export const TAILLE_MAX_PIECE = 50 * 1024 * 1024;
 export const TAILLE_MAX_ARCHIVE = 200 * 1024 * 1024;
 /** Taille totale décompressée : borne les archives piégées (zip bomb). */
@@ -50,6 +56,7 @@ export const extensionDe = (nom: string): string => {
 
 export const estTableur = (nom: string): boolean => (EXTENSIONS_TABLEURS as readonly string[]).includes(extensionDe(nom));
 export const estArchive = (nom: string): boolean => extensionDe(nom) === 'zip';
+export const estLisible = (nom: string): boolean => (EXTENSIONS_LISIBLES as readonly string[]).includes(extensionDe(nom));
 const estPiece = (nom: string): boolean => (EXTENSIONS_PIECES as readonly string[]).includes(extensionDe(nom));
 
 /** Chemin d'une entrée d'archive jugé sûr : ni remontée (`..`), ni chemin absolu ni lecteur. */

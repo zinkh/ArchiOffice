@@ -198,8 +198,20 @@ La fenêtre « Importer une offre » (`OffreImportDialog`, appelée depuis l'ACT
   (jsonb, `OffreFichierRecu`, **aucune migration**, aucune lecture du contenu). Les pièces non envoyées sont rendues à la
   fenêtre, qui ne garde qu'elles : un nouvel essai ne crée pas de doublon. Panneau `act/OffresHorsPlateformePanel.tsx`
   sous les dépôts du portail : ouvrir, marquer comme traité, retirer (le document reste dans l'affaire).
-- **Pas encore fait** : « Lire les montants » sur ces pièces (la lecture est côté serveur, liée à `consultation_depots`),
-  choix du lot par pièce (elles reprennent les lots de l'entreprise), interface non vérifiée dans un navigateur réel.
+- **Lire les montants (plan Pro et supérieurs)** : `POST /api/projects/:projectId/offres-recues/:documentId/analyser`
+  (`server/routes/offresRecues.ts`, `tests/offresRecuesAnalyse.test.ts`). Même lecture que les remises du portail
+  (`analyserFichier`, `server/consultationDepot/analyse.ts` : texte puis règles, sans modèle ni coût ni OCR), mais **le
+  portail exige Enterprise, cette lecture s'ouvre dès le plan Pro** (`isPlanAtLeast(plan, 'pro')`, 403 `plan_requis`
+  sinon, essai expiré compris) et n'a besoin d'aucun lien ni drive externe. La route ne lit que les documents de CETTE
+  affaire et de CE cabinet de catégorie `CATEGORIE_OFFRES_RECUES` (404 sinon), seulement PDF, Word, Excel, ODS, ODT
+  (`estLisible`, 400 sinon), relit les octets (`verifierOctets` : macros, actions PDF à l'ouverture) avant de lire, et
+  rend 404 si le fichier a disparu du drive. Les octets viennent du drive du cabinet (`parseExternalRef`) ou de
+  Supabase Storage (`readStorageObject`). Écran : bouton « Lire les montants » du panneau, même dialogue que le portail
+  (`AnalyseMontantsDialog`, prop `urlAnalyse`) ; « Utiliser comme offre de base » pose le montant sur le lot choisi
+  (`appliquerSaisie`) et marque la pièce traitée, seulement si l'entreprise figure dans la consultation. Une SUGGESTION,
+  jamais appliquée seule.
+- **Pas encore fait** : choix du lot par pièce (elles reprennent les lots de l'entreprise), interface non vérifiée dans
+  un navigateur réel.
 
 ### Postes ajoutés par une entreprise et import dans un document vierge
 

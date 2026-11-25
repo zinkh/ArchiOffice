@@ -3,25 +3,31 @@
 // portail, mais ces pièces ne passent par aucun lien personnel : elles sont rangées dans les documents de
 // l'affaire et simplement référencées dans la consultation (`offres_recues_fichiers`, jsonb).
 import { useState } from 'react';
-import { IconCheck, IconDownload, IconFileText, IconInbox, IconTrash } from '@tabler/icons-react';
+import { IconCheck, IconDownload, IconFileText, IconInbox, IconSparkles, IconTrash } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import { openSignedUrl } from '../../lib/signedStorageUrl';
-import { formatOctets, type OffreFichierRecu } from '../../lib/offresRecues';
+import { estLisible, formatOctets, marquerOffreRecue, type OffreFichierRecu } from '../../lib/offresRecues';
+import { appliquerSaisie, type ConsultationApplicable } from '../../lib/consultationDepotApply';
 import { formaterDate } from '../../lib/depotAffichage';
 import { useConfirmDialog } from '../ui/ConfirmDialog';
-import { libelleLot, type LotLibelle } from './DepotIntegration';
+import { AnalyseMontantsDialog, libelleLot, type LotLibelle } from './DepotIntegration';
 
 interface Props {
+  projectId: string;
   offres: OffreFichierRecu[];
   lots: LotLibelle[];
+  /** Consultation courante : la lecture des montants y pose l'offre de base du lot choisi. */
+  consultation: ConsultationApplicable;
+  onChangeConsultation: (next: any) => void;
   onMarquer: (id: string, statut: OffreFichierRecu['statut']) => void;
   onRetirer: (id: string) => void;
 }
 
 const BOUTON = 'inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.6875rem] font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50';
 
-export default function OffresHorsPlateformePanel({ offres, lots, onMarquer, onRetirer }: Props) {
+export default function OffresHorsPlateformePanel({ projectId, offres, lots, consultation, onChangeConsultation, onMarquer, onRetirer }: Props) {
   const [erreur, setErreur] = useState<string | null>(null);
+  const [analyse, setAnalyse] = useState<OffreFichierRecu | null>(null);
   const { confirm, dialog } = useConfirmDialog();
   if (offres.length === 0) return null;
 
@@ -89,6 +95,9 @@ export default function OffresHorsPlateformePanel({ offres, lots, onMarquer, onR
                   </p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <button type="button" className={BOUTON} onClick={() => void ouvrir(o)}><IconDownload size={12} /> Ouvrir</button>
+                    {estLisible(o.nom) && (
+                      <button type="button" className={BOUTON} onClick={() => setAnalyse(o)}><IconSparkles size={12} /> Lire les montants</button>
+                    )}
                     {o.statut === 'recu'
                       ? <button type="button" className={BOUTON} onClick={() => onMarquer(o.id, 'traite')}><IconCheck size={12} /> Marquer comme traité</button>
                       : <button type="button" className={BOUTON} onClick={() => onMarquer(o.id, 'recu')}>Remettre à traiter</button>}
@@ -100,6 +109,29 @@ export default function OffresHorsPlateformePanel({ offres, lots, onMarquer, onR
           </div>
         ))}
       </div>
+      {analyse && (
+        <AnalyseMontantsDialog
+          depot={{ id: analyse.id, file_name: analyse.chemin || analyse.nom, lot_id: analyse.lots_ids[0] ?? null }}
+          urlAnalyse={`/api/projects/${projectId}/offres-recues/${analyse.document_id}/analyser`}
+          lots={lots} lotsOuverts={analyse.lots_ids}
+          onClose={() => setAnalyse(null)}
+          onUtiliser={async (montant, lotId) => {
+            const o = analyse;
+            if (!o.entreprise_id || !consultation.entreprises.some(e => e.id === o.entreprise_id)) {
+              setErreur("Cette entreprise ne figure pas dans la consultation : ajoutez-la d'abord au tableau « Entreprises consultées ».");
+              setAnalyse(null);
+              return;
+            }
+            // Une suggestion confirmée d'un clic : même effet que « Utiliser comme offre de base » d'une remise du portail.
+            const suivante = appliquerSaisie(consultation, {
+              id: o.id, entreprise_id: o.entreprise_id, lot_id: lotId, received_at: o.recu_le,
+              payload: { montant_base: montant, lignes: [] },
+            }, { genererId: () => crypto.randomUUID() });
+            onChangeConsultation(marquerOffreRecue(suivante as any, o.id, 'traite'));
+            setAnalyse(null);
+          }}
+        />
+      )}
       {dialog}
     </section>
   );

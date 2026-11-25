@@ -52,7 +52,7 @@ import DepotsRecusPanel from './act/DepotsRecusPanel';
 import OffresHorsPlateformePanel from './act/OffresHorsPlateformePanel';
 import { getAccessToken } from '../lib/authToken';
 import {
-  ajouterOffresRecues, marquerOffreRecue, offresRecues, retirerOffreRecue, type OffreFichierRecu, type PieceRecue,
+  ajouterOffresRecues, CATEGORIE_OFFRES_RECUES, marquerOffreRecue, offresRecues, retirerOffreRecue, type OffreFichierRecu, type PieceRecue,
 } from '../lib/offresRecues';
 import type { ContexteDocumentsRecus } from './pro/OffreImportDialog';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
@@ -955,7 +955,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
         form.append('file', p.file);
         form.append('project_id', projectId);
         form.append('name', `${ctx.entrepriseNom} - ${p.file.name}`);
-        form.append('category', 'Consultation - offres reçues');
+        form.append('category', CATEGORIE_OFFRES_RECUES);
         form.append('phase', 'ACT');
         form.append('description', `Offre remise hors plateforme par ${ctx.entrepriseNom}${p.archive ? ` (archive ${p.archive}, ${p.chemin})` : ''}`);
         form.append('uploaded_by', 'ACT');
@@ -1641,8 +1641,11 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
             onOpenSettings={() => setReglagesDepotOuverts(true)}
           />
           <OffresHorsPlateformePanel
+            projectId={projectId}
             offres={offresRecues(consultation)}
             lots={lots}
+            consultation={consultation as any}
+            onChangeConsultation={next => update(next as Consultation)}
             onMarquer={(id, statut) => update(marquerOffreRecue(consultation, id, statut))}
             onRetirer={id => update(retirerOffreRecue(consultation, id))}
           />

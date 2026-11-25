@@ -16,7 +16,8 @@ import {
   IconShieldLock, IconUserCircle
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
-import { IconLanguage } from '@tabler/icons-react';
+import { IconLanguage, IconDatabase } from '@tabler/icons-react';
+import { StorageUsageCard } from '../components/StorageUsageCard';
 import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
 import { checkCloudLinkStatus, upgradeToCloud, retryImport, reconnectCloud } from '../lib/cloudSync';
@@ -1305,6 +1306,8 @@ export default function Settings() {
     { key: 'notifications', label: 'Notifications', icon: IconBell, adminOnly: true },
     { key: 'integrations', label: 'Intégrations', icon: IconPuzzle, adminOnly: true },
     { key: 'donnees', label: 'Données et RGPD', icon: IconShieldLock, adminOnly: true },
+    // Visible de tous : un collaborateur y voit sa propre part, l'équipe entière n'est rendue qu'aux administrateurs.
+    { key: 'stockage', label: 'Stockage', icon: IconDatabase, adminOnly: false },
     { key: 'profil', label: 'Mon profil', icon: IconUserCircle, adminOnly: false },
   ] as const;
   const visibleTabs = SETTINGS_TABS.filter(tab => isAdmin || !tab.adminOnly);
@@ -1312,6 +1315,12 @@ export default function Settings() {
   useEffect(() => {
     if (!visibleTabs.some(tab => tab.key === activeTab)) setActiveTab('profil');
   }, [isAdmin]);
+  // Un lien vers `?tab=…` (le cartouche « Stockage » de la barre latérale) doit aussi fonctionner quand la page
+  // des paramètres est déjà ouverte : l'état initial ne lit l'adresse qu'au premier affichage.
+  useEffect(() => {
+    const wanted = new URLSearchParams(location.search).get('tab');
+    if (wanted && SETTINGS_TABS.some(tab => tab.key === wanted && (isAdmin || !tab.adminOnly))) setActiveTab(wanted);
+  }, [location.search]);
 
   // ── Marketplace helpers ────────────────────────────────────────────────────
 
@@ -3477,6 +3486,8 @@ export default function Settings() {
           </div>
         </>
       )}
+
+      {activeTab === 'stockage' && <StorageUsageCard />}
 
       {/* ── User section ── */}
       {activeTab === 'profil' && <DriveAccessPanel key={currentUser?.tenantId} />}

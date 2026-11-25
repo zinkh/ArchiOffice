@@ -23,10 +23,9 @@ import { parseExternalRef } from '../externalStorage/externalRef';
 import { getConnectionById } from '../externalStorage/externalConnection';
 import { signExternalTicket } from '../externalStorage/externalTicket';
 import { createProvider } from '../externalStorage/providerFactory';
-import { lireTexteDepot } from '../consultationDepot/analyse';
+import { analyserFichier } from '../consultationDepot/analyse';
 import { aiGenerationLimiter } from '../rateLimit';
 import { MAX_FICHIER_OCTETS } from '../../src/lib/consultationDepot';
-import { extraireMontants } from '../../src/lib/depotMontants';
 import { isValidEmail } from '../../src/lib/crDiffusion';
 import { expirationLien, plisScelles, type ReglagesDepot } from '../../src/lib/consultationDepot';
 
@@ -458,14 +457,7 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
         if (total > MAX_FICHIER_OCTETS + 1024) return res.status(413).json({ error: 'Fichier trop volumineux pour être lu.' });
         morceaux.push(b);
       }
-      const texte = await Promise.race([
-        lireTexteDepot(depot.file_name || '', Buffer.concat(morceaux)),
-        new Promise<never>((_, rejeter) => setTimeout(() => rejeter(new Error("La lecture du document a dépassé le délai imparti.")), 45_000)),
-      ]);
-      if (!texte) {
-        return res.json({ texte_lu: false, candidats: [], note: 'Aucun texte exploitable : le document est peut-être scanné. Ouvrez-le pour lire le montant.' });
-      }
-      res.json({ texte_lu: true, candidats: extraireMontants(texte), note: null });
+      res.json(await analyserFichier(depot.file_name || '', Buffer.concat(morceaux)));
     } catch (err: any) {
       console.error('[POST depots/:id/analyser]', err?.message);
       res.status(500).json({ error: err?.message?.includes('délai') ? err.message : "La lecture du document a échoué." });
