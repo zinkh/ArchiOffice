@@ -35,7 +35,16 @@ export function parseMsProject(root: any): ParsedPlanningXml {
     resourcesByTask.set(taskUid, list);
   }
 
-  const tasks = asArray(project?.Tasks?.Task)
+  const rawTasks = asArray(project?.Tasks?.Task);
+  // Hiérarchie : le groupe parent se retrouve par le plan (« 1.2.3 » a pour parent « 1.2 »).
+  const uidParPlan = new Map<string, string>();
+  for (const task of rawTasks) {
+    const plan = asText(task?.OutlineNumber).trim();
+    const uid = asText(task?.UID ?? task?.ID).trim();
+    if (plan && uid) uidParPlan.set(plan, uid);
+  }
+
+  const tasks = rawTasks
     .map((task: any): ImportedPlanningTask | null => {
       const id = asText(task?.UID ?? task?.ID).trim();
       const title = asText(task?.Name).trim();
@@ -44,6 +53,14 @@ export function parseMsProject(root: any): ParsedPlanningXml {
 
       const start = isoDay(task?.Start);
       const finish = isoDay(task?.Finish, start);
+      const links = asArray(task?.PredecessorLink).map((link: any) => ({
+        id: asText(link?.PredecessorUID).trim(),
+        // LinkLag est en dixièmes de minute, sur une journée de 8 h.
+        jours: Math.round(Number(link?.LinkLag) / (8 * 60 * 10)),
+      })).filter(link => link.id);
+      const plan = asText(task?.OutlineNumber).trim();
+      const parent = plan.includes('.') ? uidParPlan.get(plan.slice(0, plan.lastIndexOf('.'))) : undefined;
+      const lagDays = Object.fromEntries(links.filter(link => Number.isFinite(link.jours) && link.jours > 0).map(link => [link.id, link.jours]));
       return {
         sourceId: id,
         title,
@@ -51,11 +68,12 @@ export function parseMsProject(root: any): ParsedPlanningXml {
         start_date: start,
         end_date: finish,
         progress: clampProgress(task?.PercentComplete),
-        dependencies: asArray(task?.PredecessorLink)
-          .map((link: any) => asText(link?.PredecessorUID).trim())
-          .filter(Boolean),
+        dependencies: links.map(link => link.id),
         resourceNames: resourcesByTask.get(id) || [],
         milestone: asText(task?.Milestone) === '1',
+        ...(asText(task?.Summary) === '1' ? { summary: true } : {}),
+        ...(parent && parent !== id ? { parentSourceId: parent } : {}),
+        ...(Object.keys(lagDays).length ? { lagDays } : {}),
       };
     })
     .filter((task: ImportedPlanningTask | null): task is ImportedPlanningTask => !!task);

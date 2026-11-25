@@ -4,7 +4,7 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-875 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+876 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
@@ -560,9 +560,10 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/projects/:projectId/panneau-chantier` | [server/routes/panneaux.ts:89](../server/routes/panneaux.ts#L89) |
 | PUT | `/api/projects/:projectId/panneau-chantier` | [server/routes/panneaux.ts:118](../server/routes/panneaux.ts#L118) |
 | POST | `/api/projects/:projectId/panneau-chantier/pdf` | [server/routes/panneaux.ts:141](../server/routes/panneaux.ts#L141) |
-| GET | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:101](../server/routes/planningChantier.ts#L101) |
-| PUT | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:125](../server/routes/planningChantier.ts#L125) |
-| POST | `/api/projects/:projectId/planning-chantier/generate` | [server/routes/planningChantier.ts:186](../server/routes/planningChantier.ts#L186) |
+| GET | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:116](../server/routes/planningChantier.ts#L116) |
+| PUT | `/api/projects/:projectId/planning-chantier` | [server/routes/planningChantier.ts:140](../server/routes/planningChantier.ts#L140) |
+| POST | `/api/projects/:projectId/planning-chantier/generate` | [server/routes/planningChantier.ts:201](../server/routes/planningChantier.ts#L201) |
+| POST | `/api/projects/:projectId/planning-chantier/import-pdf` | [server/routes/planningChantier.ts:307](../server/routes/planningChantier.ts#L307) |
 | POST | `/api/projects/:projectId/pro/control/suggest` | [server/routes/cctpGeneration.ts:620](../server/routes/cctpGeneration.ts#L620) |
 | GET | `/api/projects/:projectId/reports` | [server/routes/siteReports.ts:25](../server/routes/siteReports.ts#L25) |
 | POST | `/api/projects/:projectId/reports` | [server/routes/siteReports.ts:48](../server/routes/siteReports.ts#L48) |

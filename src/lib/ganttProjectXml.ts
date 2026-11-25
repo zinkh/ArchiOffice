@@ -14,7 +14,9 @@ import {
   type ParsedPlanningXml,
 } from './projectPlanningXmlShared';
 
-function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Array<{ predecessor: string; successor: string }>) {
+type Edge = { predecessor: string; successor: string; lag: number };
+
+function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Edge[], parentId?: string) {
   for (const node of nodes) {
     const id = asText(node?.['@_id'] ?? node?.id).trim();
     const title = asText(node?.['@_name'] ?? node?.name).trim();
@@ -22,6 +24,7 @@ function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Array<{ 
 
     const start = isoDay(node?.['@_start'] ?? node?.start);
     const duration = Math.max(1, Number(node?.['@_duration'] ?? node?.duration ?? 1));
+    const children = asArray(node?.task);
     out.push({
       sourceId: id,
       title,
@@ -32,21 +35,24 @@ function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Array<{ 
       dependencies: [],
       resourceNames: [],
       milestone: asText(node?.['@_milestone'] ?? node?.['@_meeting']).toLowerCase() === 'true',
+      ...(children.length ? { summary: true } : {}),
+      ...(parentId ? { parentSourceId: parentId } : {}),
     });
 
     for (const dep of asArray(node?.depend)) {
       const successor = asText((dep as any)?.['@_id'] ?? (dep as any)?.id).trim();
-      if (successor) edges.push({ predecessor: id, successor });
+      const lag = Number((dep as any)?.['@_difference']);
+      if (successor) edges.push({ predecessor: id, successor, lag: Number.isFinite(lag) && lag > 0 ? Math.round(lag) : 0 });
     }
 
-    collectTasks(asArray(node?.task), out, edges);
+    collectTasks(children, out, edges, id);
   }
 }
 
 export function parseGanttProject(root: any): ParsedPlanningXml {
   const project = root.project;
   const tasks: ImportedPlanningTask[] = [];
-  const edges: Array<{ predecessor: string; successor: string }> = [];
+  const edges: Edge[] = [];
   collectTasks(asArray(project?.tasks?.task), tasks, edges);
 
   const byId = new Map(tasks.map(task => [task.sourceId, task]));
@@ -54,6 +60,7 @@ export function parseGanttProject(root: any): ParsedPlanningXml {
     const successor = byId.get(edge.successor);
     if (successor && !successor.dependencies.includes(edge.predecessor)) {
       successor.dependencies.push(edge.predecessor);
+      if (edge.lag > 0) successor.lagDays = { ...successor.lagDays, [edge.predecessor]: edge.lag };
     }
   }
 

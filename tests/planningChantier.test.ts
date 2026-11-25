@@ -3,7 +3,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 
-const { chat } = vi.hoisted(() => ({ chat: vi.fn() }));
+const { chat, lireTexteDepot } = vi.hoisted(() => ({ chat: vi.fn(), lireTexteDepot: vi.fn() }));
+
+// La lecture réelle d'un PDF (pdf.js) n'est pas l'objet de ces tests : on lui substitue un texte connu.
+vi.mock('../server/consultationDepot/analyse', async (orig) => ({ ...(await orig<any>()), lireTexteDepot }));
 
 vi.mock('@zinkh/archioffice-agents/server/llm', async (orig) => ({
   ...(await orig<any>()),
@@ -19,7 +22,8 @@ import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from 
 
 let app: Express;
 beforeAll(async () => { app = await getTestApp(); });
-beforeEach(() => chat.mockReset());
+const TEXTE_PLANNING = 'PLANNING GÉNÉRAL DES TRAVAUX. Lot 01 Gros œuvre : fondations du 02/03/26 au 20/03/26. Lot 02 Charpente : levage du 20/04/26 au 01/05/26. Réception le 25/09/26.';
+beforeEach(() => { chat.mockReset(); lireTexteDepot.mockReset(); lireTexteDepot.mockResolvedValue(TEXTE_PLANNING); });
 
 const reply = (text: string) => ({ text, toolCalls: [], usage: { inputTokens: 100, outputTokens: 50 } });
 
@@ -253,5 +257,107 @@ describe('génération par l’IA', () => {
     const { token } = makeUser(makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 5000 }), 'admin');
     expect((await generate(token, projectId, { date_debut: '2026-03-02' })).status).toBe(404);
     expect(chat).not.toHaveBeenCalled();
+  });
+});
+
+describe('import d’un planning en PDF', () => {
+  const PDF = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF');
+  const importer = (token: string, projectId: string, fichier: Buffer = PDF, nom = 'planning.pdf') =>
+    request(app).post(`/api/projects/${projectId}/planning-chantier/import-pdf`).set(authHeader(token)).attach('file', fichier, nom);
+
+  it('rend des tâches datées rattachées aux lots, sans rien enregistrer', async () => {
+    const { token, projectId, lot1, lot2 } = seed();
+    chat.mockResolvedValueOnce(reply(JSON.stringify({
+      taches: [
+        { ref: 'T1', lot_numero: '01', libelle: 'Fondations', debut: '2026-03-02', fin: '2026-03-20' },
+        { ref: 'T2', lot_numero: '02', libelle: 'Levage de la charpente', debut: '2026-04-20', fin: '2026-05-01', predecesseurs: ['T1'] },
+        { ref: 'T3', lot_numero: '99', libelle: 'Lot inventé', debut: '2026-05-04', fin: '2026-05-08' },
+        { ref: 'T4', lot_numero: 'general', libelle: 'Réception', debut: '2026-09-25', jalon: true },
+        { ref: 'T5', lot_numero: '01', libelle: 'Sans date lisible', debut: 'bientôt' },
+      ],
+      remarques: ['Dates sans année : 2026 retenu'],
+    })));
+    const res = await importer(token, projectId);
+    expect(res.status).toBe(200);
+    expect(res.body.format).toBe('pdf');
+    expect(res.body.taches.map((t: any) => t.libelle)).toEqual(['Fondations', 'Levage de la charpente', 'Lot inventé', 'Réception']);
+    expect(res.body.taches[0]).toMatchObject({ lotId: lot1, debut: '2026-03-02', fin: '2026-03-20', source: 'manuel' });
+    expect(res.body.taches[1]).toMatchObject({ lotId: lot2, dependencies: [res.body.taches[0].id] });
+    expect(res.body.taches[2].lotId).toBe('');
+    expect(res.body.taches[3]).toMatchObject({ jalon: true, debut: '2026-09-25', fin: '2026-09-25' });
+    expect(res.body.ecartees).toBe(1);
+    expect(res.body.avertissements[0]).toBe('Dates sans année : 2026 retenu');
+    expect(fakeSupabaseAdmin.getTable('project_chantier_planning').find(r => r.project_id === projectId)).toBeUndefined();
+  });
+
+  it('donne au modèle le texte du document et les lots de l’opération', async () => {
+    const { token, projectId } = seed();
+    chat.mockResolvedValueOnce(reply(JSON.stringify({ taches: [{ lot_numero: '01', libelle: 'Fondations', debut: '2026-03-02', fin: '2026-03-06' }] })));
+    expect((await importer(token, projectId)).status).toBe(200);
+    const { messages } = chat.mock.calls[0][0];
+    expect(messages[0].content).toContain('01 : Gros œuvre');
+    expect(messages[0].content).toContain('02 : Charpente');
+    expect(messages[0].content).toContain('fondations du 02/03/26');
+  });
+
+  it('décompte les crédits IA du cabinet', async () => {
+    const { tenantId, token, projectId } = seed();
+    chat.mockResolvedValueOnce(reply(JSON.stringify({ taches: [{ lot_numero: '01', libelle: 'Fondations', debut: '2026-03-02', fin: '2026-03-06' }] })));
+    await importer(token, projectId);
+    expect(fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)?.ai_credit_balance_eur_cents).toBeLessThan(5000);
+  });
+
+  it('refuse ce qui n’est pas un PDF, d’après les octets comme d’après le nom', async () => {
+    const { token, projectId } = seed();
+    const fauxPdf = await importer(token, projectId, Buffer.from('<?xml version="1.0"?><project/>'), 'planning.pdf');
+    expect(fauxPdf.status).toBe(400);
+    expect(fauxPdf.body.error).toContain('pas un PDF');
+    expect((await importer(token, projectId, PDF, 'planning.xml')).status).toBe(400);
+    expect((await request(app).post(`/api/projects/${projectId}/planning-chantier/import-pdf`).set(authHeader(token))).status).toBe(400);
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it('répond 422 pour un PDF sans texte (scan), sans appeler le modèle ni toucher aux crédits', async () => {
+    const { tenantId, token, projectId } = seed();
+    lireTexteDepot.mockResolvedValueOnce(null);
+    const res = await importer(token, projectId);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain('texte lisible');
+    // Une lecture qui échoue (PDF protégé ou corrompu) a la même réponse.
+    lireTexteDepot.mockRejectedValueOnce(new Error('bad XRef entry'));
+    expect((await importer(token, projectId)).status).toBe(422);
+    expect(chat).not.toHaveBeenCalled();
+    expect(fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)?.ai_credit_balance_eur_cents).toBe(5000);
+  });
+
+  it('répond 422 quand aucune tâche datée n’a pu être lue', async () => {
+    const { token, projectId } = seed();
+    chat.mockResolvedValueOnce(reply(JSON.stringify({ taches: [{ lot_numero: '01', libelle: 'Sans date', debut: 'plus tard' }] })));
+    const res = await importer(token, projectId);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain('Aucune tâche datée');
+  });
+
+  it('répond 402 sans appeler le modèle quand le crédit IA est épuisé', async () => {
+    const { token, projectId } = seed({ ai_credit_balance_eur_cents: 0 });
+    const res = await importer(token, projectId);
+    expect(res.status).toBe(402);
+    expect(res.body.code).toBe('NO_TOKENS');
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it('rembourse la réserve quand le modèle échoue', async () => {
+    const { tenantId, token, projectId } = seed();
+    chat.mockRejectedValueOnce(new Error('timeout'));
+    expect((await importer(token, projectId)).status).toBe(500);
+    expect(fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)?.ai_credit_balance_eur_cents).toBe(5000);
+  });
+
+  it('refuse l’affaire d’un autre cabinet', async () => {
+    const { projectId } = seed();
+    const { token } = makeUser(makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 5000 }), 'admin');
+    expect((await importer(token, projectId)).status).toBe(404);
+    expect(chat).not.toHaveBeenCalled();
+    expect(lireTexteDepot).not.toHaveBeenCalled();
   });
 });
