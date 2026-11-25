@@ -1,9 +1,9 @@
 import { useState, useSyncExternalStore } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconCloudUpload, IconAlertTriangle, IconRefresh, IconX, IconLoader2 } from '@tabler/icons-react';
+import { IconCloudUpload, IconAlertTriangle, IconRefresh, IconX, IconLoader2, IconPlayerStop } from '@tabler/icons-react';
 import { db } from '../db';
-import { replayNow, getReplayProgress, subscribeReplayProgress } from '../lib/offlineQueue';
+import { replayNow, getReplayProgress, subscribeReplayProgress, cancelReplay, resumeReplay, isReplayPaused, subscribeReplayPaused } from '../lib/offlineQueue';
 import { entityLabel } from '../lib/pendingWriteLabels';
 import { QueueBackupExport } from './QueueBackupExport';
 import { ReplayProgressBar } from './ReplayProgressBar';
@@ -24,15 +24,17 @@ export function PendingWritesIndicator() {
   const [backupMessage, setBackupMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const writes = useLiveQuery(() => db.pendingWrites.orderBy('createdAt').toArray(), []);
   const progress = useSyncExternalStore(subscribeReplayProgress, getReplayProgress, getReplayProgress);
+  const paused = useSyncExternalStore(subscribeReplayPaused, isReplayPaused, isReplayPaused);
 
   if (!writes || writes.length === 0) return null;
 
   const hasError = writes.some(w => w.status === 'error');
   const busy = retrying || progress.running;
 
+  // « Réessayer » est un geste volontaire : il passe outre les délais de reprise et lève une annulation.
   const retry = async () => {
     setRetrying(true);
-    try { await replayNow(); } finally { setRetrying(false); }
+    try { await (paused ? resumeReplay() : replayNow(true)); } finally { setRetrying(false); }
   };
 
   return (
@@ -116,6 +118,23 @@ export function PendingWritesIndicator() {
                 {backupMessage.text}
               </p>
             )}
+            {/* Annule la photo en cours et suspend les envois automatiques ; rien n'est supprimé. */}
+            {(progress.running || retrying) && (
+              <button
+                type="button"
+                onClick={cancelReplay}
+                className="w-full mt-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-bold rounded-lg"
+                style={{ border: '1px solid var(--tblr-danger, #e03131)', color: 'var(--tblr-danger, #e03131)' }}
+              >
+                <IconPlayerStop size={13} />
+                Annuler l'envoi
+              </button>
+            )}
+            {paused && !progress.running && (
+              <p role="status" className="px-1.5 pt-1 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
+                Envoi annulé : les éléments restent en attente, aucun envoi automatique tant que vous ne reprenez pas.
+              </p>
+            )}
             <button
               type="button"
               onClick={retry}
@@ -124,7 +143,7 @@ export function PendingWritesIndicator() {
               style={{ background: 'var(--tblr-primary)', color: '#fff' }}
             >
               <IconRefresh size={13} className={busy ? 'animate-spin' : ''} />
-              {!navigator.onLine ? 'Hors ligne' : busy ? 'Envoi en cours…' : 'Réessayer maintenant'}
+              {!navigator.onLine ? 'Hors ligne' : busy ? 'Envoi en cours…' : paused ? 'Reprendre l\'envoi' : 'Réessayer maintenant'}
             </button>
           </motion.div>
         </>

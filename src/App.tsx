@@ -16,6 +16,7 @@ import {
 import { GlobalSearch } from './components/GlobalSearch';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { PendingWritesIndicator } from './components/PendingWritesIndicator';
+import { OfflineQueueToast } from './components/OfflineQueueToast';
 import { UpdateBanner } from './components/UpdateBanner';
 import { LocalPhotoCopyBanner } from './components/LocalPhotoCopyBanner';
 import { TenantSuspendedGate } from './components/TenantSuspendedGate';
@@ -319,6 +320,7 @@ function Header() {
               tous les écrans, y compris téléphone : c'est là qu'elle sert. */}
           <div className="flex mr-2">
             <PendingWritesIndicator />
+            <OfflineQueueToast />
           </div>
 
           {/* Search: state is scoped to the selected practice and user. */}

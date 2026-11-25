@@ -16,7 +16,7 @@ vi.mock('../../db', () => ({
 }));
 vi.mock('../activeTenant', () => ({ getActiveTenantId: () => 'tenant-1' }));
 
-import { replayPendingWrites, replayNow, getReplayProgress, subscribeReplayProgress } from '../offlineQueue';
+import { replayPendingWrites, replayNow, getReplayProgress, subscribeReplayProgress, cancelReplay, resumeReplay, isReplayPaused, backoffDelayMs, OFFLINE_QUEUE_NOTICE_EVENT } from '../offlineQueue';
 
 const entry = (id: string, url: string, createdAt: number, extra: object = {}) => ({
   id, entity: 'observation', method: 'POST', url, kind: 'json', jsonBody: { id },
@@ -26,6 +26,12 @@ const photo = (id: string, createdAt: number, extra: object = {}) => entry(id, `
   entity: 'observationPhoto', kind: 'multipart', blob: new Blob(['abc']), blobFieldName: 'photo', ...extra,
 });
 const ok = () => Promise.resolve(new Response(null, { status: 200 }));
+/** Un passage complet : la pause entre deux photos (faux timers) est avancée jusqu'à la fin. */
+const replayAll = async (force = false) => {
+  const run = replayPendingWrites(force);
+  await vi.advanceTimersByTimeAsync(10_000);
+  return run;
+};
 
 describe('replayPendingWrites', () => {
   beforeEach(() => {
@@ -62,8 +68,9 @@ describe('replayPendingWrites', () => {
     await vi.advanceTimersByTimeAsync(31_000);
     await first;
 
+    // Un passage automatique attendrait le délai de reprise : « Réessayer » (force) le passe.
     hangs = false;
-    await replayPendingWrites();
+    await replayPendingWrites(true);
     expect(rows.has('hang')).toBe(false);
   });
 
@@ -123,7 +130,7 @@ describe('replayPendingWrites', () => {
     const order: string[] = [];
     vi.stubGlobal('fetch', (url: string) => { order.push(url); return ok(); });
 
-    await replayPendingWrites();
+    await replayAll();
 
     expect(order).toEqual(['/api/json-late', '/api/photo-new', '/api/photo-bad']);
   });
@@ -134,7 +141,7 @@ describe('replayPendingWrites', () => {
     const fetchMock = vi.fn(ok);
     vi.stubGlobal('fetch', fetchMock);
 
-    await replayPendingWrites();
+    await replayAll();
 
     expect(rows.get('photo')).toMatchObject({ status: 'error' });
     expect(rows.get('photo').lastError).toContain('illisible');
@@ -188,5 +195,112 @@ describe('replayPendingWrites', () => {
 
     expect(rows.size).toBe(0);
     expect(final.sent).toBe(1);
+  });
+  describe('reprise espacée, plafond et annulation', () => {
+    afterEach(async () => {
+      // L'état « annulé » est global au module : on le lève pour ne pas contaminer les autres tests.
+      if (isReplayPaused()) { vi.stubGlobal('fetch', ok); await resumeReplay(); }
+    });
+
+    it('espace la reprise d\'une entrée en échec : le passage suivant la saute, « Réessayer » (force) non', async () => {
+      rows.set('bad', entry('bad', '/api/bad', 1));
+      const fetchMock = vi.fn(() => Promise.reject(new TypeError('Load failed')));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await replayPendingWrites();
+      expect(rows.get('bad').nextAttemptAt).toBeGreaterThan(Date.now());
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await replayPendingWrites();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await replayPendingWrites(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(backoffDelayMs(3) + 1_000);
+      await replayPendingWrites();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it('le délai de reprise double jusqu\'à un plafond de 10 minutes', () => {
+      expect(backoffDelayMs(1)).toBe(30_000);
+      expect(backoffDelayMs(2)).toBe(60_000);
+      expect(backoffDelayMs(3)).toBe(120_000);
+      expect(backoffDelayMs(20)).toBe(600_000);
+    });
+
+    it('un 429 (serveur occupé) garde la photo, arrête le passage et prévient par une alerte', async () => {
+      rows.set('p1', photo('p1', 1));
+      rows.set('p2', photo('p2', 2));
+      const notices: any[] = [];
+      vi.stubGlobal('window', { dispatchEvent: (e: any) => { if (e.type === OFFLINE_QUEUE_NOTICE_EVENT) notices.push(e.detail); return true; } });
+      const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ error: 'busy' }), { status: 429, headers: { 'content-type': 'application/json' } })));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await replayAll();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(rows.get('p1')).toMatchObject({ status: 'pending', attempts: 1 });
+      expect(rows.has('p2')).toBe(true);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({ type: 'error' });
+      expect(notices[0].message).toContain('Problème d\'envoi');
+    });
+
+    it('n\'envoie que quatre photos par passage, le reste part au passage suivant', async () => {
+      for (let i = 1; i <= 6; i++) rows.set(`p${i}`, photo(`p${i}`, i));
+      const fetchMock = vi.fn(ok);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const run = replayPendingWrites();
+      await vi.advanceTimersByTimeAsync(3_000);
+      await run;
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+      expect(rows.size).toBe(2);
+
+      // Le lot suivant est programmé tout seul quelques secondes plus tard.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+      expect(rows.size).toBe(0);
+    });
+
+    it('n\'envoie pas plus de 12 Mo par passage', async () => {
+      const big = () => new Blob([new Uint8Array(7 * 1024 * 1024)]);
+      rows.set('b1', photo('b1', 1, { blob: big() }));
+      rows.set('b2', photo('b2', 2, { blob: big() }));
+      const fetchMock = vi.fn(ok);
+      vi.stubGlobal('fetch', fetchMock);
+
+      const run = replayPendingWrites();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await run;
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(rows.size).toBe(1);
+    });
+
+    it('annuler l\'envoi garde tout en file, suspend les rejeux automatiques, puis « reprendre » envoie le reste', async () => {
+      rows.set('a', entry('a', '/api/a', 1));
+      rows.set('b', entry('b', '/api/b', 2));
+      const notices: any[] = [];
+      vi.stubGlobal('window', { dispatchEvent: (e: any) => { if (e.type === OFFLINE_QUEUE_NOTICE_EVENT) notices.push(e.detail); return true; } });
+      const fetchMock = vi.fn((url: string) => { if (url === '/api/a') cancelReplay(); return ok(); });
+      vi.stubGlobal('fetch', fetchMock);
+
+      await replayPendingWrites();
+
+      expect(isReplayPaused()).toBe(true);
+      expect(rows.has('b')).toBe(true);
+      expect(getReplayProgress()).toMatchObject({ running: false, stopReason: 'cancelled' });
+      expect(notices.some(n => n.message.includes('Envoi annulé'))).toBe(true);
+
+      // En pause, ni le sondage ni une nouvelle photo ne relancent l'envoi.
+      await replayPendingWrites();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await resumeReplay();
+      expect(isReplayPaused()).toBe(false);
+      expect(rows.size).toBe(0);
+    });
   });
 });
