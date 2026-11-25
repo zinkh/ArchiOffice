@@ -518,3 +518,41 @@ test('ordre vertical fixe, placement à l’ajout du prédécesseur puis dates m
   await expect.poll(rowIds).toEqual(initial);
   expect(saved.taches.find(t => t.id === 'fondations')?.fin).toBe('2027-01-08');
 });
+
+test('import d’un planning : rapprochement des groupes du fichier avec les lots de l’opération', async ({ page }) => {
+  test.setTimeout(90_000);
+  let saved: any = { version: 1, taches, hypotheses: [], genereLe: null };
+  await page.route('**/api/projects/*/planning-chantier', route => {
+    if (route.request().method() === 'PUT') saved = route.request().postDataJSON();
+    return route.fulfill({ json: { available: true, planning: saved, entreprises: {} } });
+  });
+  await page.goto('/e2e/fixtures/chantier-planning.html');
+  await expect(page.getByText('2026-S53', { exact: true })).toBeVisible({ timeout: 30_000 });
+
+  await page.getByRole('button', { name: 'Importer', exact: true }).click();
+  const fenetre = page.getByRole('dialog');
+  // Un fichier à deux groupes : « Gros oeuvre » (sans ligature) se reconnaît, « Menuiseries extérieures » n'est aucun lot de l'opération.
+  const gan = `<project name="Autre cabinet"><tasks>
+    <task id="1" name="Gros oeuvre" start="2027-03-01" duration="10"><task id="2" name="Dalle" start="2027-03-01" duration="10"/></task>
+    <task id="3" name="Menuiseries extérieures" start="2027-03-15" duration="5"><task id="4" name="Pose des menuiseries" start="2027-03-15" duration="5"/></task>
+  </tasks></project>`;
+  await fenetre.getByLabel('Fichier de planning à importer').setInputFiles({ name: 'planning.gan', mimeType: 'application/xml', buffer: Buffer.from(gan, 'utf8') });
+
+  await expect(fenetre.getByRole('heading', { name: 'Rapprochement avec les lots de l’opération' })).toBeVisible();
+  const groupeReconnu = fenetre.getByLabel('Lot de l’opération pour « Gros oeuvre »');
+  const groupeInconnu = fenetre.getByLabel('Lot de l’opération pour « Menuiseries extérieures »');
+  await expect(groupeReconnu).toHaveValue('go');
+  await expect(groupeInconnu).toContainText('Choisir un lot…');
+  await expect(fenetre.getByText('1 tâche sans lot', { exact: false })).toBeVisible();
+
+  await groupeInconnu.selectOption({ label: 'Lot 02 · Charpente' });
+  await expect(groupeInconnu).toHaveValue('bois');
+  await expect(fenetre.getByText('tâche sans lot', { exact: false })).toHaveCount(0);
+
+  // Le planning contient déjà des tâches : on remplace tout.
+  await fenetre.getByLabel('Remplacer tout le planning', { exact: false }).check();
+  await fenetre.getByRole('button', { name: /^Importer 2 tâches$/ }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect.poll(() => saved.taches.map((t: any) => [t.libelle, t.lotId])).toEqual([['Dalle', 'go'], ['Pose des menuiseries', 'bois']]);
+  expect(saved.taches.every((t: any) => t.source === 'manuel')).toBe(true);
+});

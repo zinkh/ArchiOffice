@@ -6,7 +6,7 @@ import { AnimatePresence } from 'motion/react';
 import { IconAlertTriangle, IconFileImport, IconLoader2 } from '@tabler/icons-react';
 import { ModalShell } from '../ui/ModalShell';
 import {
-  MAX_FICHIER_PLANNING, MESSAGE_MPP, bornesImport, datesVraisemblables, lireXmlPlanning, typeFichierPlanning,
+  MAX_FICHIER_PLANNING, MESSAGE_MPP, appliquerChoixLots, bornesImport, datesVraisemblables, lireXmlPlanning, typeFichierPlanning,
   type ModeImportPlanning, type PlanningImporte,
 } from '../../lib/planningChantierImport';
 import type { LotPlanifiable } from '../../lib/planningChantier';
@@ -23,6 +23,8 @@ interface Props {
 const FORMATS: Record<PlanningImporte['format'], string> = {
   ganttproject: 'GanttProject', msproject: 'Microsoft Project XML', pdf: 'PDF lu par l’IA',
 };
+/** Valeur de la liste d'un groupe pas encore rapproché (jamais envoyée : ce n'est pas un lot). */
+const A_RAPPROCHER = '__a_rapprocher';
 const fmt = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 const pluriel = (n: number, mot: string) => `${n} ${mot}${n > 1 ? 's' : ''}`;
 
@@ -31,11 +33,13 @@ export function PlanningImportDialog({ projectId, lots, aDesTaches, onApply, onC
   const [nomFichier, setNomFichier] = useState('');
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
-  const [importe, setImporte] = useState<PlanningImporte | null>(null);
+  // `brut` est l'import tel que lu ; `importe` en est dérivé avec les lots choisis par l'architecte (`choix`).
+  const [brut, setImporte] = useState<PlanningImporte | null>(null);
+  const [choix, setChoix] = useState<Record<string, string>>({});
   const [mode, setMode] = useState<ModeImportPlanning>('ajouter');
 
   const lire = async (fichier: File) => {
-    setErreur(null); setImporte(null); setNomFichier(fichier.name);
+    setErreur(null); setImporte(null); setChoix({}); setNomFichier(fichier.name);
     const type = typeFichierPlanning(fichier.name);
     if (type === 'mpp') { setErreur(MESSAGE_MPP); return; }
     if (!type) { setErreur('Format non pris en charge. Formats acceptés : XML Microsoft Project, GanttProject (.gan) et PDF.'); return; }
@@ -61,7 +65,14 @@ export function PlanningImportDialog({ projectId, lots, aDesTaches, onApply, onC
     }
   };
 
+  const importe = useMemo(() => (brut ? appliquerChoixLots(brut, choix, lots) : null), [brut, choix, lots]);
   const bornes = useMemo(() => (importe ? bornesImport(importe) : null), [importe]);
+  // Lots de l'opération qu'aucune tâche importée n'occupe : utile pour repérer un oubli de rapprochement.
+  const lotsSansTache = useMemo(() => {
+    const occupes = new Set((importe?.taches ?? []).map(t => t.lotId));
+    return lots.filter(l => !occupes.has(l.id));
+  }, [importe, lots]);
+  const choisirLot = (cle: string, lotId: string) => setChoix(prec => ({ ...prec, [cle]: lotId }));
   const lotsConcernes = useMemo(() => new Set((importe?.taches ?? []).map(t => t.lotId).filter(Boolean)).size, [importe]);
   const liens = importe?.taches.reduce((n, t) => n + (t.dependencies?.length ?? 0), 0) ?? 0;
   const jalons = importe?.taches.filter(t => t.jalon).length ?? 0;
@@ -125,6 +136,56 @@ export function PlanningImportDialog({ projectId, lots, aDesTaches, onApply, onC
                 <ul className="list-disc pl-5 text-xs space-y-0.5 text-[var(--tblr-muted)]">
                   {importe.avertissements.map(a => <li key={a}>{a}</li>)}
                 </ul>
+              )}
+              {brut && brut.groupes.length > 0 && (
+                <section aria-labelledby="rapprochement-lots" className="space-y-2">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 id="rapprochement-lots" className="text-xs font-semibold text-[var(--tblr-muted)]">Rapprochement avec les lots de l’opération</h3>
+                    {brut.groupes.filter(g => g.statut === 'inconnu' && choix[g.cle] === undefined).length > 1 && (
+                      <button type="button" className="text-xs underline pointer-coarse:min-h-11"
+                        onClick={() => setChoix(prec => ({ ...prec, ...Object.fromEntries(brut.groupes.filter(g => g.statut === 'inconnu' && prec[g.cle] === undefined).map(g => [g.cle, ''])) }))}>
+                        Ranger les groupes non reconnus en tâches générales
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-[var(--tblr-muted)]">
+                    Chaque groupe du fichier est rangé dans le lot de l’opération choisi sur sa ligne. Corrigez ce qui a été mal reconnu : le planning ne crée jamais de lot.
+                  </p>
+                  <ul className="max-h-64 overflow-y-auto border border-[var(--tblr-border)] rounded-lg divide-y divide-[var(--tblr-border)]">
+                    {brut.groupes.map(g => {
+                      const decide = choix[g.cle];
+                      const aRapprocher = g.statut === 'inconnu' && decide === undefined;
+                      const valeur = decide !== undefined ? decide : aRapprocher ? A_RAPPROCHER : g.lotId;
+                      const etat = decide !== undefined ? 'Choisi' : g.statut === 'reconnu' ? 'Reconnu' : g.statut === 'general' ? 'Général' : 'À rapprocher';
+                      return (
+                        <li key={g.cle} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,16rem)] gap-x-3 gap-y-1 items-center px-3 py-2">
+                          <div className="min-w-0">
+                            <span className="block truncate font-semibold text-xs" title={g.intitule}>{g.intitule}</span>
+                            <span className="text-[0.6875rem] text-[var(--tblr-muted)]">{pluriel(g.tacheIds.length, 'tâche')}</span>
+                          </div>
+                          <span className="text-[0.6875rem] font-semibold justify-self-start sm:justify-self-end" style={{ color: aRapprocher ? 'var(--tblr-warning)' : 'var(--tblr-muted)' }}>{etat}</span>
+                          <select className="w-full rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] px-2 py-1.5 text-xs pointer-coarse:min-h-11"
+                            aria-label={`Lot de l’opération pour « ${g.intitule} »`} value={valeur}
+                            onChange={e => { if (e.target.value !== A_RAPPROCHER) choisirLot(g.cle, e.target.value); }}>
+                            {aRapprocher && <option value={A_RAPPROCHER}>Choisir un lot…</option>}
+                            <option value="">Tâches générales (sans lot)</option>
+                            {lots.map(l => <option key={l.id} value={l.id}>Lot {l.lot_number} · {l.lot_title}</option>)}
+                          </select>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {importe && importe.sansLot > 0 && (
+                    <p role="status" className="text-xs" style={{ color: 'var(--tblr-warning)' }}>
+                      {pluriel(importe.sansLot, 'tâche')} sans lot : sans choix de votre part, elles iront dans les tâches générales.
+                    </p>
+                  )}
+                  {lotsSansTache.length > 0 && (
+                    <p className="text-xs text-[var(--tblr-muted)]">
+                      Lots de l’opération sans tâche importée : {lotsSansTache.map(l => l.lot_number).join(', ')}.
+                    </p>
+                  )}
+                </section>
               )}
               {aDesTaches && (
                 <fieldset className="space-y-1">

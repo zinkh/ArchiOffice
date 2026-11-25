@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Project } from '../../types';
 import { exportPlanningChantierXml } from '../planningChantierXml';
 import {
-  appliquerImport, bornesImport, datesVraisemblables, lireXmlPlanning, planningDepuisPdf, rapprocherLot, typeFichierPlanning,
+  appliquerChoixLots, appliquerImport, bornesImport, datesVraisemblables, lireXmlPlanning, planningDepuisPdf, rapprocherLot, typeFichierPlanning,
 } from '../planningChantierImport';
 import { sanitizePlanning, type LotPlanifiable, type PlanningChantier } from '../planningChantier';
 
@@ -107,9 +107,19 @@ describe('fichiers XML inexploitables ou particuliers', () => {
     const importe = lireXmlPlanning(xml, lots, fabrique);
     expect(importe.taches.map(t => t.lotId)).toEqual(['lot-2', '']);
     expect(importe.taches[0]).toMatchObject({ debut: '2026-05-04', fin: '2026-05-08' });
-    // « Nettoyage » n'est dans aucun groupe et ne cite aucun lot : rangée faute de mieux, et signalée.
+    // « Nettoyage » n'est dans aucun groupe et ne cite aucun lot : elle attend un rapprochement.
     expect(importe.sansLot).toBe(1);
-    expect(importe.avertissements.join(' ')).toContain('1 tâche sans lot reconnu');
+    expect(importe.groupes).toEqual([
+      { cle: 'Lot 02 Charpente : pose', intitule: 'Lot 02 Charpente : pose', statut: 'reconnu', lotId: 'lot-2', tacheIds: [importe.taches[0].id] },
+      { cle: 'Sans groupe', intitule: 'Sans groupe', statut: 'inconnu', lotId: '', tacheIds: [importe.taches[1].id] },
+    ]);
+  });
+  it('ne laisse pas le titre d’une tâche contourner son groupe', () => {
+    const xml = `<project name="G"><tasks>
+      <task id="1" name="Lot 01 Gros œuvre" start="2026-03-02" duration="10"><task id="2" name="Charpente provisoire" start="2026-03-02" duration="5"/></task></tasks></project>`;
+    const importe = lireXmlPlanning(xml, lots, fabrique);
+    expect(importe.taches[0].lotId).toBe('lot-1');
+    expect(importe.groupes).toHaveLength(1);
   });
   it('signale les tâches d’un groupe qui ne correspond à aucun lot de l’opération', () => {
     const xml = `<project name="Autre"><tasks>
@@ -117,7 +127,8 @@ describe('fichiers XML inexploitables ou particuliers', () => {
     const importe = lireXmlPlanning(xml, lots, fabrique);
     expect(importe.taches.map(t => t.lotId)).toEqual(['', '']);
     expect(importe.sansLot).toBe(2);
-    expect(importe.avertissements[0]).toContain('2 tâches sans lot reconnu rangées');
+    expect(importe.groupes).toMatchObject([{ intitule: 'Lot 77 Piscine', statut: 'inconnu', lotId: '' }]);
+    expect(importe.groupes[0].tacheIds).toHaveLength(2);
   });
   it('écarte un lien qui part d’un groupe et le dit', () => {
     // Le groupe « Lot 01 » (id 1) précède la tâche 3 : le planning relie des tâches, pas des groupes.
@@ -165,7 +176,10 @@ describe('planningDepuisPdf', () => {
     // « general » est un rangement voulu ; seul le lot 77 est compté comme non reconnu.
     expect(importe.sansLot).toBe(1);
     expect(importe.avertissements[0]).toBe('Année supposée 2026 pour les dates sans année');
-    expect(importe.avertissements.join(' ')).toMatch(/1 tâche sans lot reconnu/);
+    // Un groupe par lot cité : « Lot 01 », « Lot 02 », « Tâches générales » (voulu) et « Lot 77 » (à rapprocher).
+    expect(importe.groupes.map(g => [g.intitule, g.statut])).toEqual([
+      ['Lot 01', 'reconnu'], ['Lot 02', 'reconnu'], ['Tâches générales', 'general'], ['Lot 77', 'inconnu'],
+    ]);
   });
   it('supporte une réponse vide ou invalide', () => {
     expect(planningDepuisPdf(null, lots, fabrique).taches).toEqual([]);
@@ -206,5 +220,67 @@ describe('datesVraisemblables', () => {
     expect(datesVraisemblables(tache('2026-03-02', '2026-03-06'))).toBe(true);
     expect(datesVraisemblables(tache('1926-03-02', '1926-03-06'))).toBe(false);
     expect(datesVraisemblables(tache('2026-03-02', '2126-03-06'))).toBe(false);
+  });
+});
+
+describe('appliquerChoixLots (rapprochement des groupes du fichier avec les lots de l’opération)', () => {
+  const xml = `<project name="Autre cabinet"><tasks>
+    <task id="1" name="Gros oeuvre" start="2026-03-02" duration="10"><task id="2" name="Dalle" start="2026-03-02" duration="10"/><task id="3" name="Murs" start="2026-03-16" duration="10"/></task>
+    <task id="4" name="Menuiseries extérieures" start="2026-04-01" duration="10"><task id="5" name="Pose" start="2026-04-01" duration="10"/></task>
+    <task id="6" name="Divers" start="2026-05-01" duration="3"/></tasks></project>`;
+  const importe = lireXmlPlanning(xml, lots, fabrique);
+  const lotsDe = (i: typeof importe) => Object.fromEntries(i.taches.map(t => [t.libelle, t.lotId]));
+
+  it('propose un lot pour les groupes reconnus et laisse les autres à rapprocher', () => {
+    expect(importe.groupes.map(g => [g.intitule, g.statut, g.lotId])).toEqual([
+      ['Gros oeuvre', 'reconnu', 'lot-1'], ['Menuiseries extérieures', 'inconnu', ''], ['Sans groupe', 'inconnu', ''],
+    ]);
+    expect(importe.sansLot).toBe(2);
+  });
+  it('sans choix, ne change rien', () => {
+    expect(appliquerChoixLots(importe, {}, lots)).toEqual(importe);
+  });
+  it('range tout un groupe dans le lot choisi et ne le compte plus comme sans lot', () => {
+    const choisi = appliquerChoixLots(importe, { 'Menuiseries extérieures': 'lot-3' }, lots);
+    expect(lotsDe(choisi)).toMatchObject({ Dalle: 'lot-1', Murs: 'lot-1', Pose: 'lot-3', Divers: '' });
+    expect(choisi.sansLot).toBe(1);
+  });
+  it('permet de remplacer le lot proposé d’un groupe reconnu', () => {
+    expect(lotsDe(appliquerChoixLots(importe, { 'Gros oeuvre': 'lot-2' }, lots))).toMatchObject({ Dalle: 'lot-2', Murs: 'lot-2' });
+  });
+  it('accepte explicitement les tâches générales, ce qui lève le signalement', () => {
+    const general = appliquerChoixLots(importe, { 'Menuiseries extérieures': '', 'Sans groupe': '' }, lots);
+    expect(lotsDe(general).Pose).toBe('');
+    expect(general.sansLot).toBe(0);
+  });
+  it('ignore un lot étranger à l’opération et une clé inconnue, sans rien créer', () => {
+    const choisi = appliquerChoixLots(importe, { 'Menuiseries extérieures': 'lot-autre-cabinet', 'Groupe inexistant': 'lot-1' }, lots);
+    expect(lotsDe(choisi).Pose).toBe('');
+    expect(choisi.sansLot).toBe(2);
+    expect(choisi.taches).toHaveLength(importe.taches.length);
+  });
+  it('ne modifie pas l’import d’origine et se combine avec appliquerImport', () => {
+    const avant = JSON.stringify(importe);
+    const choisi = appliquerChoixLots(importe, { 'Menuiseries extérieures': 'lot-3' }, lots);
+    expect(JSON.stringify(importe)).toBe(avant);
+    const planningFinal = appliquerImport(sanitizePlanning({ taches: [] }), choisi, 'ajouter');
+    expect(planningFinal.taches.find(t => t.libelle === 'Pose')?.lotId).toBe('lot-3');
+  });
+  it('regroupe les tâches d’un PDF par lot cité, et le choix s’applique à tout le lot cité', () => {
+    const pdf = planningDepuisPdf({ taches: [
+      { lot_numero: '77', libelle: 'A', debut: '2026-04-01' }, { lot_numero: 'Lot 77', libelle: 'B', debut: '2026-04-02' },
+    ] }, lots, fabrique);
+    expect(pdf.groupes).toHaveLength(1);
+    const choisi = appliquerChoixLots(pdf, { 'Lot 77': 'lot-2' }, lots);
+    expect(choisi.taches.map(t => t.lotId)).toEqual(['lot-2', 'lot-2']);
+  });
+});
+
+describe('ligatures (œ, æ)', () => {
+  const batiment: LotPlanifiable[] = [{ id: 'g', lot_number: '01', lot_title: 'Gros œuvre' }, { id: 's', lot_number: '09', lot_title: 'Second œuvre' }];
+  it('reconnaît « oe » et « œ » comme le même mot, dans les deux sens', () => {
+    expect(rapprocherLot('GROS OEUVRE', batiment)).toEqual({ lot: batiment[0] });
+    expect(rapprocherLot('Gros œuvre - bâtiment A', batiment)).toEqual({ lot: batiment[0] });
+    expect(rapprocherLot('second oeuvre', batiment)).toEqual({ lot: batiment[1] });
   });
 });

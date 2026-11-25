@@ -11,18 +11,41 @@ import {
 
 export type FormatImportPlanning = 'ganttproject' | 'msproject' | 'pdf';
 
+/** `reconnu` : lot de l'opération trouvé ; `general` : groupe « Tâches générales » ; `inconnu` : à rapprocher à la main. */
+export type StatutGroupeImport = 'reconnu' | 'general' | 'inconnu';
+
+/**
+ * Un groupe du fichier (un lot, un bâtiment, « Lot 02 · Charpente »...) et le lot de l'opération qui lui est proposé.
+ * L'architecte peut changer ce lot pour chaque groupe avant d'appliquer l'import (`appliquerChoixLots`).
+ */
+export interface GroupeImport {
+  /** Clé stable du groupe : son intitulé dans le fichier. */
+  cle: string;
+  intitule: string;
+  statut: StatutGroupeImport;
+  /** Lot proposé (`project_lots.id`), vide pour les tâches générales. */
+  lotId: string;
+  /** Identifiants (proposés) des tâches du groupe. */
+  tacheIds: string[];
+}
+
 export interface PlanningImporte {
   format: FormatImportPlanning;
   /** Nom de l'opération porté par le fichier, s'il en a un. */
   nomProjet?: string;
   taches: TachePlanning[];
+  /** Groupes du fichier avec le lot proposé pour chacun, dans l'ordre du fichier. */
+  groupes: GroupeImport[];
   /** Ce que l'import a dû décider à la place de l'architecte : à lire avant d'appliquer. */
   avertissements: string[];
   /** Lignes du fichier non reprises (dates illisibles, au-delà du plafond). */
   ecartees: number;
-  /** Tâches rangées sans lot reconnu dans les tâches générales. */
+  /** Tâches dont le groupe n'a été rapproché d'aucun lot et qui iront dans les tâches générales. */
   sansLot: number;
 }
+
+/** Intitulé donné aux tâches qui ne sont dans aucun groupe et ne citent aucun lot. */
+export const SANS_GROUPE = 'Sans groupe';
 
 export type ModeImportPlanning = 'remplacer' | 'ajouter';
 
@@ -45,7 +68,8 @@ export const MESSAGE_MPP = 'Le format .mpp de Microsoft Project est un format bi
 // ── Rapprochement des lots ───────────────────────────────────────────────────
 
 const sansAccents = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '');
-const normaliser = (s: string) => sansAccents(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+// Les ligatures ne se décomposent pas : « Gros œuvre » et « Gros oeuvre » (clavier, export) doivent se reconnaître.
+const normaliser = (s: string) => sansAccents(s).toLowerCase().replace(/œ/g, 'oe').replace(/æ/g, 'ae').replace(/[^a-z0-9]+/g, ' ').trim();
 const numeroNormalise = (n: unknown) => String(n ?? '').trim().toLowerCase().replace(/^lot\s*/, '').replace(/^0+(?=\d)/, '');
 const EST_GENERAL = /^(taches?|travaux)?\s*(generale?s?|communes?|chantier)$|^general$/;
 
@@ -85,22 +109,30 @@ export function planningDepuisImport(parsed: ParsedPlanningXml, lots: LotPlanifi
   // Un groupe sans enfant lisible reste une tâche ordinaire.
   const estGroupe = (id: string) => !!parId.get(id)?.summary && aDesEnfants.has(id);
 
-  const lotDe = (sourceId: string): Rapprochement => {
+  /**
+   * Lot d'une tâche et intitulé du groupe qui le donne : la tâche elle-même d'abord (« Lot 03 Couverture : zinguerie »
+   * dans un fichier à plat), puis ses groupes en remontant. Sans correspondance, le groupe à rapprocher est le plus
+   * proche (ou « Sans groupe » pour une tâche à la racine).
+   */
+  const lotDe = (sourceId: string): { trouve: Rapprochement; intitule: string } => {
     const vus = new Set<string>();
+    let plusProche: string | undefined;
     for (let courant = parId.get(sourceId); courant && !vus.has(courant.sourceId); courant = courant.parentSourceId ? parId.get(courant.parentSourceId) : undefined) {
       vus.add(courant.sourceId);
-      // La tâche elle-même d'abord (« Lot 03 Couverture : zinguerie » dans un fichier à plat), puis ses groupes.
-      const trouve = rapprocherLot(courant.title, lots);
-      if (trouve && (courant.sourceId !== sourceId || 'lot' in trouve)) return trouve;
+      const soi = courant.sourceId === sourceId;
+      // Le titre d'une tâche rangée dans un groupe ne contourne jamais son groupe : « Charpente » sous « Lot 01 » reste au lot 01.
+      const trouve = soi && courant.parentSourceId ? null : rapprocherLot(courant.title, lots);
+      if (trouve && (!soi || 'lot' in trouve)) return { trouve, intitule: courant.title };
+      if (!soi) plusProche ??= courant.title;
     }
-    return null;
+    return { trouve: null, intitule: plusProche ?? SANS_GROUPE };
   };
 
   const avertissements: string[] = [];
   const gardees: TachePlanning[] = [];
   const idPar = new Map<string, string>();
+  const groupes = new Map<string, GroupeImport>();
   let ecartees = 0;
-  let sansLot = 0;
   let liensIgnores = 0;
 
   for (const t of parsed.tasks) {
@@ -112,14 +144,20 @@ export function planningDepuisImport(parsed: ParsedPlanningXml, lots: LotPlanifi
     if (fin < debut) [debut, fin] = [fin, debut];
     const jalon = t.milestone === true;
     if (jalon) fin = debut;
-    const rattache = lotDe(t.sourceId);
-    // Un groupe « Tâches générales » est un rangement voulu : il ne compte pas comme un lot non reconnu.
-    if (!rattache) sansLot++;
+    const { trouve: rattache, intitule } = lotDe(t.sourceId);
     const id = fabriqueId();
     idPar.set(t.sourceId, id);
+    // Un groupe « Tâches générales » est un rangement voulu : il ne demande aucun rapprochement.
+    const groupe = groupes.get(intitule) ?? {
+      cle: intitule, intitule, tacheIds: [],
+      statut: !rattache ? 'inconnu' as const : 'lot' in rattache ? 'reconnu' as const : 'general' as const,
+      lotId: rattache && 'lot' in rattache ? rattache.lot.id : '',
+    };
+    groupe.tacheIds.push(id);
+    groupes.set(intitule, groupe);
     gardees.push({
       id,
-      lotId: rattache && 'lot' in rattache ? rattache.lot.id : '',
+      lotId: groupe.lotId,
       libelle: t.title,
       debut, fin,
       avancement: t.progress,
@@ -147,10 +185,15 @@ export function planningDepuisImport(parsed: ParsedPlanningXml, lots: LotPlanifi
     if (Object.keys(delais).length) tache.delais = delais;
   }
 
-  if (sansLot) avertissements.push(`${sansLot} tâche${sansLot > 1 ? 's' : ''} sans lot reconnu rangée${sansLot > 1 ? 's' : ''} dans les tâches générales : le planning ne crée jamais de lot, affectez-les ensuite depuis la fiche de chaque tâche.`);
   if (liensIgnores) avertissements.push(`${liensIgnores} lien${liensIgnores > 1 ? 's' : ''} non repris (vers un groupe ou une tâche absente).`);
   if (ecartees) avertissements.push(`${ecartees} ligne${ecartees > 1 ? 's' : ''} du fichier non reprise${ecartees > 1 ? 's' : ''} (dates illisibles ou plus de ${MAX_TACHES} tâches).`);
-  return { format: parsed.format, nomProjet: parsed.projectName, taches: gardees, avertissements, ecartees, sansLot };
+  const liste = [...groupes.values()];
+  return { format: parsed.format, nomProjet: parsed.projectName, taches: gardees, groupes: liste, avertissements, ecartees, sansLot: tachesSansLot(liste) };
+}
+
+/** Tâches dont le groupe n'a pas de lot rapproché (et dont aucun choix n'a été fait). */
+function tachesSansLot(groupes: GroupeImport[], choix: Record<string, string> = {}): number {
+  return groupes.reduce((n, g) => n + (g.statut === 'inconnu' && choix[g.cle] === undefined ? g.tacheIds.length : 0), 0);
 }
 
 /** Lit un fichier XML de planning et le convertit ; lève une erreur lisible pour un fichier inexploitable. */
@@ -201,8 +244,8 @@ export function planningDepuisPdf(brut: unknown, lots: LotPlanifiable[], fabriqu
   const gardees: TachePlanning[] = [];
   const idParRef = new Map<string, string>();
   const liens: { id: string; refs: unknown }[] = [];
+  const groupes = new Map<string, GroupeImport>();
   let ecartees = 0;
-  let sansLot = 0;
 
   for (const entree of entrees.slice(0, MAX_TACHES + 100)) {
     if (gardees.length >= MAX_TACHES) { ecartees++; continue; }
@@ -214,16 +257,25 @@ export function planningDepuisPdf(brut: unknown, lots: LotPlanifiable[], fabriqu
     if (fin < debut) [debut, fin] = [fin, debut];
     if (jalon) fin = debut;
     const numero = numeroNormalise(entree.lot_numero);
-    const lot = numero && numero !== 'general' && numero !== 'général' ? parNumero.get(numero) : undefined;
+    const general = numero === 'general' || numero === 'général';
+    const lot = numero && !general ? parNumero.get(numero) : undefined;
     // « general » est un rangement voulu par le modèle, pas un lot qu'on n'a pas su reconnaître.
-    if (!lot && numero !== 'general' && numero !== 'général') sansLot++;
+    const intitule = lot ? `Lot ${lot.lot_number}`
+      : general ? 'Tâches générales'
+        : numero ? `Lot ${texteCourt(entree.lot_numero, 20).replace(/^lot\s*/i, '')}` : SANS_GROUPE;
+    const groupe = groupes.get(intitule) ?? {
+      cle: intitule, intitule, tacheIds: [], lotId: lot?.id ?? '',
+      statut: lot ? 'reconnu' as const : general ? 'general' as const : 'inconnu' as const,
+    };
     const avancement = Math.round(Number(entree.avancement));
     const id = fabriqueId();
+    groupe.tacheIds.push(id);
+    groupes.set(intitule, groupe);
     const ref = texteCourt(entree.ref, 40);
     if (ref && !idParRef.has(ref)) idParRef.set(ref, id);
     liens.push({ id, refs: entree.predecesseurs });
     gardees.push({
-      id, lotId: lot?.id ?? '', libelle, debut, fin,
+      id, lotId: groupe.lotId, libelle, debut, fin,
       avancement: Number.isFinite(avancement) ? Math.min(100, Math.max(0, avancement)) : 0,
       source: 'manuel',
       ...(jalon ? { jalon: true } : {}),
@@ -237,9 +289,33 @@ export function planningDepuisPdf(brut: unknown, lots: LotPlanifiable[], fabriqu
   }
 
   const avertissements = (Array.isArray(source.remarques) ? source.remarques : []).map(r => texteCourt(r, 300)).filter(Boolean).slice(0, 8);
-  if (sansLot) avertissements.push(`${sansLot} tâche${sansLot > 1 ? 's' : ''} sans lot reconnu rangée${sansLot > 1 ? 's' : ''} dans les tâches générales : affectez-les ensuite depuis la fiche de chaque tâche.`);
   if (ecartees) avertissements.push(`${ecartees} ligne${ecartees > 1 ? 's' : ''} du document non reprise${ecartees > 1 ? 's' : ''} (date absente ou illisible).`);
-  return { format: 'pdf', taches: gardees, avertissements, ecartees, sansLot };
+  const liste = [...groupes.values()];
+  return { format: 'pdf', taches: gardees, groupes: liste, avertissements, ecartees, sansLot: tachesSansLot(liste) };
+}
+
+/**
+ * Applique les choix de l'architecte : `choix` associe la clé d'un groupe au lot de l'opération (`project_lots.id`),
+ * ou à une chaîne vide pour les tâches générales. Un lot qui n'est pas dans `lots` est ignoré (jamais de lot créé ni
+ * emprunté à un autre cabinet). Un groupe sans choix garde le lot proposé ; un groupe « inconnu » auquel on a affecté
+ * un lot, ou explicitement les tâches générales, ne compte plus parmi les tâches sans lot.
+ */
+export function appliquerChoixLots(importe: PlanningImporte, choix: Record<string, string>, lots: LotPlanifiable[]): PlanningImporte {
+  const valides = new Set(lots.map(l => l.id));
+  const retenus: Record<string, string> = {};
+  const lotParTache = new Map<string, string>();
+  for (const g of importe.groupes) {
+    const demande = choix[g.cle];
+    const valide = demande !== undefined && (demande === '' || valides.has(demande));
+    if (valide) retenus[g.cle] = demande;
+    const lotId = valide ? demande : g.lotId;
+    for (const id of g.tacheIds) lotParTache.set(id, lotId);
+  }
+  return {
+    ...importe,
+    taches: importe.taches.map(t => (lotParTache.has(t.id) ? { ...t, lotId: lotParTache.get(t.id)! } : t)),
+    sansLot: tachesSansLot(importe.groupes, retenus),
+  };
 }
 
 // ── Application ──────────────────────────────────────────────────────────────
