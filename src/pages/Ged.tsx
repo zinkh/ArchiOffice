@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   IconStar, IconStarFilled, IconSearch, IconUpload, IconFolder, IconFolderOpen, IconClock, IconInbox,
   IconLayoutList, IconLayoutGrid, IconTable, IconExternalLink, IconChevronRight, IconChevronDown, IconX, IconFile,
+  IconFolderPlus, IconPlus, IconPencil, IconTrash,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
@@ -13,8 +14,9 @@ import {
   GED_ALL, NO_FILTERS, NO_PROJECT, countBy, extensionOf, filterDocs, highlightParts, phaseOf, recentIds, sortDocs,
   statutOf, type GedFilters, type GedNav, type GedSort, type GedSortKey,
 } from '../lib/gedView';
+import { DOCUMENT_PHASES, buildFolderTree, folderChoices, folderPath, type DocFolder, type FolderNode } from '../lib/gedFolders';
 
-const PHASES = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR', 'Général'];
+const PHASES: string[] = [...DOCUMENT_PHASES];
 const DOC_TYPES = ['Plan', 'Note technique', 'CCTP', 'DPGF', 'BPU', 'DQE', 'Rapport', 'Contrat', 'OS', 'CR réunion', 'Devis', 'Autre'];
 const STATUTS: Record<string, { label: string; color: string }> = {
   en_cours: { label: 'En cours', color: 'var(--tblr-primary)' },
@@ -90,6 +92,11 @@ export default function Ged() {
   const [versions, setVersions] = useState<DocumentVersion[] | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [folders, setFolders] = useState<DocFolder[]>([]);
+  // Formulaire de création de dossier (barre de commandes ou « + » d'une phase) et renommage du dossier ouvert.
+  const [folderForm, setFolderForm] = useState<{ project: string; phase: string; parent: string; name: string } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [folderBusy, setFolderBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
@@ -101,7 +108,11 @@ export default function Ged() {
     Promise.all([
       apiFetch<Document[]>('/api/documents'),
       apiFetch<Project[]>('/api/projects').catch(() => [] as Project[]),
-    ]).then(([d, p]) => { if (!current) return; setDocs(Array.isArray(d) ? d : []); setProjects(Array.isArray(p) ? p : []); })
+      apiFetch<DocFolder[]>('/api/document-folders').catch(() => [] as DocFolder[]),
+    ]).then(([d, p, f]) => {
+      if (!current) return;
+      setDocs(Array.isArray(d) ? d : []); setProjects(Array.isArray(p) ? p : []); setFolders(Array.isArray(f) ? f : []);
+    })
       .catch(() => { if (current) setError('Les documents sont indisponibles pour le moment.'); })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
@@ -114,8 +125,8 @@ export default function Ged() {
 
   const recent = useMemo(() => recentIds(docs), [docs]);
   const visible = useMemo(() => sortDocs(
-    filterDocs(docs, nav, filters, { favs, recent, projectName }), sort, projectName),
-  [docs, nav, filters, favs, recent, projectName, sort]);
+    filterDocs(docs, nav, filters, { favs, recent, projectName, folders }), sort, projectName),
+  [docs, nav, filters, favs, recent, projectName, sort, folders]);
   const selected = docs.find(d => d.id === selectedId) || null;
 
   useEffect(() => {
@@ -143,15 +154,20 @@ export default function Ged() {
   const flash = (ok: boolean, text: string) => { setNotice({ ok, text }); setTimeout(() => setNotice(null), 5000); };
 
   // Classement d'un document : affaire et phase. Le fichier ne bouge pas, mise à jour optimiste.
-  const classify = async (doc: Document, projectId: string, phase: string) => {
+  // `folderId` : un dossier choisi (« » pour sortir du dossier) ; sans lui le serveur retire le dossier si
+  // l'affaire ou la phase change, et le garde sinon.
+  const classify = async (doc: Document, projectId: string, phase: string, folderId?: string) => {
     const previous = docs;
-    setDocs(prev => prev.map(d => d.id === doc.id ? { ...d, project_id: projectId as any, phase: phase as any } : d));
+    const moved = (doc.project_id || '') !== projectId || phaseOf(doc) !== phase;
+    const nextFolder = folderId !== undefined ? (folderId || null) : (moved ? null : (doc as any).folder_id ?? null);
+    setDocs(prev => prev.map(d => d.id === doc.id ? { ...d, project_id: projectId as any, phase: phase as any, folder_id: nextFolder } as Document : d));
     try {
       await apiFetch(`/api/documents/${doc.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           name: doc.name, category: doc.category, description: doc.description || '',
           emetteur: doc.emetteur || '', doc_type: doc.doc_type || '', phase, project_id: projectId,
+          ...(folderId !== undefined ? { folder_id: folderId } : {}),
         }),
       });
       flash(true, 'Document classé.');
@@ -163,8 +179,10 @@ export default function Ged() {
   const importFiles = async (files: FileList | null) => {
     const list = Array.from(files || []);
     if (!list.length) return;
-    const projectId = nav.kind === 'project' && nav.project !== NO_PROJECT ? nav.project || '' : '';
-    const phase = nav.kind === 'project' && nav.value ? nav.value : 'Général';
+    const inProject = nav.kind === 'project' || nav.kind === 'folder';
+    const projectId = inProject && nav.project !== NO_PROJECT ? nav.project || '' : '';
+    const phase = inProject && nav.value ? nav.value : 'Général';
+    const folderId = nav.kind === 'folder' ? nav.folder || '' : '';
     setUploading(true);
     let failed = 0;
     try {
@@ -175,6 +193,7 @@ export default function Ged() {
         form.append('phase', phase); form.append('description', ''); form.append('uploaded_by', currentUser?.name || 'Unknown');
         form.append('indice', 'A'); form.append('emetteur', ''); form.append('doc_type', '');
         if (projectId) form.append('project_id', projectId);
+        if (folderId) form.append('folder_id', folderId);
         try {
           const res = await fetch('/api/documents', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
           if (!res.ok) failed++;
@@ -188,21 +207,86 @@ export default function Ged() {
       : `${failed} fichier${s(failed)} sur ${list.length} n'${failed > 1 ? 'ont' : 'a'} pas pu être importé${s(failed)}.`);
   };
 
+  // Dossiers libres sous les phases.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const currentFolder = nav.kind === 'folder' ? folders.find(f => f.id === nav.folder) : undefined;
+  const refreshFolders = async () => {
+    const data = await apiFetch<DocFolder[]>('/api/document-folders').catch(() => null);
+    if (Array.isArray(data)) setFolders(data);
+  };
+  const createFolder = async () => {
+    if (!folderForm || folderBusy) return;
+    setFolderBusy(true);
+    try {
+      const created = await apiFetch<DocFolder>('/api/document-folders', {
+        method: 'POST',
+        body: JSON.stringify({ project_id: folderForm.project, phase: folderForm.phase, parent_id: folderForm.parent || undefined, name: folderForm.name }),
+      });
+      await refreshFolders();
+      setExpanded(prev => new Set(prev).add(folderForm.project));
+      setFolderForm(null);
+      go({ kind: 'folder', project: created.project_id, value: created.phase, folder: created.id });
+      flash(true, 'Dossier créé.');
+    } catch (e: any) { flash(false, e?.message || 'Le dossier n’a pas pu être créé.'); }
+    finally { setFolderBusy(false); }
+  };
+  const renameFolder = async (id: string, name: string) => {
+    if (folderBusy) return;
+    setFolderBusy(true);
+    try {
+      await apiFetch(`/api/document-folders/${id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+      await refreshFolders();
+      setRenaming(null);
+      flash(true, 'Dossier renommé.');
+    } catch (e: any) { flash(false, e?.message || 'Le dossier n’a pas pu être renommé.'); }
+    finally { setFolderBusy(false); }
+  };
+  const deleteFolder = async (folder: DocFolder) => {
+    if (folderBusy) return;
+    setFolderBusy(true);
+    try {
+      await apiFetch(`/api/document-folders/${folder.id}`, { method: 'DELETE' });
+      await refreshFolders();
+      setConfirmDelete(false);
+      go({ kind: 'project', project: folder.project_id, value: folder.phase });
+      flash(true, 'Dossier supprimé.');
+    } catch (e: any) { setConfirmDelete(false); flash(false, e?.message || 'Le dossier n’a pas pu être supprimé.'); }
+    finally { setFolderBusy(false); }
+  };
+  const folderDocCount = (id: string) => {
+    const ids = new Set<string>([id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const f of folders) if (f.parent_id && ids.has(f.parent_id) && !ids.has(f.id)) { ids.add(f.id); grew = true; }
+    }
+    return docs.filter(d => d.folder_id && ids.has(d.folder_id)).length;
+  };
+  const renderFolders = (nodes: FolderNode[]): React.ReactNode => nodes.map(node => (
+    <div key={node.id}>
+      <NavButton indent={2 + node.depth} active={nav.kind === 'folder' && nav.folder === node.id}
+        onClick={() => go({ kind: 'folder', project: node.project_id, value: node.phase, folder: node.id })}
+        icon={<IconFolder size={14} aria-hidden="true" />} count={folderDocCount(node.id)}>{node.name}</NavButton>
+      {renderFolders(node.children)}
+    </div>
+  ));
+
   // Compteurs de la navigation.
   const byProject = useMemo(() => countBy(docs, d => d.project_id || NO_PROJECT), [docs]);
   const byPhase = useMemo(() => countBy(docs, phaseOf), [docs]);
   const byType = useMemo(() => countBy(docs, d => d.doc_type || ''), [docs]);
   const byStatut = useMemo(() => countBy(docs, statutOf), [docs]);
+  // Une phase apparaît dès qu'elle a des documents ou des dossiers.
   const projectPhases = (projectId: string) => {
     const m = countBy(docs.filter(d => (d.project_id || NO_PROJECT) === projectId), phaseOf);
-    return PHASES.filter(p => m.has(p)).map(p => [p, m.get(p)!] as const);
+    const withFolders = new Set(folders.filter(f => f.project_id === projectId).map(f => f.phase));
+    return PHASES.filter(p => m.has(p) || withFolders.has(p)).map(p => [p, m.get(p) || 0] as const);
   };
-  const navProjects = useMemo(() => projects.filter(p => byProject.has(p.id))
-    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true })), [projects, byProject]);
+  const navProjects = useMemo(() => projects.filter(p => byProject.has(p.id) || folders.some(f => f.project_id === p.id))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true })), [projects, byProject, folders]);
 
   const isNav = (kind: GedNav['kind'], project?: string, value?: string) =>
     nav.kind === kind && (nav.project || '') === (project || '') && (nav.value || '') === (value || '');
-  const go = (next: GedNav) => { setNav(next); setSelectedId(null); };
+  const go = (next: GedNav) => { setNav(next); setSelectedId(null); setRenaming(null); setConfirmDelete(false); };
 
   const sortBy = (key: GedSortKey) => setSort(s => ({ key, dir: s.key === key && s.dir === 'asc' ? 'desc' : 'asc' }));
   const headStyle = { color: 'var(--tblr-muted)', background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' } as const;
@@ -224,6 +308,7 @@ export default function Ged() {
       case 'phase': return `Phase ${nav.value}`;
       case 'type': return nav.value ? nav.value : 'Sans type';
       case 'statut': return STATUTS[nav.value || '']?.label || 'Statut';
+      case 'folder': return `${projectName(nav.project) || 'Projet'} · ${nav.value} · ${folderPath(nav.folder, folders).join(' / ') || 'Dossier'}`;
       case 'project': return `${nav.project === NO_PROJECT ? 'Sans projet' : projectName(nav.project) || 'Projet'}${nav.value ? ` · ${nav.value}` : ''}`;
     }
   })();
@@ -254,8 +339,51 @@ export default function Ged() {
             placeholder="Rechercher un document, un projet, un type…" aria-label="Recherche dans les documents"
             className="flex-1 min-w-0 bg-transparent outline-none text-sm py-2" style={{ color: 'var(--tblr-text)' }} />
         </label>
+        <button type="button" className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm min-h-9" style={controlStyle}
+          onClick={() => setFolderForm({
+            project: nav.project && nav.project !== NO_PROJECT ? nav.project : (projects[0]?.id || ''),
+            phase: nav.value && PHASES.includes(nav.value) ? nav.value : 'PRO',
+            parent: nav.kind === 'folder' ? nav.folder || '' : '', name: '',
+          })}>
+          <IconFolderPlus size={16} aria-hidden="true" />Nouveau dossier
+        </button>
         <Link to="/settings" className="text-xs underline" style={muted}>Réglages du partage et du lecteur</Link>
       </div>
+
+      {folderForm && (
+        <form aria-label="Nouveau dossier" className="flex flex-wrap items-end gap-2 rounded-xl p-3" style={surface}
+          onSubmit={e => { e.preventDefault(); void createFolder(); }}>
+          <label className="text-xs space-y-1 block" style={muted}>Affaire
+            <select className={`${control} block`} style={controlStyle} value={folderForm.project}
+              onChange={e => setFolderForm({ ...folderForm, project: e.target.value, parent: '' })}>
+              <option value="" disabled>Choisir…</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
+          <label className="text-xs space-y-1 block" style={muted}>Phase
+            <select className={`${control} block`} style={controlStyle} value={folderForm.phase}
+              onChange={e => setFolderForm({ ...folderForm, phase: e.target.value, parent: '' })}>
+              {PHASES.map(p => <option key={p}>{p}</option>)}
+            </select>
+          </label>
+          <label className="text-xs space-y-1 block" style={muted}>Dans
+            <select className={`${control} block`} style={controlStyle} value={folderForm.parent}
+              onChange={e => setFolderForm({ ...folderForm, parent: e.target.value })}>
+              <option value="">Racine de la phase</option>
+              {folderChoices(folderForm.project, folderForm.phase, folders).map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </label>
+          <label className="text-xs space-y-1 block flex-1 min-w-[12rem]" style={muted}>Nom du dossier
+            <input autoFocus required maxLength={80} className={`${control} block w-full`} style={controlStyle} value={folderForm.name}
+              onChange={e => setFolderForm({ ...folderForm, name: e.target.value })} placeholder="Plans, Pièces écrites…" />
+          </label>
+          <button type="submit" disabled={folderBusy || !folderForm.project || !folderForm.name.trim()}
+            className="rounded-lg px-3 py-2 text-sm font-semibold min-h-9 disabled:opacity-50" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+            {folderBusy ? 'Création…' : 'Créer le dossier'}
+          </button>
+          <button type="button" className="text-sm underline min-h-9" style={muted} onClick={() => setFolderForm(null)}>Annuler</button>
+        </form>
+      )}
 
       <div className="grid gap-3 lg:grid-cols-[15.5rem_minmax(0,1fr)] xl:grid-cols-[15.5rem_minmax(0,1fr)_21rem] items-start">
         {/* Navigation */}
@@ -281,7 +409,19 @@ export default function Ged() {
                   </div>
                 </div>
                 {open && projectPhases(p.id).map(([phase, n]) => (
-                  <NavButton key={phase} indent={2} active={isNav('project', p.id, phase)} onClick={() => go({ kind: 'project', project: p.id, value: phase })} count={n}>{phase}</NavButton>
+                  <div key={phase}>
+                    <div className="flex items-center">
+                      <div className="flex-1 min-w-0">
+                        <NavButton indent={2} active={isNav('project', p.id, phase)} onClick={() => go({ kind: 'project', project: p.id, value: phase })} count={n}>{phase}</NavButton>
+                      </div>
+                      {p.id !== NO_PROJECT && (
+                        <button type="button" aria-label={`Nouveau dossier dans ${phase}`} title="Nouveau dossier"
+                          onClick={() => setFolderForm({ project: p.id, phase, parent: '', name: '' })}
+                          className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)]" style={muted}><IconPlus size={14} aria-hidden="true" /></button>
+                      )}
+                    </div>
+                    {p.id !== NO_PROJECT && renderFolders(buildFolderTree(folders.filter(f => f.project_id === p.id && f.phase === phase)))}
+                  </div>
                 ))}
               </div>
             );
@@ -310,6 +450,32 @@ export default function Ged() {
               {visible.length} document{visible.length > 1 ? 's' : ''}{filters.search.trim() ? ` pour « ${filters.search.trim()} »` : ''}
             </p>
           </div>
+          {currentFolder && (
+            <div className="flex flex-wrap items-center gap-2 px-4 pt-1">
+              {renaming !== null ? (
+                <form className="flex flex-wrap items-center gap-2" onSubmit={e => { e.preventDefault(); void renameFolder(currentFolder.id, renaming); }}>
+                  <input autoFocus aria-label="Nouveau nom du dossier" maxLength={80} className={control} style={controlStyle} value={renaming} onChange={e => setRenaming(e.target.value)} />
+                  <button type="submit" disabled={folderBusy || !renaming.trim()} className={control} style={controlStyle}>Enregistrer</button>
+                  <button type="button" className="text-xs underline" style={muted} onClick={() => setRenaming(null)}>Annuler</button>
+                </form>
+              ) : (
+                <>
+                  <button type="button" className="inline-flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5" style={controlStyle} onClick={() => setRenaming(currentFolder.name)}><IconPencil size={14} aria-hidden="true" />Renommer</button>
+                  <button type="button" className="inline-flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5" style={controlStyle}
+                    onClick={() => setFolderForm({ project: currentFolder.project_id, phase: currentFolder.phase, parent: currentFolder.id, name: '' })}><IconFolderPlus size={14} aria-hidden="true" />Sous-dossier</button>
+                  {confirmDelete ? (
+                    <>
+                      <span className="text-xs" style={muted}>Supprimer ce dossier ? Il doit être vide.</span>
+                      <button type="button" disabled={folderBusy} className="text-xs rounded-lg px-2.5 py-1.5 font-semibold" style={{ background: 'var(--tblr-danger, #d63939)', color: '#fff' }} onClick={() => void deleteFolder(currentFolder)}>Confirmer</button>
+                      <button type="button" className="text-xs underline" style={muted} onClick={() => setConfirmDelete(false)}>Annuler</button>
+                    </>
+                  ) : (
+                    <button type="button" className="inline-flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5" style={controlStyle} onClick={() => setConfirmDelete(true)}><IconTrash size={14} aria-hidden="true" />Supprimer</button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 px-4 pb-3 pt-2">
             <select aria-label="Phase" className={control} style={controlStyle} value={filters.phase} onChange={e => setFilters(f => ({ ...f, phase: e.target.value }))}>
               <option value="">Phase : toutes</option>{PHASES.map(p => <option key={p}>{p}</option>)}
@@ -356,6 +522,7 @@ export default function Ged() {
                   {view === 'details' && sortHead('project', 'Projet')}
                   {sortHead('phase', 'Phase')}{sortHead('type', 'Type')}
                   {view === 'details' && sortHead('indice', 'Indice')}
+                  {view === 'details' && <th scope="col" className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={headStyle}>Dossier</th>}
                   {sortHead('date', 'Déposé le')}
                   <th scope="col" className="px-3 py-2 text-left text-xs font-semibold" style={headStyle}>Statut</th>
                 </tr></thead>
@@ -373,6 +540,7 @@ export default function Ged() {
                       <td className="px-3 py-2">{phaseOf(d)}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{d.doc_type || '-'}</td>
                       {view === 'details' && <td className="px-3 py-2">{d.indice || '-'}</td>}
+                      {view === 'details' && <td className="px-3 py-2 whitespace-nowrap">{folderPath(d.folder_id, folders).join(' / ') || '-'}</td>}
                       <td className="px-3 py-2 whitespace-nowrap">{fmtDate(d.uploaded_at)}</td>
                       <td className="px-3 py-2 whitespace-nowrap"><StatutDot statut={statutOf(d)} /></td>
                     </tr>
@@ -426,6 +594,12 @@ export default function Ged() {
                   <dt style={muted}>Phase</dt>
                   <dd><select aria-label="Phase du document" className={`${control} w-full`} style={controlStyle} value={phaseOf(selected)} onChange={e => void classify(selected, selected.project_id || '', e.target.value)}>
                     {PHASES.map(p => <option key={p}>{p}</option>)}</select></dd>
+                  <dt style={muted}>Dossier</dt>
+                  <dd><select aria-label="Dossier du document" className={`${control} w-full`} style={controlStyle} disabled={!selected.project_id}
+                    value={selected.folder_id || ''} onChange={e => void classify(selected, selected.project_id || '', phaseOf(selected), e.target.value)}>
+                    <option value="">À la racine de la phase</option>
+                    {folderChoices(selected.project_id, phaseOf(selected), folders).map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select></dd>
                   <dt style={muted}>Type</dt><dd>{selected.doc_type || '-'}</dd>
                   <dt style={muted}>Indice</dt><dd>{selected.indice || '-'}</dd>
                   <dt style={muted}>Version</dt><dd>{selected.version ?? 1}</dd>

@@ -33,6 +33,8 @@ export interface Document {
   contact_name?: string;
   validation_status?: 'pending' | 'approved' | 'rejected' | 'commented';
   validation_comments?: string;
+  /** Dossier libre sous la phase (GED), supabase/migrate_document_folders.sql. Absent ou nul : à la racine de la phase. */
+  folder_id?: string | null;
 }
 
 export interface DocumentVersion {

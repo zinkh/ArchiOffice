@@ -1,5 +1,6 @@
 // Logique pure de la vue GED générale (/documents) : navigation, filtres, recherche, tri.
 // Aucune dépendance à React : la page ne fait que l'afficher.
+import { folderAndDescendantIds, type DocFolder } from './gedFolders';
 
 export interface GedDoc {
   id: string;
@@ -13,12 +14,16 @@ export interface GedDoc {
   uploaded_at?: string;
   description?: string | null;
   emetteur?: string | null;
+  folder_id?: string | null;
 }
 
-export type GedNavKind = 'all' | 'recent' | 'fav' | 'toclass' | 'project' | 'phase' | 'type' | 'statut';
+export type GedNavKind = 'all' | 'recent' | 'fav' | 'toclass' | 'project' | 'phase' | 'type' | 'statut' | 'folder';
 
-/** Sélection de la navigation de gauche. `project` vaut un identifiant d'affaire ; `value` un code de phase, un type ou un statut. */
-export interface GedNav { kind: GedNavKind; project?: string; value?: string }
+/**
+ * Sélection de la navigation de gauche. `project` vaut un identifiant d'affaire ; `value` un code de phase,
+ * un type ou un statut ; `folder` (avec kind « folder ») un dossier libre sous une phase, sous-dossiers compris.
+ */
+export interface GedNav { kind: GedNavKind; project?: string; value?: string; folder?: string }
 
 export const GED_ALL: GedNav = { kind: 'all' };
 export const RECENT_COUNT = 20;
@@ -52,8 +57,11 @@ export function recentIds(docs: readonly GedDoc[], count = RECENT_COUNT): Set<st
 export function statutOf(d: GedDoc): string { return d.doc_statut || 'en_cours'; }
 export function phaseOf(d: GedDoc): string { return d.phase || 'Général'; }
 
-export function matchesNav(d: GedDoc, nav: GedNav, favs: ReadonlySet<string>, recent: ReadonlySet<string>): boolean {
+export function matchesNav(
+  d: GedDoc, nav: GedNav, favs: ReadonlySet<string>, recent: ReadonlySet<string>, folders: readonly DocFolder[] = [],
+): boolean {
   switch (nav.kind) {
+    case 'folder': return !!nav.folder && !!d.folder_id && folderAndDescendantIds(nav.folder, folders).has(d.folder_id);
     case 'all': return true;
     case 'recent': return recent.has(d.id);
     case 'fav': return favs.has(d.id);
@@ -76,11 +84,11 @@ export function searchHaystack(d: GedDoc, projectName: string): string {
 
 export function filterDocs(
   docs: readonly GedDoc[], nav: GedNav, f: GedFilters,
-  ctx: { favs: ReadonlySet<string>; recent: ReadonlySet<string>; projectName: (id?: string | null) => string },
+  ctx: { favs: ReadonlySet<string>; recent: ReadonlySet<string>; projectName: (id?: string | null) => string; folders?: readonly DocFolder[] },
 ): GedDoc[] {
   const q = fold(f.search.trim());
   return docs.filter(d =>
-    matchesNav(d, nav, ctx.favs, ctx.recent)
+    matchesNav(d, nav, ctx.favs, ctx.recent, ctx.folders)
     && (!f.phase || phaseOf(d) === f.phase)
     && (!f.type || (d.doc_type || '') === f.type)
     && (!f.statut || statutOf(d) === f.statut)
