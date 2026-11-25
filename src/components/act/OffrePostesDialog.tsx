@@ -24,6 +24,8 @@ interface Props {
 
 interface AjoutBrouillon {
   id: string; numero: string; designation: string; unite: string; quantite: string; prixUnitaire: string;
+  /** Article du document que ce poste chiffre (rattachement), conservé tel quel à l'enregistrement. */
+  articleId?: string;
 }
 
 /** « 1 234,50 € » ou « 1234.5 » : nombre positif, ou null si le texte n'en est pas un. */
@@ -66,6 +68,7 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
   const [ajouts, setAjouts] = useState<AjoutBrouillon[]>(() => ajoutsInitiaux.map(p => ({
     id: p.id, numero: p.numero, designation: p.designation, unite: p.unite,
     quantite: p.quantite != null ? String(p.quantite) : '', prixUnitaire: p.prixUnitaire != null ? String(p.prixUnitaire).replace('.', ',') : '',
+    ...(p.articleId ? { articleId: p.articleId } : {}),
   })));
   const [modifie, setModifie] = useState(false);
   const [abandon, setAbandon] = useState(false);
@@ -142,6 +145,7 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
         .map(a => ({
           id: a.id, numero: a.numero.trim(), designation: a.designation.trim(), unite: a.unite.trim() || 'u',
           quantite: lireNombre(a.quantite), prixUnitaire: lireNombre(a.prixUnitaire), lotId: lot.id,
+          ...(a.articleId && lignes.some(l => l.id === a.articleId) ? { articleId: a.articleId } : {}),
         }));
       // Seules les quantités qui diffèrent du document sont gardées ; une acceptation n'a de sens que pour elles.
       const quantites = quantitesUtiles(
@@ -269,7 +273,16 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
               {ajouts.map(a => (
                 <tr key={a.id} className="bg-violet-50/60 dark:bg-violet-900/10">
                   <td className="px-3 py-1.5"><input className={`${CHAMP} text-left`} value={a.numero} onChange={e => majAjout(a.id, { numero: e.target.value })} aria-label="Code du poste ajouté" /></td>
-                  <td className="px-3 py-1.5"><input className={`${CHAMP} text-left`} value={a.designation} onChange={e => majAjout(a.id, { designation: e.target.value })} aria-label="Désignation du poste ajouté" placeholder="Désignation" /></td>
+                  <td className="px-3 py-1.5">
+                    <input className={`${CHAMP} text-left`} value={a.designation} onChange={e => majAjout(a.id, { designation: e.target.value })} aria-label="Désignation du poste ajouté" placeholder="Désignation" />
+                    <select value={a.articleId && lignes.some(l => l.id === a.articleId) ? a.articleId : ''}
+                      onChange={e => majAjout(a.id, { articleId: e.target.value || undefined })}
+                      aria-label="Poste du document chiffré par ce poste ajouté"
+                      className="mt-1 w-full text-[0.6875rem] border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 px-1 py-0.5">
+                      <option value="">Hors marché (non rattaché à un poste)</option>
+                      {lignes.map(l => <option key={l.id} value={l.id}>Rattaché au poste {l.numero} {l.designation.length > 50 ? `${l.designation.slice(0, 50)}…` : l.designation}</option>)}
+                    </select>
+                  </td>
                   <td className="px-3 py-1.5"><input className={`${CHAMP} text-center`} value={a.unite} onChange={e => majAjout(a.id, { unite: e.target.value })} aria-label="Unité" placeholder="u" /></td>
                   <td className="px-3 py-1.5"><input inputMode="decimal" className={CHAMP} value={a.quantite} onChange={e => majAjout(a.id, { quantite: e.target.value })} aria-label="Quantité annoncée" placeholder="1" /></td>
                   <td className="px-3 py-1.5 text-right text-[var(--tblr-muted)]">·</td>

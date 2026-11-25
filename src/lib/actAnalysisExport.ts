@@ -31,6 +31,8 @@ interface ComparatifArticleExport {
   is_section_header?: boolean;
   is_subtotal?: boolean;
   ajoute_par?: string;
+  /** Propositions d'entreprises rattachées à cet article (leur montant est déjà dans `prix`). */
+  propositions?: { entrepriseId: string; entrepriseNom: string; designation: string; montant: number }[];
   unite?: string;
   /** Quantité du document (DPGF ou DQE). */
   quantite?: number;
@@ -57,8 +59,11 @@ const euros = (n?: number) =>
 // ── RAO (PDF) ─────────────────────────────────────────────────────────────────
 
 /** Un poste ajouté par une entreprise le dit dans l'export, où la couleur ne passe pas. */
-const titreArticle = (a: { titre: string; ajoute_par?: string }) =>
-  a.ajoute_par ? `${a.titre} (ajouté par ${a.ajoute_par})` : a.titre;
+const titreArticle = (a: { titre: string; ajoute_par?: string; propositions?: { entrepriseNom: string; designation: string }[] }) => {
+  if (a.ajoute_par) return `${a.titre} (ajouté par ${a.ajoute_par})`;
+  const propositions = (a.propositions ?? []).map(p => `${p.entrepriseNom} : ${p.designation}`);
+  return propositions.length ? `${a.titre} (proposition rattachée, ${propositions.join(' ; ')})` : a.titre;
+};
 
 export async function generateRAO(
   lots: ProjectLot[],

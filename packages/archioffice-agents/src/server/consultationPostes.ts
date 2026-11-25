@@ -65,7 +65,7 @@ export function trouverArticle(articles: Article[], ref: Json, numeroLot: string
 
 // ── Prix d'une entreprise (reprise de comparatifPrix.ts) ─────────────────────
 
-export interface PosteAjoute { id: string; numero: string; designation: string; unite: string; quantite: number | null; prixUnitaire: number | null; lotId?: string }
+export interface PosteAjoute { id: string; numero: string; designation: string; unite: string; quantite: number | null; prixUnitaire: number | null; lotId?: string; /** Article du DPGF que le poste chiffre (rattachement posé à l'écran), conservé à chaque réécriture. */ articleId?: string }
 
 const retenue = (o: Json, entrepriseId: string) => o.entrepriseId === entrepriseId && o.statut !== 'ecartee';
 
@@ -282,7 +282,7 @@ export async function manageOffresPostes(c: PostesCtx): Promise<Result> {
       const poste: PosteAjoute = { id: crypto.randomUUID(), numero: text(a.numero), designation: text(a.designation), unite: text(a.unite), quantite: q, prixUnitaire: pu, lotId: String(docLot.id) };
       // Rejouer un appel met à jour la ligne déjà saisie (même numéro et même désignation) au lieu de la doubler.
       const meme = ajouts.find(x => cleNumero(x.numero) === cleNumero(poste.numero) && norm(x.designation) === norm(poste.designation));
-      if (meme) ajouts = ajouts.map(x => (x === meme ? { ...poste, id: meme.id } : x));
+      if (meme) ajouts = ajouts.map(x => (x === meme ? { ...poste, id: meme.id, ...(meme.articleId ? { articleId: meme.articleId } : {}) } : x));
       else ajouts.push(poste);
     }
     if (erreurs.length) {

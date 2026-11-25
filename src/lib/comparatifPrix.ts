@@ -11,7 +11,7 @@
 //                contrediraient sans que rien ne le dise.
 import type { Lot, Ligne, OffreDocument, PosteAjoute } from '../types/dpgf';
 import { versComparatif, type ComparatifLot } from './bpuToAct';
-import { montantPoste } from './postesAjoutes';
+import { articleRattache, montantPoste } from './postesAjoutes';
 import type { BaseQuantites } from './quantitesOffre';
 
 export type ModeSaisie = 'total' | 'postes';
@@ -52,6 +52,8 @@ export interface LigneComparee {
   /** Plus bas prix unitaire chiffré (au moins deux entreprises en comparaison). */
   meilleur: number | null;
   mediane: number | null;
+  /** Postes que des entreprises ont rattachés à cet article (leur proposition pour ce poste du document). */
+  propositions?: AjoutCompare[];
 }
 
 export interface ChapitreCompare {
@@ -71,6 +73,8 @@ export interface AjoutCompare {
   entrepriseNom: string;
   prixUnitaire: number | null;
   montant: number;
+  /** Article du lot auquel le poste est rattaché ; absent si non rattaché ou si l'article n'existe plus. */
+  articleId?: string;
 }
 
 export interface LotCompare {
@@ -191,6 +195,14 @@ export function construireLot(lot: Lot, offres: OffreDocument[], entreprises: En
   const parEntreprise = new Map(entreprises.map(e => [e.id, prixEntreprise(offres, e.id)]));
   const enPostes = entreprises.filter(e => e.mode === 'postes');
 
+  const idsArticles = new Set(chapitresDuLot(lot).flatMap(c => c.lignes.map(l => l.id)));
+  const ajouts: AjoutCompare[] = enPostes.flatMap(e =>
+    ajoutsEntreprise(offres, e.id, lot.id).map(p => ({
+      id: p.id, code: p.numero, titre: p.designation, unite: p.unite, quantite: p.quantite ?? 1,
+      entrepriseId: e.id, entrepriseNom: e.nom, prixUnitaire: p.prixUnitaire, montant: montantPoste(p),
+      articleId: articleRattache(p, idsArticles),
+    })));
+
   const chapitres: ChapitreCompare[] = chapitresDuLot(lot).map(c => ({
     id: c.id, code: c.numero, titre: c.titre,
     lignes: c.lignes.map(l => {
@@ -206,15 +218,10 @@ export function construireLot(lot: Lot, offres: OffreDocument[], entreprises: En
         estimation: l.prixUnitaire || 0, horsBase: estHorsBase(l), prix,
         meilleur: chiffres.length > 1 ? Math.min(...chiffres) : null,
         mediane: chiffres.length > 1 ? mediane(chiffres) : null,
+        propositions: ajouts.filter(a => a.articleId === l.id),
       };
     }),
   }));
-
-  const ajouts: AjoutCompare[] = enPostes.flatMap(e =>
-    ajoutsEntreprise(offres, e.id, lot.id).map(p => ({
-      id: p.id, code: p.numero, titre: p.designation, unite: p.unite, quantite: p.quantite ?? 1,
-      entrepriseId: e.id, entrepriseNom: e.nom, prixUnitaire: p.prixUnitaire, montant: montantPoste(p),
-    })));
 
   const estimationTotale = chapitres.reduce(
     (s, c) => s + c.lignes.reduce((t, l) => t + (l.horsBase ? 0 : l.estimation * l.quantite), 0), 0);

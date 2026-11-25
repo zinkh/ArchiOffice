@@ -69,6 +69,42 @@ export function totalPostesAjoutes(postes: PosteAjoute[] | undefined): number {
   return (postes ?? []).reduce((s, p) => s + montantPoste(p), 0);
 }
 
+// ── Rattachement d'un poste ajouté à un article du DPGF ──────────────────────
+
+/** Article du document auquel un poste est rattaché, seulement si cet article existe encore dans le lot. */
+export function articleRattache(p: Pick<PosteAjoute, 'articleId'>, idsArticles: ReadonlySet<string>): string | undefined {
+  return p.articleId && idsArticles.has(p.articleId) ? p.articleId : undefined;
+}
+
+/**
+ * Rattache (ou détache, `articleId` null) un poste. Rend une NOUVELLE liste, les autres postes sont inchangés ;
+ * la même liste si le poste n'existe pas ou n'a pas à changer.
+ */
+export function rattacherPoste(postes: PosteAjoute[], posteId: string, articleId: string | null): PosteAjoute[] {
+  const cible = postes.find(p => p.id === posteId);
+  if (!cible || (cible.articleId ?? null) === articleId) return postes;
+  return postes.map(p => {
+    if (p.id !== posteId) return p;
+    const { articleId: _ancien, ...reste } = p;
+    return articleId ? { ...reste, articleId } : reste;
+  });
+}
+
+/**
+ * Article que le texte d'un poste désigne : « (poste 3.2 du DPGF, chiffré en forfait) » renvoie l'article de code
+ * « 3.2 ». Une SUGGESTION : rien n'est rattaché sans geste de l'architecte. Sans référence, ou si plusieurs articles
+ * du lot portent ce code (les numéros ne sont plus uniques dans un document), aucune suggestion.
+ */
+export function suggererRattachement(
+  designation: string, articles: Array<{ id: string; numero: string }>,
+): string | undefined {
+  const m = /\bpostes?\s+(?:n[°o]\s*)?(\d+(?:[.\-_]\d+)*[a-z]?)/i.exec(designation);
+  if (!m) return undefined;
+  const cle = normalizeNumero(m[1]);
+  const trouves = articles.filter(a => normalizeNumero(a.numero) === cle);
+  return trouves.length === 1 ? trouves[0].id : undefined;
+}
+
 // ── Import dans un document vierge ───────────────────────────────────────────
 
 const titreLot = (numero: string) => `Lot ${numero}`;

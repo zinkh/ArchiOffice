@@ -198,6 +198,24 @@ Un bouton crée d'un coup un poste pour toutes les lignes non rattachées.
   concernée ayant un prix ; le sous-total du lot les compte. `ACTModule.tsx` colore la ligne (violet, couleur
   de donnée) avec la pastille « Ajouté par … » ; l'export Excel du comparatif (`actAnalysisExport.ts`) ajoute
   « (ajouté par … ) » au libellé, la couleur n'y passant pas. Une offre écartée n'ajoute rien.
+- **Rattacher une proposition à un poste du DPGF** (`PosteAjoute.articleId`, jsonb de l'offre, aucune migration) : une
+  entreprise qui chiffre un poste du DPGF en forfait ou en variante (« poste 3.2 du DPGF, chiffré en forfait ») le rend
+  d'abord comme poste ajouté ; l'architecte le RATTACHE ensuite à l'article qu'il chiffre. Le montant reste dans le total
+  du lot (aucun double compte, le classement ne bouge pas), seule sa PLACE change : il s'affiche sous la ligne de l'article
+  dans la colonne de l'entreprise (« Proposition : … », bouton « Détacher ») et sort de la section « Postes ajoutés par
+  les entreprises ». Dans le comparatif enregistré (`versComparatif`), il s'ajoute au prix de l'article de l'entreprise
+  (`ComparatifArticle.propositions`) ; l'export Excel et le RAO l'écrivent « (proposition rattachée, entreprise : poste) ».
+  Un `articleId` qui ne désigne plus un article du lot est ignoré (`articleRattache`) : le poste redevient un poste ajouté
+  ordinaire. Gestes : liste « Rattacher à un poste du DPGF… » sur chaque poste ajouté (`ComparatifPrixUnitaires`),
+  **suggestion** tirée du texte (`suggererRattachement` : « poste 3.2 » renvoie l'article de code 3.2, seulement s'il est
+  UNIQUE dans le lot) confirmée d'un clic ou par « Rattacher les N suggestions » (jamais appliquée seule), et même choix
+  dans « Saisir les postes » (`OffrePostesDialog`, qui doit conserver `articleId` à l'enregistrement). Écriture par
+  `rattacherPostes` (`ACTModule`, une écriture par entreprise, offres seulement : le DPGF n'est jamais modifié). Si
+  l'entreprise a aussi un P.U. sur l'article, la proposition s'AJOUTE à ce prix (à détacher si elle le remplace).
+  `set_postes` du MCP conserve le rattachement quand il rejoue un poste. Tests : `src/lib/__tests__/postesAjoutes.test.ts`.
+  Pas encore fait : cartes mobiles du comparatif, rattachement à l'import d'un bordereau (`OffreImportDialog`), prise en
+  compte dans le snapshot du marché (`marcheAct.ts`, le poste reste sous son chapitre dédié), interface non vérifiée
+  dans un navigateur réel.
 - **Même dialogue pour remplir un document vierge** (`mode="document"`) : onglet PRO, menu « Importer un fichier
   (créer les postes) » du DPGF, du DQE/BPU et du CCTP (bouton). Pas d'entreprise ni de prix obligatoire
   (`detectHeader(..., { prixOptionnel })`, un CCTP n'a que des désignations) ; les lignes absentes du document

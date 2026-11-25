@@ -12,6 +12,7 @@ import {
 } from '../../lib/comparatifPrix';
 import { LIBELLE_BASE, construireLotQuantites, syntheseEcarts, type BaseQuantites } from '../../lib/quantitesEntreprise';
 import { LIBELLE_CHOIX, reponseAppliquee, type ReponseQuantite } from '../../lib/quantitesConfirmation';
+import { suggererRattachement } from '../../lib/postesAjoutes';
 import { cn } from '../../lib/utils';
 
 interface Props {
@@ -34,7 +35,14 @@ interface Props {
   /** Entreprises à qui demander une confirmation, et ouverture de la fenêtre d'envoi. */
   nbADemander?: number;
   onDemanderConfirmation?: () => void;
+  /**
+   * Rattache (`ligneId`) ou détache (`null`) des postes ajoutés par une entreprise à un article du document : sa
+   * proposition compte alors sur la ligne de cet article. Ne modifie que l'offre de l'entreprise, jamais le document.
+   */
+  onRattacher?: (lotId: string, changements: ChangementRattachement[]) => Promise<void> | void;
 }
+
+export interface ChangementRattachement { entrepriseId: string; posteId: string; ligneId: string | null }
 
 const HACHURE = { background: 'repeating-linear-gradient(135deg, var(--tblr-surface-2) 0 6px, transparent 6px 12px)' } as const;
 
@@ -50,7 +58,7 @@ function SousPrix({ ligne, pu, montrer }: { ligne: LigneComparee; pu: number; mo
   );
 }
 
-export default function ComparatifPrixUnitaires({ lots, documentLots, offres, entreprisesDuLot, documentLabel, onExport, base = 'moe', onChangeBase, onAccepterQuantite, reponses = [], onAppliquerReponses, nbADemander = 0, onDemanderConfirmation }: Props) {
+export default function ComparatifPrixUnitaires({ lots, documentLots, offres, entreprisesDuLot, documentLabel, onExport, base = 'moe', onChangeBase, onAccepterQuantite, reponses = [], onAppliquerReponses, nbADemander = 0, onDemanderConfirmation, onRattacher }: Props) {
   const lotsComparables = useMemo(
     () => lots.filter(l => documentLots.some(d => d.projectLotId === l.id)),
     [lots, documentLots],
@@ -58,6 +66,7 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
   const [lotChoisi, setLotChoisi] = useState<string | null>(null);
   const [montrer, setMontrer] = useState<'ecart' | 'total'>('ecart');
   const [filtre, setFiltre] = useState(false);
+  const [rattachement, setRattachement] = useState<{ enCours: boolean; erreur: string | null }>({ enCours: false, erreur: null });
 
   const lotId = lotChoisi && lotsComparables.some(l => l.id === lotChoisi) ? lotChoisi : lotsComparables[0]?.id ?? null;
   const lotDoc = documentLots.find(d => d.projectLotId === lotId);
@@ -80,6 +89,44 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
     .filter(c => c.lignes.length > 0);
   const nbLignes = chapitres.reduce((s, c) => s + c.lignes.length, 0);
   const classes = [...entreprises].filter(e => data.rangs[e.id] != null).sort((a, b) => (data.rangs[a.id]! - data.rangs[b.id]!));
+
+  // Postes ajoutés : ceux qui ne sont rattachés à aucun article restent dans leur section, les autres sont sous la
+  // ligne du document qu'ils chiffrent. Le rattachement proposé vient du texte du poste (« poste 3.2 du DPGF »).
+  const lignesLot = data.chapitres.flatMap(c => c.lignes);
+  const libres = data.ajouts.filter(a => !a.articleId);
+  const articlesPourSuggestion = lignesLot.map(l => ({ id: l.id, numero: l.code }));
+  const suggestions: ChangementRattachement[] = libres.flatMap(a => {
+    const ligneId = suggererRattachement(a.titre, articlesPourSuggestion);
+    return ligneId ? [{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId }] : [];
+  });
+  const rattacher = async (changements: ChangementRattachement[]) => {
+    if (!lotId || !onRattacher || changements.length === 0) return;
+    setRattachement({ enCours: true, erreur: null });
+    try {
+      await onRattacher(lotId, changements);
+      setRattachement({ enCours: false, erreur: null });
+    } catch (e: any) {
+      setRattachement({ enCours: false, erreur: e?.message || 'Le rattachement n’a pas pu être enregistré.' });
+    }
+  };
+
+  /** Propositions rattachées à un article, dans la colonne de l'entreprise qui les a faites. */
+  const propositionsCellule = (l: LigneComparee, entrepriseId: string) => {
+    const liste = (l.propositions ?? []).filter(a => a.entrepriseId === entrepriseId);
+    if (liste.length === 0) return null;
+    return liste.map(a => (
+      <span key={a.id} className="mt-1 block rounded px-1.5 py-1 text-left text-[0.6875rem] bg-violet-50 dark:bg-violet-900/20 text-violet-900 dark:text-violet-100"
+        title={`Proposition de l'entreprise rattachée à ce poste : ${a.titre}`}>
+        <span className="block font-semibold">Proposition{a.prixUnitaire != null ? ` : ${eur2(a.montant)} €` : ' (pour mémoire)'}</span>
+        <span className="block line-clamp-2">{a.titre}</span>
+        {onRattacher && (
+          <button type="button" disabled={rattachement.enCours}
+            onClick={() => void rattacher([{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId: null }])}
+            className="mt-0.5 underline font-semibold disabled:opacity-50">Détacher</button>
+        )}
+      </span>
+    ));
+  };
 
   const bouton = 'px-3 py-1.5 text-xs font-bold';
   return (
@@ -170,8 +217,8 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                         {entreprises.map(e => {
                           if (e.mode === 'total') return <td key={e.id} className="border-l border-[var(--tblr-border)]" style={HACHURE} aria-hidden="true" />;
                           const pu = l.prix[e.id];
-                          if (pu === null) return <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] italic text-[var(--tblr-muted)]">p.m.<span className="block text-[0.6875rem] not-italic">pour mémoire</span></td>;
-                          if (typeof pu !== 'number') return <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] text-[var(--tblr-muted)]">·</td>;
+                          if (pu === null) return <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] italic text-[var(--tblr-muted)]">p.m.<span className="block text-[0.6875rem] not-italic">pour mémoire</span>{propositionsCellule(l, e.id)}</td>;
+                          if (typeof pu !== 'number') return <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] text-[var(--tblr-muted)]">·{propositionsCellule(l, e.id)}</td>;
                           const meilleur = l.meilleur != null && pu === l.meilleur;
                           return (
                             <td key={e.id} className={cn('px-3 py-2 text-right border-l border-[var(--tblr-border)]', meilleur && 'bg-green-100 dark:bg-green-900/30')}>
@@ -184,6 +231,7 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                                   {data.ecarts[e.id]?.find(x => x.ligneId === l.id)?.acceptee ? ' (acceptée)' : ''}
                                 </span>
                               )}
+                              {propositionsCellule(l, e.id)}
                             </td>
                           );
                         })}
@@ -195,13 +243,49 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                 {nbLignes === 0 && (
                   <tr><td colSpan={nbColonnes} className="px-4 py-6 text-center italic text-[var(--tblr-muted)]">Aucun article avec un écart supérieur à 10 %.</td></tr>
                 )}
-                {data.ajouts.length > 0 && (
+                {libres.length > 0 && (
                   <>
-                    <tr className="bg-violet-50 dark:bg-violet-900/20"><td colSpan={nbColonnes} className="px-3 py-1.5 text-[0.6875rem] font-bold uppercase tracking-wider text-violet-800 dark:text-violet-200">Postes ajoutés par les entreprises</td></tr>
-                    {data.ajouts.map(a => (
+                    <tr className="bg-violet-50 dark:bg-violet-900/20">
+                      <td colSpan={nbColonnes} className="px-3 py-1.5 text-[0.6875rem] font-bold uppercase tracking-wider text-violet-800 dark:text-violet-200">
+                        <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+                          Postes ajoutés par les entreprises
+                          {onRattacher && suggestions.length > 0 && (
+                            <button type="button" disabled={rattachement.enCours} onClick={() => void rattacher(suggestions)}
+                              title={`Rattache les postes qui citent un poste du ${documentLabel} (« poste 3.2 du ${documentLabel} » par exemple)`}
+                              className="normal-case tracking-normal text-xs font-semibold px-2 py-0.5 rounded border border-violet-300 dark:border-violet-700 bg-white dark:bg-zinc-900 disabled:opacity-50">
+                              Rattacher les {suggestions.length} suggestion{suggestions.length > 1 ? 's' : ''}
+                            </button>
+                          )}
+                          {rattachement.erreur && <span role="alert" className="normal-case tracking-normal font-semibold text-red-600 dark:text-red-400">{rattachement.erreur}</span>}
+                        </span>
+                      </td>
+                    </tr>
+                    {libres.map(a => {
+                      const suggeree = suggestions.find(s => s.posteId === a.id)?.ligneId;
+                      const ligneSuggeree = suggeree ? lignesLot.find(l => l.id === suggeree) : undefined;
+                      return (
                       <tr key={a.id}>
                         <td className="px-3 py-2 text-[var(--tblr-muted)] sticky left-0 bg-[var(--tblr-surface)]">{a.code}</td>
-                        <td className="px-3 py-2">{a.titre}<br /><span className="inline-block mt-0.5 text-[0.6875rem] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200">Ajouté par {a.entrepriseNom}</span></td>
+                        <td className="px-3 py-2">{a.titre}<br /><span className="inline-block mt-0.5 text-[0.6875rem] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200">Ajouté par {a.entrepriseNom}</span>
+                          {onRattacher && (
+                            <span className="mt-1 flex flex-wrap items-center gap-2">
+                              <select value="" disabled={rattachement.enCours}
+                                aria-label={`Rattacher « ${a.titre} » à un poste du ${documentLabel}`}
+                                onChange={ev => { if (ev.target.value) void rattacher([{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId: ev.target.value }]); }}
+                                className="max-w-[260px] text-[0.6875rem] rounded border border-[var(--tblr-border)] bg-white dark:bg-zinc-900 px-1 py-0.5 disabled:opacity-50">
+                                <option value="">Rattacher à un poste du {documentLabel}…</option>
+                                {lignesLot.map(l => <option key={l.id} value={l.id}>{l.code} {l.titre.length > 60 ? `${l.titre.slice(0, 60)}…` : l.titre}</option>)}
+                              </select>
+                              {ligneSuggeree && (
+                                <button type="button" disabled={rattachement.enCours}
+                                  onClick={() => void rattacher([{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId: ligneSuggeree.id }])}
+                                  className="text-[0.6875rem] font-semibold underline disabled:opacity-50">
+                                  Rattacher au poste {ligneSuggeree.code}
+                                </button>
+                              )}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-center text-[var(--tblr-muted)]">{a.unite}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{a.quantite}</td>
                         <td className="px-3 py-2 text-right text-[var(--tblr-muted)] bg-[var(--tblr-surface-2)]">·</td>
@@ -214,7 +298,8 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                         ))}
                         <td className="border-l border-[var(--tblr-border)]" />
                       </tr>
-                    ))}
+                      );
+                    })}
                   </>
                 )}
                 <tr className="font-bold border-t-2 border-[var(--tblr-border)]">
