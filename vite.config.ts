@@ -122,7 +122,11 @@ export default defineConfig(({mode}) => {
           // for this route, silently keeping a popup on a pre-fix version no
           // matter how many times the server and client code were fixed and
           // redeployed, since the browser never even asked the network.
-          navigateFallbackDenylist: [/^\/api\//, /^\/auth\//],
+          // /oauth/ et /.well-known/ : /oauth/mcp/authorize est une redirection
+          // serveur (vers /mcp/authorize). Si le service worker la sert depuis
+          // la précache, React Router reçoit /oauth/mcp/authorize et affiche
+          // « No routes matched location » : la liaison MCP échoue.
+          navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/oauth\//, /^\/\.well-known\//],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\//,
