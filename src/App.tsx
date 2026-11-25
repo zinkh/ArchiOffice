@@ -56,7 +56,7 @@ const Mailbox = lazy(() => import('./pages/Mailbox'));
 const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const References = lazy(() => import('./pages/References'));
-const Documents = lazy(() => import('./pages/Documents'));
+const Documents = lazy(() => import('./pages/Ged'));
 const ShareTarget = lazy(() => import('./pages/ShareTarget'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Billing = lazy(() => import('./pages/Billing'));
