@@ -177,6 +177,11 @@ export interface LlmProvider {
    *  pièces photographiées — dégradé, mais honnête, plutôt que d'envoyer une
    *  image qu'il ignorerait silencieusement ou refuserait. */
   readonly supportsVision?: boolean;
+  /** Nombre maximal d'images qu'une requête peut porter (Mistral : 8).
+   *  Absent : aucune limite connue. buildAgentContext() (context.ts) s'en sert
+   *  pour ne pas dépasser ce budget : les pièces en trop retombent sur le
+   *  texte OCR plutôt que de faire refuser toute la requête. */
+  readonly maxImages?: number;
   /** Le fournisseur sait-il exécuter lui-même une recherche web (voir
    *  LlmChatParams.webSearch) ? Absent/false : routes.ts n'envoie jamais ce
    *  paramètre à ce fournisseur, et web_search_enabled reste sans effet tant
