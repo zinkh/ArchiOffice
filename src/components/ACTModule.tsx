@@ -49,6 +49,12 @@ import {
 } from '../lib/quantitesEntreprise';
 import { quantitesApresReponses, type LotQuantitesAConfirmer, type ReponseQuantite } from '../lib/quantitesConfirmation';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
+import OffresHorsPlateformePanel from './act/OffresHorsPlateformePanel';
+import { getAccessToken } from '../lib/authToken';
+import {
+  ajouterOffresRecues, marquerOffreRecue, offresRecues, retirerOffreRecue, type OffreFichierRecu, type PieceRecue,
+} from '../lib/offresRecues';
+import type { ContexteDocumentsRecus } from './pro/OffreImportDialog';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
 import OffrePostesDialog from './act/OffrePostesDialog';
@@ -210,6 +216,8 @@ interface Consultation extends DonneesNegociation {
   marche?: ParametresMarche;
   /** Document dont les articles et l'estimation servent à comparer les offres (DPGF par défaut). */
   document_reference?: CibleDocument;
+  /** Pièces d'offre remises hors plateforme (PDF, contenu d'un ZIP), rangées dans les documents de l'affaire. */
+  offres_recues_fichiers?: OffreFichierRecu[];
 }
 
 type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'negociation' | 'analyse' | 'marches';
@@ -931,6 +939,44 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     await enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id), quantites, quantitesAcceptees(docs.offres, entrepriseId));
   };
 
+  /**
+   * Range les documents d'une offre remise hors plateforme dans les documents de l'affaire (catégorie
+   * « Consultation - offres reçues ») et les référence dans la consultation. Rend les pièces NON envoyées :
+   * la fenêtre ne garde que celles-là, un nouvel essai ne crée donc aucun doublon.
+   */
+  const enregistrerDocumentsRecus = async (pieces: PieceRecue[], ctx: ContexteDocumentsRecus): Promise<PieceRecue[]> => {
+    const token = await getAccessToken();
+    const entreprise = ctx.entrepriseId ? latest.current.consultation.entreprises.find(e => e.id === ctx.entrepriseId) : undefined;
+    const nouvelles: OffreFichierRecu[] = [];
+    const restantes: PieceRecue[] = [];
+    for (const p of pieces) {
+      try {
+        const form = new FormData();
+        form.append('file', p.file);
+        form.append('project_id', projectId);
+        form.append('name', `${ctx.entrepriseNom} - ${p.file.name}`);
+        form.append('category', 'Consultation - offres reçues');
+        form.append('phase', 'ACT');
+        form.append('description', `Offre remise hors plateforme par ${ctx.entrepriseNom}${p.archive ? ` (archive ${p.archive}, ${p.chemin})` : ''}`);
+        form.append('uploaded_by', 'ACT');
+        const r = await fetch('/api/documents', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+        const doc = await r.json().catch(() => ({}));
+        if (!r.ok || !doc?.id) throw new Error(doc?.error || 'envoi refusé');
+        nouvelles.push({
+          id: crypto.randomUUID(), entreprise_id: ctx.entrepriseId, entreprise_nom: ctx.entrepriseNom,
+          lots_ids: entreprise?.lots_ids ?? [], document_id: doc.id, file_url: doc.file_url, nom: p.file.name,
+          chemin: p.chemin !== p.file.name ? p.chemin : undefined, archive: p.archive, taille: p.file.size,
+          recu_le: ctx.dateReception, statut: 'recu', origine: 'hors_plateforme',
+        });
+      } catch {
+        restantes.push(p);
+      }
+    }
+    if (nouvelles.length > 0) update(ajouterOffresRecues(latest.current.consultation, nouvelles));
+    if (nouvelles.length === 0 && restantes.length > 0) throw new Error("Aucun document n'a pu être enregistré : vérifiez le format et la taille (50 Mo au plus par fichier), puis réessayez.");
+    return restantes;
+  };
+
   /** Un bordereau importé passe en « poste par poste » les lots de l'entreprise qu'il chiffre. */
   const confirmerImport = async (offre: Omit<OffreDocument, 'id' | 'importedAt'>) => {
     const { offres: suivantes, saved } = await docs.enregistrer(offre);
@@ -1593,6 +1639,12 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
             onChangeConsultation={next => update(next as Consultation)}
             onImporterActe={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
             onOpenSettings={() => setReglagesDepotOuverts(true)}
+          />
+          <OffresHorsPlateformePanel
+            offres={offresRecues(consultation)}
+            lots={lots}
+            onMarquer={(id, statut) => update(marquerOffreRecue(consultation, id, statut))}
+            onRetirer={id => update(retirerOffreRecue(consultation, id))}
           />
           {/* Document de référence : ses articles et son estimation servent à saisir et comparer les offres poste par poste. */}
           <div className="rounded-lg p-4 flex flex-wrap items-center justify-between gap-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
@@ -2311,6 +2363,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
           entrepriseInitiale={importOuvert.entreprise ? { id: importOuvert.entreprise.id, nom: importOuvert.entreprise.nom } : undefined}
           onClose={() => setImportOuvert(null)}
           onConfirm={confirmerImport}
+          onDocumentsRecus={enregistrerDocumentsRecus}
         />
       )}
 

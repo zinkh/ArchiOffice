@@ -179,6 +179,28 @@ reçues, synthèse économique), les exports dans `src/lib/actNegociationExport.
   des PDF passent par un `euros()` qui remplace l'espace fine U+202F, absente des
   polices de jsPDF (sinon « 31 /210 » : voir la note d'honoraires plus haut).
 
+### Import d'une offre : autocomplétion et documents reçus hors plateforme
+
+La fenêtre « Importer une offre » (`OffreImportDialog`, appelée depuis l'ACT avec `onDocumentsRecus`) :
+
+- **Champ entreprise à l'autocomplétion** (`act/EntrepriseConsulteeCombobox.tsx`, recherche `rechercherEntreprises` de
+  `src/lib/offresRecues.ts`) : accents, casse et ponctuation ignorés, tous les mots saisis exigés, début de mot classé
+  avant simple inclusion. Choisir rattache l'entreprise de la consultation (`entrepriseId`), un autre nom reste saisi tel
+  quel. Distinct de `EntrepriseAutocomplete` (fiches contacts, avec création de fiche).
+- **Documents hors plateforme** : la zone de dépôt accepte plusieurs fichiers (clic ou glisser-déposer) : PDF, Word,
+  Excel, ODS, ODT, CSV, ou un **dossier ZIP** (`lireDepot`, `src/lib/offresRecues.ts`, testé). Le ZIP est ouvert en
+  mémoire, sous-dossiers compris ; sont écartés avec motif les formats non acceptés, les chemins non sûrs (`..`,
+  absolu, lecteur), les parasites (`__MACOSX`, fichiers cachés), les doublons, et au-delà des plafonds (50 Mo par
+  pièce, 200 Mo d'archive, 400 Mo décompressés, 100 pièces). Le premier tableur déposé sert de bordereau à analyser
+  (flux existant) ; le reste devient pièce de l'offre. Sans bordereau, le bouton devient « Enregistrer N documents ».
+- **Rangement** (`enregistrerDocumentsRecus`, `ACTModule`) : chaque pièce est envoyée par `POST /api/documents`
+  (catégorie « Consultation - offres reçues », phase ACT) puis référencée dans `consultation.offres_recues_fichiers`
+  (jsonb, `OffreFichierRecu`, **aucune migration**, aucune lecture du contenu). Les pièces non envoyées sont rendues à la
+  fenêtre, qui ne garde qu'elles : un nouvel essai ne crée pas de doublon. Panneau `act/OffresHorsPlateformePanel.tsx`
+  sous les dépôts du portail : ouvrir, marquer comme traité, retirer (le document reste dans l'affaire).
+- **Pas encore fait** : « Lire les montants » sur ces pièces (la lecture est côté serveur, liée à `consultation_depots`),
+  choix du lot par pièce (elles reprennent les lots de l'entreprise), interface non vérifiée dans un navigateur réel.
+
 ### Postes ajoutés par une entreprise et import dans un document vierge
 
 Une ligne du fichier d'une offre qui ne correspond à aucun article du marché
