@@ -108,6 +108,7 @@ import ChantierModule from '../components/ChantierModule';
 import MilestoneGantt from '../components/MilestoneGantt';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedPhoneCalls from '../components/phoneCalls/LinkedPhoneCalls';
+import ProjectDocuments from './Documents';
 import { ProTab } from '../components/pro/ProTab';
 import { SituationsTravaux } from '../components/projectDetail/situations/SituationsTravaux';
 import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS, computePartInteretFromContrat, missionFlagsFromMaf } from '../lib/mafUtils';
@@ -5143,6 +5144,7 @@ export default function ProjectDetail() {
                 />
               </div>
             )}
+            {activeTab === 'DOCS' && id && <ProjectDocuments key={id} embedded projectId={id} />}
             {activeTab === 'CORRESPONDANCE' && (
               <div className="space-y-8">
                 <LinkedPhoneCalls projectId={id!} />

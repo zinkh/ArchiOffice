@@ -256,7 +256,9 @@ Don't see something you expected here, or know of a gap this page is missing? Op
 
 ### Document management (GED): general view, per-project view and folders under phases
 
-⏳ Planned. The `/documents` screen is a simple list. It currently mixes two jobs and carries settings that do not belong to it. Mock-up: a three-pane GED inspired by ArchiOffice Drive and M-Files (published as a private artifact during design; nothing is coded yet).
+🚧 Step 1 done: the "Mémoire technique collective" panel moved to `/settings` > Données et RGPD (`KnowledgeSharingSettings`), the Drive reader block lives in `/settings` > Mon profil (`DriveAccessPanel`) and, per project, in the new project tab **Documents** (`DOCS`, family "Documents", which mounts `Documents` with `embedded` + `projectId`). Not done yet: the general GED view and the folders under phases.
+
+The `/documents` screen is a simple list. It currently mixes two jobs and carries settings that do not belong to it. Mock-up: a three-pane GED inspired by ArchiOffice Drive and M-Files (published as a private artifact during design; nothing is coded yet).
 
 - **Move settings to the global settings** (`/settings`): the "Mémoire technique collective" block (anonymous sharing consent, automatic sharing, analysed and shared documents, manual sharing, Mistral link check) and the "Lecteur A:" block (connection, projects added to the drive, open and disconnect). `/documents` keeps neither.
 - **Per-project view**: today's simple documents view moves into each project file (project sheet), where it already fits the project context.

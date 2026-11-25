@@ -1,4 +1,5 @@
 import { DriveAccessPanel } from '../components/DriveAccessPanel';
+import { KnowledgeSharingSettings } from '../components/KnowledgeSharingSettings';
 import { DeleteProjectCard } from '../components/settings/DeleteProjectCard';
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -3058,6 +3059,9 @@ export default function Settings() {
 
       {isAdmin && activeTab === 'donnees' && (
         <>
+          {/* ── Mémoire technique collective (déplacée depuis /documents) ── */}
+          <KnowledgeSharingSettings />
+
           {/* ── Archivage — RGPD : export complet de l'activité du cabinet ── */}
           <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Archivage</h2>

@@ -4,7 +4,6 @@ import { desktopBridge } from '../lib/desktopBridge';
 import { useDragToZone } from '../hooks/useDragToZone';
 import { useDriveDocumentStatuses } from '../hooks/useDriveDocumentStatuses';
 import { DriveDocumentActions } from '../components/DriveDocumentActions';
-import { KnowledgeSharingPanel } from '../components/KnowledgeSharingPanel';
 import {
   IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX,
   IconUpload, IconCloudOff, IconCloud, IconChevronDown, IconChevronRight, IconFolder,
@@ -69,7 +68,12 @@ function IndiceBadge({ indice }: { indice?: string }) {
 const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition text-sm";
 const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
-export default function Documents() {
+/**
+ * Vue simple des documents. Montée dans la fiche affaire (`embedded` + `projectId`) elle est limitée
+ * à l'affaire et porte l'ajout au lecteur ArchiOffice Drive ; les réglages de partage de la mémoire
+ * technique et du lecteur vivent dans les paramètres.
+ */
+export default function Documents({ projectId, embedded = false }: { projectId?: string; embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -154,7 +158,7 @@ export default function Documents() {
   const [isDiffSending, setIsDiffSending] = useState(false);
 
   // Navigation
-  const [activeProject, setActiveProject] = useState<string | null>(null);
+  const [activeProject, setActiveProject] = useState<string | null>(projectId ?? null);
   const [activePhase, setActivePhase] = useState<DocumentPhase | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -448,6 +452,7 @@ export default function Documents() {
 
   return (
     <div className="flex gap-4 h-full">
+      {!embedded && <>
       {/* Mobile sidebar overlay */}
       {sidebarOpen && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setSidebarOpen(false)} />}
 
@@ -565,9 +570,10 @@ export default function Documents() {
         })}
       </div>
 
+      </>}
+
       {/* Main content */}
       <div className="flex-1 space-y-4 min-w-0">
-        <KnowledgeSharingPanel documents={documents} />
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <button
@@ -606,8 +612,8 @@ export default function Documents() {
           </div>
         </div>
 
-        {driveEnabled && <WindowsDrivePreview key={`${currentUser?.id}:${activeTenantId}`} projectId={activeProject && activeProject!=='unassigned'?activeProject:null} />}
-        {!driveEnabled && driveReason && (
+        {embedded && driveEnabled && <WindowsDrivePreview key={`${currentUser?.id}:${activeTenantId}`} projectId={activeProject && activeProject!=='unassigned'?activeProject:null} />}
+        {embedded && !driveEnabled && driveReason && (
           <div className="rounded-lg px-3 py-2 text-xs max-w-prose" role="status" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
             <strong style={{ color: 'var(--tblr-text)' }}>{t('windows_drive_unavailable_title')}</strong>
             {' : '}{t(`windows_drive_unavailable_${driveReason}`)}

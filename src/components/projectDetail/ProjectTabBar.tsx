@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IconInfoCircle, IconChecklist, IconReceipt2, IconFileDescription, IconUsersGroup,
-  IconBuildingFactory2, IconMail, IconChevronDown,
+  IconBuildingFactory2, IconMail, IconChevronDown, IconFolders,
 } from '@tabler/icons-react';
 import { PillTabs, type PillTabItem } from '../ui/PillTabs';
 import { BottomSheet, SheetOption } from '../ui/BottomSheet';
@@ -33,6 +33,7 @@ const GROUP_ICONS: Record<ProjectTabGroupId, React.ElementType> = {
   ETUDES: IconFileDescription,
   CONSULTATION: IconUsersGroup,
   CHANTIER: IconBuildingFactory2,
+  DOCUMENTS: IconFolders,
   CORRESPONDANCE: IconMail,
 };
 
