@@ -90,6 +90,7 @@ import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
 import { registerSupportRoutes } from "./server/routes/support";
 import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntreprises";
 import { registerMarcheSousTraitantsRoutes } from "./server/routes/marcheSousTraitants";
+import { registerLotIntervenantsRoutes } from "./server/routes/lotIntervenants";
 import { registerTravauxModificatifsRoutes } from "./server/routes/travauxModificatifs";
 import { registerMarchesSubsequentsRoutes } from "./server/routes/marchesSubsequents";
 import { registerAccordCadreConsultationsRoutes } from "./server/routes/accordCadreConsultations";
@@ -1235,6 +1236,7 @@ export async function createApp() {
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerMarcheSousTraitantsRoutes(app, { supabaseAdmin, getTenantId });
+  registerLotIntervenantsRoutes(app, { supabaseAdmin, getTenantId });
   registerTravauxModificatifsRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMarchesSubsequentsRoutes(app, { supabaseAdmin, getTenantId });
   registerAccordCadreConsultationsRoutes(app, { supabaseAdmin, getTenantId });
