@@ -265,6 +265,7 @@ import type { Project } from '@/src/types';
 
 ### Component Style
 
+- **Toujours suivre `DESIGN.md` (racine) pour toute interface** : couleurs en `var(--tblr-*)` (jamais `bg-zinc-*`, `bg-blue-600`, hex en dur, ni classes shadcn comme `bg-primary` ou `bg-card`, qui n'existent pas ici), classes `.btn-*`, `.card`, `.tblr-input`, deux rayons seulement (4 px, 8 px), pas de `shadow-lg` sur une carte, texte 11 px minimum en `rem`. Le relire avant de toucher à un écran.
 - Tailwind utility classes for all styling
 - `clsx` for conditional class merging
 - Tabler Icons (`@tabler/icons-react`) for icons

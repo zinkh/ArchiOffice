@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
-import { IconPlugConnected } from '@tabler/icons-react';
+import { IconBan, IconCheck, IconPlugConnected } from '@tabler/icons-react';
 
 export default function McpAuthorize() {
   const { t } = useTranslation();
@@ -45,26 +45,31 @@ export default function McpAuthorize() {
   };
 
   return (
-    <div className="mx-auto max-w-md py-16 px-4">
-      <div className="rounded-lg border border-border bg-card p-6 text-center">
-        <IconPlugConnected className="mx-auto mb-4 h-10 w-10 text-muted-foreground" />
-        <h1 className="text-lg font-semibold">{t('mcp_authorize_title')}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{t('mcp_authorize_description')}</p>
+    <div className="mx-auto max-w-lg px-4 py-16">
+      <div className="rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] p-6 text-[var(--tblr-text)] shadow-[var(--tblr-shadow)]">
+        <div className="text-center">
+          <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-[var(--tblr-surface-2)] text-[var(--tblr-primary)]">
+            <IconPlugConnected className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <h1 className="text-base font-bold tracking-tight">{t('mcp_authorize_title')}</h1>
+          <p className="mt-2 text-sm text-[var(--tblr-muted)]">{t('mcp_authorize_description')}</p>
+        </div>
         {missing ? (
-          <p className="mt-4 text-sm text-destructive">{t('mcp_authorize_invalid_request')}</p>
+          <p role="alert" className="mt-6 text-center text-sm font-medium text-[var(--tblr-danger)]">{t('mcp_authorize_invalid_request')}</p>
         ) : (
           <>
-            <ul className="mt-4 space-y-1 text-left text-sm text-muted-foreground">
-              <li>• {t('mcp_authorize_scope_read')}</li>
-              <li>• {t('mcp_authorize_scope_write')}</li>
-              <li>• {t('mcp_authorize_scope_drafts')}</li>
-              <li>• {t('mcp_authorize_scope_never')}</li>
+            <ul className="mt-6 divide-y divide-[var(--tblr-border)] overflow-hidden rounded-lg border border-[var(--tblr-border)] text-left text-sm">
+              <li className="flex gap-3 px-3 py-2.5"><IconCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--tblr-primary)]" aria-hidden="true" />{t('mcp_authorize_scope_read')}</li>
+              <li className="flex gap-3 px-3 py-2.5"><IconCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--tblr-primary)]" aria-hidden="true" />{t('mcp_authorize_scope_write')}</li>
+              <li className="flex gap-3 px-3 py-2.5"><IconCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--tblr-primary)]" aria-hidden="true" />{t('mcp_authorize_scope_drafts')}</li>
+              <li className="flex gap-3 bg-[var(--tblr-surface-2)] px-3 py-2.5 font-medium"><IconBan className="mt-0.5 h-4 w-4 shrink-0 text-[var(--tblr-danger)]" aria-hidden="true" />{t('mcp_authorize_scope_never')}</li>
             </ul>
-            {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+            {error && <p role="alert" className="mt-4 text-sm font-medium text-[var(--tblr-danger)]">{error}</p>}
             <button
+              type="button"
               onClick={handleAuthorize}
               disabled={loading}
-              className="mt-6 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              className="btn btn-primary mt-6 w-full justify-center disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? t('mcp_authorize_connecting') : t('mcp_authorize_confirm')}
             </button>
