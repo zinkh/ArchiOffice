@@ -271,7 +271,16 @@ export async function buildAgentContext(
   // comme docsRead/docsWrite (voir AgentCapabilities.knowledge dans types.ts).
   knowledgeEnabled: boolean = false,
   // capabilitiesFromAgent(agent).learning — même indépendance de context_scopes.
-  learningEnabled: boolean = false
+  learningEnabled: boolean = false,
+  // LlmProvider.maxImages : nombre d'images qu'une requête peut porter (Mistral :
+  // 8). Une pièce qui ne tient plus dans ce budget retombe sur le texte OCR au
+  // lieu de faire refuser toute la requête. Sans limite par défaut.
+  maxImages: number = Number.POSITIVE_INFINITY,
+  // Documents autorisés à partir en vision. null = tous. Avec un fournisseur
+  // limité en images, routes.ts ne passe que les documents du message courant :
+  // ceux des tours précédents, qui restent attachés à la conversation, ne
+  // repartent pas en images à chaque message.
+  visionDocumentIds: string[] | null = null
 ): Promise<AgentContext> {
   const [tenantRes, profileRes] = await Promise.all([
     supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single(),
@@ -516,8 +525,10 @@ export async function buildAgentContext(
         // mais fausse, sans jamais avoir vu les pixels réels. Voir LlmImage
         // dans llm/types.ts.
         const imageMime = visionMimeType(lowerName);
+        const visionAllowed = supportsVision && (!visionDocumentIds || visionDocumentIds.includes(doc.id));
+        const imageSlots = () => maxImages - ctx.documentImages.length;
         if (imageMime) {
-          if (supportsVision) {
+          if (visionAllowed && imageSlots() >= 1) {
             ctx.documentImages.push({ id: doc.id, name: doc.name, mimeType: imageMime, data: buffer });
             return;
           }
@@ -572,9 +583,12 @@ export async function buildAgentContext(
         // même raison que ci-dessus — un PV ou un plan scanné à la va-vite
         // n'est pas plus "plat" qu'une photo, et mérite la même lecture
         // directe plutôt qu'un détour par Tesseract.
-        if (lowerName.endsWith('.pdf') && supportsVision && (!text || text.trim().length < OCR_MIN_TEXT_CHARS)) {
+        if (lowerName.endsWith('.pdf') && visionAllowed && imageSlots() >= 1 && (!text || text.trim().length < OCR_MIN_TEXT_CHARS)) {
           const pages = await rasterizePdf(buffer, ocrMaxPages()).catch(() => null);
-          if (pages && pages.length > 0) {
+          // Toutes les pages ou aucune : un plan lu à moitié serait pris pour
+          // complet. Si elles ne tiennent plus dans le budget d'images, le
+          // document retombe sur l'OCR texte ci-dessous.
+          if (pages && pages.length > 0 && pages.length <= imageSlots()) {
             pages.forEach((page, i) => {
               ctx.documentImages.push({ id: doc.id, name: `${doc.name} (page ${i + 1})`, mimeType: 'image/png', data: page });
             });
