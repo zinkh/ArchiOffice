@@ -367,10 +367,12 @@ export default function AgentChatPage() {
         <button
           onClick={resetConversation}
           disabled={loading || loadingHistory || resetBusy}
-          className="min-h-11 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[0.75rem] shrink-0 hover:bg-[var(--tblr-surface-2)] disabled:opacity-50 disabled:cursor-wait transition-colors"
+          className="min-h-11 min-w-11 flex items-center justify-center rounded-lg border shrink-0 hover:bg-[var(--tblr-surface-2)] disabled:opacity-50 disabled:cursor-wait transition-colors"
           style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
+          title={t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear') as string}
+          aria-label={t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear') as string}
         >
-          <IconMessagePlus size={15} style={{ color: 'var(--tblr-primary)' }} /> {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
+          <IconMessagePlus size={18} style={{ color: 'var(--tblr-primary)' }} />
         </button>
       </div>
 

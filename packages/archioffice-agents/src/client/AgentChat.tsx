@@ -1049,11 +1049,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={resetConversation}
                 disabled={loading || loadingHistory || resetBusy}
-                className="shrink-0 inline-flex items-center gap-1.5 min-h-11 px-2 rounded-lg text-[0.75rem] font-medium hover:bg-[var(--tblr-surface-2)] disabled:opacity-50 disabled:cursor-wait transition-colors"
-                style={{ color: 'var(--tblr-text)' }}
+                className="shrink-0 inline-flex items-center justify-center min-h-11 min-w-11 rounded-lg hover:bg-[var(--tblr-surface-2)] disabled:opacity-50 disabled:cursor-wait transition-colors"
+                title={t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear') as string}
+                aria-label={t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear') as string}
               >
                 <IconMessagePlus size={18} style={{ color: 'var(--tblr-primary)' }} />
-                {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
               </button>
               {/* Dédié au poste de bureau : sur téléphone le panneau occupe déjà la largeur de l'écran. */}
               {activeAgent && (
