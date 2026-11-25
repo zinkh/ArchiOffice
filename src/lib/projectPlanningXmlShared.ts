@@ -13,6 +13,12 @@ export interface ImportedPlanningTask {
   dependencies: string[];
   resourceNames: string[];
   milestone?: boolean;
+  /** Tâche récapitulative (groupe) : elle regroupe d'autres tâches et n'est pas une intervention. */
+  summary?: boolean;
+  /** Identifiant source du groupe qui contient la tâche (absent : niveau racine). */
+  parentSourceId?: string;
+  /** Décalage de chaque lien, en jours, par identifiant source de prédécesseur (absent : 0). */
+  lagDays?: Record<string, number>;
 }
 
 export interface ParsedPlanningXml {

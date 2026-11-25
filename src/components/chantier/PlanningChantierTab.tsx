@@ -8,7 +8,7 @@
 // écraserait sinon le planning enregistré par un planning vide.
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { IconArrowBackUp, IconArrowForwardUp, IconChevronDown, IconChevronRight, IconSparkles, IconPlus, IconFileDownload, IconAlertTriangle, IconLoader2, IconCheck } from '@tabler/icons-react';
+import { IconArrowBackUp, IconArrowForwardUp, IconChevronDown, IconChevronRight, IconSparkles, IconPlus, IconFileDownload, IconFileImport, IconAlertTriangle, IconLoader2, IconCheck } from '@tabler/icons-react';
 import { saveAs } from 'file-saver';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../../UserContext';
@@ -34,6 +34,8 @@ import { canRedo, canUndo, createHistory, pushHistory, redoHistory, undoHistory,
 import { ecartJalonMission, jalonMissionAvecDate, jalonsMissionDepuisApi } from '../../lib/planningJalonsMission';
 import { PlanningBarre } from './PlanningBarre';
 import { PlanningGenerateDialog } from './PlanningGenerateDialog';
+import { PlanningImportDialog } from './PlanningImportDialog';
+import { appliquerImport, type ModeImportPlanning, type PlanningImporte } from '../../lib/planningChantierImport';
 
 interface Props {
   project: Project;
@@ -102,6 +104,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const [etat, setEtat] = useState<EtatEnregistrement>('repos');
   const [tacheOuverte, setTacheOuverte] = useState<{ tache: TachePlanning; nouvelle: boolean } | null>(null);
   const [genererOuvert, setGenererOuvert] = useState(false);
+  const [importerOuvert, setImporterOuvert] = useState(false);
   const [enExport, setEnExport] = useState<string | null>(null);
   // Réglages propres à l'export PDF : ne modifient ni l'écran ni le planning partagé.
   const [formatPdf, setFormatPdf] = useState<FormatPdfPlanning>('a4');
@@ -236,7 +239,7 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
   const actionsHistorique = useRef({ annuler: annulerDernier, retablir: retablirDernier });
   actionsHistorique.current = { annuler: annulerDernier, retablir: retablirDernier };
   const fenetreOuverte = useRef(false);
-  fenetreOuverte.current = !!tacheOuverte || genererOuvert;
+  fenetreOuverte.current = !!tacheOuverte || genererOuvert || importerOuvert;
   useEffect(() => {
     // Ctrl/Cmd+Z annule, Ctrl/Cmd+Maj+Z ou Ctrl+Y rétablit ; jamais dans un champ de saisie (annulation native du champ)
     // ni pendant qu'une fenêtre est ouverte.
@@ -293,6 +296,13 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
     modifier(appliquerGeneration(planning, genere, lotIds, { garderManuel }));
     setGenererOuvert(false);
     showToast(`${genere.taches.length} tâche${genere.taches.length > 1 ? 's' : ''} ajoutée${genere.taches.length > 1 ? 's' : ''} au planning.`);
+  };
+
+  const importerFichier = (importe: PlanningImporte, mode: ModeImportPlanning) => {
+    // Un seul pas d'historique : Ctrl+Z annule tout l'import.
+    modifier(appliquerImport(planning, importe, mode));
+    setImporterOuvert(false);
+    showToast(`${importe.taches.length} tâche${importe.taches.length > 1 ? 's' : ''} importée${importe.taches.length > 1 ? 's' : ''} ${mode === 'remplacer' ? 'à la place du planning' : 'au planning'}.`);
   };
 
   const exporter = async (lotId?: string) => {
@@ -466,6 +476,9 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
             </button>
             <button type="button" className="btn btn-secondary" onClick={() => void exporter()} disabled={!planning.taches.length || enExport !== null}>
               {enExport === '*' ? <IconLoader2 size={16} className="animate-spin" aria-hidden="true" /> : <IconFileDownload size={16} aria-hidden="true" />}Exporter PDF
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={() => setImporterOuvert(true)} disabled={!disponible}>
+              <IconFileImport size={16} aria-hidden="true" />Importer
             </button>
             <button type="button" className="btn btn-primary" onClick={() => setGenererOuvert(true)} disabled={!disponible || lots.length === 0}>
               <IconSparkles size={16} aria-hidden="true" />Générer avec l’IA
@@ -748,6 +761,15 @@ export function PlanningChantierView({ project, lots, settings, showToast, prefe
           aDuManuel={planning.taches.some(t => t.source === 'manuel')}
           onApply={appliquerIa}
           onClose={() => setGenererOuvert(false)}
+        />
+      )}
+      {importerOuvert && (
+        <PlanningImportDialog
+          projectId={project.id}
+          lots={lotsPlanif}
+          aDesTaches={planning.taches.length > 0}
+          onApply={importerFichier}
+          onClose={() => setImporterOuvert(false)}
         />
       )}
     </div>
