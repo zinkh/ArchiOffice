@@ -232,8 +232,11 @@ export function ActeLecteur({ fichier, lots, contacts, consultation, onImporter,
 
 // ── Montants probables lus dans un fichier ───────────────────────────────────
 
-export function AnalyseMontantsDialog({ depot, lots, lotsOuverts, onUtiliser, onClose }: {
-  depot: DepotRecu;
+export function AnalyseMontantsDialog({ depot, urlAnalyse, lots, lotsOuverts, onUtiliser, onClose }: {
+  /** Une remise du portail, ou une pièce reçue hors plateforme (alors `urlAnalyse` est fourni). */
+  depot: Pick<DepotRecu, 'id' | 'file_name' | 'lot_id'>;
+  /** Route de lecture ; par défaut celle des remises du portail (`/api/depots/:id/analyser`). */
+  urlAnalyse?: string;
   lots: LotLibelle[];
   /** Lots que l'entreprise peut viser (tous si l'invitation n'en précise pas). */
   lotsOuverts: string[];
@@ -247,11 +250,11 @@ export function AnalyseMontantsDialog({ depot, lots, lotsOuverts, onUtiliser, on
 
   useEffect(() => {
     let annule = false;
-    apiFetch<{ texte_lu: boolean; candidats: MontantCandidat[]; note: string | null }>(`/api/depots/${depot.id}/analyser`, { method: 'POST', body: '{}' })
+    apiFetch<{ texte_lu: boolean; candidats: MontantCandidat[]; note: string | null }>(urlAnalyse ?? `/api/depots/${depot.id}/analyser`, { method: 'POST', body: '{}' })
       .then(r => { if (!annule) setResultat(r); })
       .catch(e => { if (!annule) setErreur(e?.message || 'La lecture du document a échoué.'); });
     return () => { annule = true; };
-  }, [depot.id]);
+  }, [depot.id, urlAnalyse]);
 
   const choix = lots.filter(l => lotsOuverts.length === 0 || lotsOuverts.includes(l.id));
 

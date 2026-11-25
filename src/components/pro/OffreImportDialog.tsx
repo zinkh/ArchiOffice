@@ -11,8 +11,16 @@ import { postesDepuisLignes, totalPostesAjoutes } from '../../lib/postesAjoutes'
 import { parseOffreFile, type DocumentAvecArticles, type ResultatImport, type Rapprochement, type LigneImportee } from '../../lib/bpuImport';
 import { formatCurrency } from '../../lib/utils';
 import { quantitesUtiles } from '../../lib/quantitesEntreprise';
+import { estTableur, formatOctets, lireDepot, type PieceIgnoree, type PieceRecue } from '../../lib/offresRecues';
+import { EntrepriseConsulteeCombobox } from '../act/EntrepriseConsulteeCombobox';
 
 interface Entreprise { id: string; nom: string }
+
+/** Ce que la fenêtre sait de l'offre au moment de ranger les documents reçus hors plateforme. */
+export interface ContexteDocumentsRecus { entrepriseId?: string; entrepriseNom: string; dateReception: string }
+
+/** Formats proposés dans le sélecteur : bordereau chiffré, pièces de l'offre, ou dossier complet en archive. */
+const ACCEPT_DEPOT = '.xlsx,.ods,.xls,.csv,.pdf,.docx,.odt,.zip';
 
 interface Props {
   doc: DocumentAvecArticles;
@@ -30,6 +38,11 @@ interface Props {
   onConfirm?: (offre: Omit<OffreDocument, 'id' | 'importedAt'>) => Promise<void> | void;
   /** Mode « document » : reçoit les lignes du fichier à créer comme articles. */
   onCreerPostes?: (sources: LigneImportee[]) => Promise<void> | void;
+  /**
+   * Mode « offre » : reçoit les documents (PDF, Word, tableurs, dossier ZIP) remis hors plateforme par
+   * l'entreprise, pour les ranger avec l'offre. Absent : la zone de dépôt ne propose que le bordereau chiffré.
+   */
+  onDocumentsRecus?: (pieces: PieceRecue[], contexte: ContexteDocumentsRecus) => Promise<PieceRecue[] | void> | PieceRecue[] | void;
   /** Fichier déjà en main (bordereau remis sur le portail de dépôt) : évite de le re-sélectionner. */
   fichierInitial?: File;
   /** Entreprise connue d'avance (celle du lien de dépôt) et date de réception réelle. */
@@ -52,7 +65,7 @@ const CONFIANCE_LABEL: Record<string, string> = {
 };
 
 export const OffreImportDialog: React.FC<Props> = ({
-  doc, docLabel = 'bordereau', entreprises = [], mode = 'offre', onClose, onConfirm, onCreerPostes,
+  doc, docLabel = 'bordereau', entreprises = [], mode = 'offre', onClose, onConfirm, onCreerPostes, onDocumentsRecus,
   fichierInitial, entrepriseInitiale, dateReceptionInitiale,
 }) => {
   const [etape, setEtape] = useState<Etape>('fichier');
@@ -65,6 +78,44 @@ export const OffreImportDialog: React.FC<Props> = ({
   const [analyse, setAnalyse] = useState(false);
   const [enregistrement, setEnregistrement] = useState(false);
   const modeDocument = mode === 'document';
+
+  // Documents remis hors plateforme (PDF, pièces diverses, contenu d'un ZIP) : rangés avec l'offre, jamais lus comme bordereau.
+  const accepteDocuments = !modeDocument && !!onDocumentsRecus;
+  const [pieces, setPieces] = useState<PieceRecue[]>([]);
+  const [ignoreesDepot, setIgnoreesDepot] = useState<PieceIgnoree[]>([]);
+  const [lectureDepot, setLectureDepot] = useState(false);
+  const [survol, setSurvol] = useState(false);
+
+  /** Trie ce qui est déposé : le premier tableur sert de bordereau à analyser, le reste devient pièce de l'offre. */
+  const deposer = useCallback(async (liste: File[]) => {
+    if (liste.length === 0) return;
+    setErreur(null); setLectureDepot(true);
+    try {
+      if (!accepteDocuments) {
+        // Sans rangement des documents : comportement d'origine, un seul bordereau.
+        setFichier(liste[0]);
+        return;
+      }
+      const lecture = await lireDepot(liste);
+      let bordereau = fichier;
+      const autres: PieceRecue[] = [];
+      for (const p of lecture.pieces) {
+        if (!bordereau && !p.archive && estTableur(p.file.name)) bordereau = p.file;
+        else autres.push(p);
+      }
+      setFichier(bordereau);
+      setPieces(prev => {
+        const dejaLa = new Set(prev.map(p => `${p.chemin}|${p.file.size}`));
+        return [...prev, ...autres.filter(p => !dejaLa.has(`${p.chemin}|${p.file.size}`))];
+      });
+      setIgnoreesDepot(prev => [...prev, ...lecture.ignorees]);
+      if (lecture.pieces.length === 0 && lecture.ignorees.length > 0) {
+        setErreur('Aucun document exploitable dans ce dépôt : voir la liste des fichiers ignorés ci-dessous.');
+      }
+    } finally {
+      setLectureDepot(false);
+    }
+  }, [accepteDocuments, fichier]);
 
   // Un rapprochement approximatif ne compte que si l'architecte l'a coché.
   const [approxValides, setApproxValides] = useState<Set<number>>(new Set());
@@ -176,6 +227,27 @@ export const OffreImportDialog: React.FC<Props> = ({
   const nbNonRattachees = resultat
     ? resultat.nonAppariees.filter((_, i) => !manuels.has(i) && !ignorees.has(i)).length : 0;
 
+  const contexteDocuments: ContexteDocumentsRecus = { entrepriseId, entrepriseNom: entrepriseNom.trim(), dateReception };
+
+  /** Sans bordereau à analyser : seuls les documents reçus sont rangés avec l'entreprise. */
+  const enregistrerDocuments = async () => {
+    setEnregistrement(true); setErreur(null);
+    try {
+      const restantes = await onDocumentsRecus?.(pieces, contexteDocuments);
+      if (restantes && restantes.length > 0) {
+        // Seuls les documents non envoyés restent : un nouvel essai ne crée pas de doublon.
+        setPieces(restantes);
+        setErreur(`${restantes.length} document(s) n'ont pas pu être enregistrés. Réessayez, ou retirez-les de la liste.`);
+        setEnregistrement(false);
+        return;
+      }
+      onClose();
+    } catch (e: any) {
+      setErreur(e?.message || "L'enregistrement des documents a échoué.");
+      setEnregistrement(false);
+    }
+  };
+
   const valider = async () => {
     if (!resultat || !fichier) return;
     setEnregistrement(true);
@@ -240,6 +312,16 @@ export const OffreImportDialog: React.FC<Props> = ({
         totalOffreHT: totalOffre + totalPostes,
         statut: 'validee',
       });
+      if (pieces.length > 0) {
+        const restantes = await onDocumentsRecus?.(pieces, contexteDocuments);
+        if (restantes && restantes.length > 0) {
+          // L'offre est enregistrée : on revient à l'étape 1 avec les seuls documents restants, sans rejouer l'offre.
+          setPieces(restantes); setFichier(null); setResultat(null); setEtape('fichier');
+          setErreur(`L'offre est enregistrée, mais ${restantes.length} document(s) n'ont pas pu l'être. Réessayez, ou retirez-les de la liste.`);
+          setEnregistrement(false);
+          return;
+        }
+      }
       onClose();
     } catch (e: any) {
       setErreur(e?.message || "L'enregistrement de l'offre a échoué.");
@@ -279,37 +361,70 @@ export const OffreImportDialog: React.FC<Props> = ({
                   ? `Fichier à importer dans le ${docLabel} (lots, chapitres et articles)`
                   : `${docLabel[0].toUpperCase() + docLabel.slice(1)} chiffré renvoyé par l'entreprise`}
               </label>
-              <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-300 rounded-lg p-8 cursor-pointer hover:border-blue-400 transition-colors">
-                <IconUpload size={22} className="text-zinc-400" />
-                <span className="text-sm text-zinc-600">{fichier ? fichier.name : 'Choisir un fichier .xlsx, .ods, .xls ou .csv'}</span>
-                <input type="file" accept=".xlsx,.ods,.xls,.csv" className="hidden"
-                       onChange={e => { setFichier(e.target.files?.[0] ?? null); setErreur(null); }} />
+              <label
+                className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg p-8 cursor-pointer hover:border-blue-400 transition-colors ${survol ? 'border-blue-400 bg-blue-50/40' : 'border-zinc-300'}`}
+                onDragOver={accepteDocuments ? (e => { e.preventDefault(); setSurvol(true); }) : undefined}
+                onDragLeave={accepteDocuments ? (() => setSurvol(false)) : undefined}
+                onDrop={accepteDocuments ? (e => { e.preventDefault(); setSurvol(false); void deposer(Array.from(e.dataTransfer.files)); }) : undefined}
+              >
+                {lectureDepot ? <IconLoader2 size={22} className="text-zinc-400 animate-spin" /> : <IconUpload size={22} className="text-zinc-400" />}
+                <span className="text-sm text-zinc-600 text-center">
+                  {accepteDocuments
+                    ? 'Choisir ou déposer des fichiers : bordereau chiffré (.xlsx, .ods, .xls, .csv), PDF, ou un dossier complet (.zip)'
+                    : fichier ? fichier.name : 'Choisir un fichier .xlsx, .ods, .xls ou .csv'}
+                </span>
+                <input type="file" accept={accepteDocuments ? ACCEPT_DEPOT : '.xlsx,.ods,.xls,.csv'} multiple={accepteDocuments} className="hidden"
+                       onChange={e => { void deposer(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
               </label>
               <p className="mt-2 text-[0.6875rem] text-zinc-400">
                 {modeDocument
                   ? 'Les lignes qui ne sont pas déjà dans le document pourront être créées comme articles, rangées sous leur lot.'
-                  : "Une offre reçue en PDF se saisit à la main sur l'écran suivant, dans la même structure."}
+                  : accepteDocuments
+                    ? "Offre remise hors plateforme : les PDF et le contenu d'un ZIP sont rangés avec l'entreprise ; un tableur peut en plus être analysé comme bordereau chiffré."
+                    : "Une offre reçue en PDF se saisit à la main sur l'écran suivant, dans la même structure."}
               </p>
+
+              {accepteDocuments && (fichier || pieces.length > 0) && (
+                <ul className="mt-3 divide-y divide-zinc-100 border border-zinc-200 rounded text-xs">
+                  {fichier && (
+                    <li className="flex items-center gap-2 px-3 py-1.5">
+                      <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-semibold shrink-0">Bordereau à analyser</span>
+                      <span className="truncate flex-1">{fichier.name}</span>
+                      <span className="text-zinc-400 shrink-0">{formatOctets(fichier.size)}</span>
+                      <button type="button" aria-label={`Retirer ${fichier.name}`} className="text-zinc-400 hover:text-zinc-700" onClick={() => setFichier(null)}><IconX size={13} /></button>
+                    </li>
+                  )}
+                  {pieces.map((p, i) => (
+                    <li key={`${p.chemin}-${i}`} className="flex items-center gap-2 px-3 py-1.5">
+                      <span className="px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-700 font-semibold shrink-0">Document</span>
+                      <span className="truncate flex-1" title={p.chemin}>{p.chemin}</span>
+                      {p.archive && <span className="text-zinc-400 shrink-0 truncate max-w-[10rem]" title={p.archive}>{p.archive}</span>}
+                      <span className="text-zinc-400 shrink-0">{formatOctets(p.file.size)}</span>
+                      <button type="button" aria-label={`Retirer ${p.chemin}`} className="text-zinc-400 hover:text-zinc-700" onClick={() => setPieces(prev => prev.filter((_, j) => j !== i))}><IconX size={13} /></button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {accepteDocuments && ignoreesDepot.length > 0 && (
+                <details className="mt-2 text-[0.6875rem] text-amber-800">
+                  <summary className="cursor-pointer">{ignoreesDepot.length} fichier(s) ignoré(s)</summary>
+                  <ul className="mt-1 space-y-0.5 max-h-28 overflow-auto">
+                    {ignoreesDepot.map((x, i) => <li key={i} className="truncate" title={x.nom}>{x.nom} : {x.motif}</li>)}
+                  </ul>
+                </details>
+              )}
             </div>
 
             {!modeDocument && <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={label}>Entreprise</label>
-                {entreprises.length > 0 ? (
-                  <select className={champ} value={entrepriseId ?? '__saisie__'}
-                          onChange={e => {
-                            const v = e.target.value;
-                            if (v === '__saisie__') { setEntrepriseId(undefined); setEntrepriseNom(''); }
-                            else { setEntrepriseId(v); setEntrepriseNom(entreprises.find(x => x.id === v)?.nom ?? ''); }
-                          }}>
-                    <option value="__saisie__">Saisir un nom…</option>
-                    {entreprises.map(e => <option key={e.id} value={e.id}>{e.nom}</option>)}
-                  </select>
-                ) : null}
-                {!entrepriseId && (
-                  <input className={`${champ} ${entreprises.length ? 'mt-2' : ''}`} placeholder="Nom de l'entreprise"
-                         value={entrepriseNom} onChange={e => setEntrepriseNom(e.target.value)} />
-                )}
+                {/* Autocomplétion à la frappe : choisir une entreprise de la consultation la rattache, un autre nom reste saisi tel quel. */}
+                <EntrepriseConsulteeCombobox
+                  className={champ} entreprises={entreprises}
+                  valeur={entrepriseNom} entrepriseId={entrepriseId}
+                  placeholder={entreprises.length ? 'Rechercher une entreprise ou saisir un nom…' : "Nom de l'entreprise"}
+                  onChange={(nom, e) => { setEntrepriseNom(nom); setEntrepriseId(e?.id); }}
+                />
               </div>
               <div>
                 <label className={label}>Date de réception</label>
@@ -503,10 +618,19 @@ export const OffreImportDialog: React.FC<Props> = ({
             <button onClick={onClose} className="px-3 py-1.5 text-xs rounded border border-zinc-300 hover:bg-zinc-50">
               Annuler
             </button>
-            {etape === 'fichier' ? (
+            {etape === 'fichier' && accepteDocuments && !fichier ? (
+              <button
+                onClick={enregistrerDocuments}
+                disabled={pieces.length === 0 || !entrepriseNom.trim() || enregistrement || lectureDepot}
+                className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 flex items-center gap-1.5"
+              >
+                {enregistrement ? <IconLoader2 size={13} className="animate-spin" /> : <IconCheck size={13} />}
+                {pieces.length > 1 ? `Enregistrer ${pieces.length} documents` : 'Enregistrer le document'}
+              </button>
+            ) : etape === 'fichier' ? (
               <button
                 onClick={lancerAnalyse}
-                disabled={!fichier || (!modeDocument && !entrepriseNom.trim()) || analyse}
+                disabled={!fichier || (!modeDocument && !entrepriseNom.trim()) || analyse || lectureDepot}
                 className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 flex items-center gap-1.5"
               >
                 {analyse ? <IconLoader2 size={13} className="animate-spin" /> : <IconArrowRight size={13} />}
