@@ -52,7 +52,8 @@ import DepotsRecusPanel from './act/DepotsRecusPanel';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
 import OffrePostesDialog from './act/OffrePostesDialog';
-import ComparatifPrixUnitaires from './act/ComparatifPrixUnitaires';
+import ComparatifPrixUnitaires, { type ChangementRattachement } from './act/ComparatifPrixUnitaires';
+import { rattacherPoste } from '../lib/postesAjoutes';
 import { OffreImportDialog } from './pro/OffreImportDialog';
 import { useOffresDocument, type CibleDocument } from '../hooks/useOffresDocument';
 import {
@@ -178,6 +179,8 @@ interface ComparatifArticle {
   is_subtotal?: boolean;
   /** Entreprise qui a ajouté ce poste, absent du marché : la ligne est colorée. */
   ajoute_par?: string;
+  /** Propositions d'entreprises rattachées à cet article (leur montant est déjà dans `prix`). */
+  propositions?: { entrepriseId: string; entrepriseNom: string; designation: string; montant: number }[];
 }
 
 interface ComparatifLot {
@@ -848,6 +851,32 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     await enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id), quantites, acceptees);
   };
 
+
+  /**
+   * Rattache (ou détache) des postes ajoutés par des entreprises à un article du document. Ne modifie que leurs offres :
+   * les prix et quantités saisis sont réécrits tels quels, le DPGF / DQE reste celui du maître d'œuvre. Un lot à la fois,
+   * une écriture par entreprise, calculées depuis les offres lues UNE fois (plusieurs changements d'un coup ne se
+   * marchent donc pas dessus) ; une entreprise qui échoue arrête la série et l'erreur remonte à l'écran.
+   */
+  const rattacherPostes = async (lotId: string, changements: ChangementRattachement[]) => {
+    const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+    if (!lotDoc) throw new Error('Ce lot n’est pas rattaché à un lot du document.');
+    const idsLot = new Set(chapitresDuLot(lotDoc).flatMap(c => c.lignes.map(l => l.id)));
+    if (changements.some(c => c.ligneId !== null && !idsLot.has(c.ligneId))) throw new Error('Le poste choisi n’existe plus dans le document.');
+    const parEntreprise = new Map<string, ChangementRattachement[]>();
+    for (const c of changements) parEntreprise.set(c.entrepriseId, [...(parEntreprise.get(c.entrepriseId) ?? []), c]);
+    for (const [entrepriseId, liste] of parEntreprise) {
+      const entreprise = latest.current.consultation.entreprises.find(e => e.id === entrepriseId);
+      if (!entreprise) continue;
+      const avant = ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id);
+      const apres = liste.reduce((postes, c) => rattacherPoste(postes, c.posteId, c.ligneId), avant);
+      if (apres === avant) continue;
+      const prixTous = prixEntreprise(docs.offres, entrepriseId);
+      const prix: Record<string, PrixSaisi> = {};
+      for (const id of idsLot) prix[id] = prixTous[id];
+      await enregistrerSaisie(lotId, entreprise, lotDoc, prix, apres);
+    }
+  };
 
   /** Par entreprise, ses postes dont la quantité diffère du dossier et n'est pas déjà acceptée (à lui faire confirmer). */
   const quantitesAConfirmerParEntreprise = useMemo(() => {
@@ -1769,6 +1798,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
             onAppliquerReponses={(lotId, entrepriseId) => { void appliquerReponsesQuantites(lotId, entrepriseId); }}
             nbADemander={Object.keys(quantitesAConfirmerParEntreprise).length}
             onDemanderConfirmation={() => setConfirmationQuantites(true)}
+            onRattacher={rattacherPostes}
           />
           {confirmationQuantites && (
             <DceEnvoiGroupeDialog
@@ -1991,6 +2021,12 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                                           Ajouté par {article.ajoute_par}
                                         </span>
                                       )}
+                                      {article.propositions?.map(p => (
+                                        <span key={`${p.entrepriseId}-${p.designation}`} className="mt-1 block rounded px-1.5 py-0.5 text-[0.6875rem] bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
+                                              title={p.designation}>
+                                          Proposition de {p.entrepriseNom} rattachée : {p.designation}
+                                        </span>
+                                      ))}
                                     </td>
                                     <td className="px-3 py-2">
                                       <input type="number" min={0} step={100}

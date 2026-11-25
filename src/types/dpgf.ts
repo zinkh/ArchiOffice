@@ -353,6 +353,13 @@ export interface PosteAjoute {
   prixUnitaire: number | null;
   /** Lot du document (Lot.id) auquel le poste est rattaché, déduit de son numéro. */
   lotId?: string;
+  /**
+   * Article du document (Ligne.id) que ce poste chiffre : la proposition de l'entreprise répond à ce poste du DPGF
+   * (forfait, variante...). Absent : poste réellement hors marché. Un identifiant qui ne désigne plus un article du
+   * lot est ignoré à la lecture (`articleRattache`). Le montant reste dans le total du lot, le poste ne fait que
+   * changer de place dans le comparatif.
+   */
+  articleId?: string;
 }
 
 /**

@@ -14,8 +14,8 @@
 // `projectLotId` vit maintenant sur Lot pour cette raison précise — la même
 // fonction sert donc les deux documents. `bpuVersComparatif` reste exporté
 // comme alias : c'est le nom que le code et les tests existants connaissent.
-import type { Lot, Ligne, OffreDocument } from '../types/dpgf';
-import { montantPoste } from './postesAjoutes';
+import type { Lot, Ligne, OffreDocument, PosteAjoute } from '../types/dpgf';
+import { articleRattache, montantPoste } from './postesAjoutes';
 import { quantiteRetenue, quantitesAcceptees, quantitesDifferent, quantitesEntreprise, type BaseQuantites } from './quantitesOffre';
 
 /** Forme des articles attendue par ACTModule (voir son ComparatifArticle). */
@@ -35,6 +35,11 @@ export interface ComparatifArticle {
    * signaler dans l'analyse des offres.
    */
   ajoute_par?: string;
+  /**
+   * Propositions que des entreprises ont rattachées à cet article du document (postes ajoutés rattachés) : leur
+   * montant est déjà compté dans `prix` de l'entreprise, la liste sert à le signaler.
+   */
+  propositions?: { entrepriseId: string; entrepriseNom: string; designation: string; montant: number }[];
   /**
    * Entreprises qui ont remis une quantité différente de celle du document (quantité, acceptée ou non, P.U.).
    * Les montants de `prix` suivent la base de quantités demandée (voir `versComparatif`).
@@ -78,6 +83,21 @@ export function versComparatif(lots: Lot[], offres: OffreDocument[], base: BaseQ
 
     const articles: ComparatifArticle[] = [];
 
+    // Postes ajoutés que l'entreprise a rattachés à un article du document : ils comptent sur la ligne de cet
+    // article (en plus de son P.U. éventuel) au lieu de figurer dans la section des postes ajoutés. Un rattachement
+    // vers un article qui n'existe plus est ignoré : le poste reste alors un poste ajouté ordinaire.
+    const idsFeuilles = new Set<string>();
+    const collecter = (ls: Ligne[]) => { for (const l of ls) { if (l.children?.length) collecter(l.children); else idsFeuilles.add(l.id); } };
+    for (const chap of lot.chapitres) collecter(chap.lignes);
+    const tous = retenues.flatMap(o => (o.postesAjoutes ?? []).filter(p => p.lotId === lot.id).map(p => ({ o, p })));
+    const rattaches = new Map<string, { o: OffreDocument; p: PosteAjoute }[]>();
+    const libres: { o: OffreDocument; p: PosteAjoute }[] = [];
+    for (const x of tous) {
+      const cible = articleRattache(x.p, idsFeuilles);
+      if (!cible) { libres.push(x); continue; }
+      rattaches.set(cible, [...(rattaches.get(cible) ?? []), x]);
+    }
+
     for (const chap of lot.chapitres) {
       articles.push({
         id: chap.id, code: chap.numero, titre: chap.titre,
@@ -102,10 +122,16 @@ export function versComparatif(lots: Lot[], offres: OffreDocument[], base: BaseQ
               ecarts[o.entrepriseId!] = { quantite: q[l.id], acceptee: ok.has(l.id), prixUnitaire: typeof o.prix?.[l.id] === 'number' ? (o.prix[l.id] as number) : (typeof pu === 'number' ? pu : null) };
             }
           }
+          const propositions = (rattaches.get(l.id) ?? []).map(({ o, p }) => {
+            const eid = o.entrepriseId!;
+            if (p.prixUnitaire != null) prix[eid] = (prix[eid] ?? 0) + montantPoste(p);
+            return { entrepriseId: eid, entrepriseNom: o.entrepriseNom, designation: p.designation, montant: montantPoste(p) };
+          });
           articles.push({
             id: l.id, code: l.numero, titre: l.designation, unite: l.unite,
             quantite: l.quantite, estimatif: l.prixTotal || undefined, prix,
             ...(Object.keys(ecarts).length ? { ecartsQuantites: ecarts } : {}),
+            ...(propositions.length ? { propositions } : {}),
           });
         }
       };
@@ -114,9 +140,7 @@ export function versComparatif(lots: Lot[], offres: OffreDocument[], base: BaseQ
 
     // Postes que des entreprises ont ajoutés à leur offre : ils ne sont pas
     // dans le document, seule l'entreprise concernée les chiffre.
-    const ajouts = retenues.flatMap(o => (o.postesAjoutes ?? [])
-      .filter(p => p.lotId === lot.id)
-      .map(p => ({ o, p })));
+    const ajouts = libres;
     if (ajouts.length) {
       articles.push({
         id: `${lot.id}__ajouts`, code: '', titre: 'Postes ajoutés par les entreprises',

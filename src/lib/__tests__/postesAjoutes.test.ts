@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { lotPourLigne, postesDepuisLignes, montantPoste, totalPostesAjoutes, ajouterLignesAuDocument } from '../postesAjoutes';
+import {
+  lotPourLigne, postesDepuisLignes, montantPoste, totalPostesAjoutes, ajouterLignesAuDocument,
+  articleRattache, rattacherPoste, suggererRattachement,
+} from '../postesAjoutes';
 import { versComparatif } from '../bpuToAct';
 import type { Lot, OffreDocument } from '../../types/dpgf';
 import type { LigneImportee } from '../bpuImport';
@@ -58,6 +61,76 @@ describe('versComparatif et postes ajoutés', () => {
     const postes = postesDepuisLignes([ligne('02.07', 'X')], lots());
     const { comparatif } = versComparatif(lots(), [{ ...offre, statut: 'ecartee', postesAjoutes: postes }]);
     expect(comparatif[1].articles.some(a => a.ajoute_par)).toBe(false);
+  });
+});
+
+describe('rattachement d\'un poste à un article du DPGF', () => {
+  const lotsAvecArticles = (): Lot[] => [
+    { id: 'l1', numero: '03', titre: 'Plomberie', sousTotal: 0, projectLotId: 'pl3', chapitres: [
+      { id: 'c1', numero: '3', titre: 'Sanitaires', lignes: [
+        { id: 'a32', numero: '3.2', designation: 'Alimentations', unite: 'forf', quantite: 1, prixUnitaire: 0, prixTotal: 0, type: 'ouvrage' },
+        { id: 'a34', numero: '3.4', designation: 'Vestiaires', unite: 'forf', quantite: 1, prixUnitaire: 500, prixTotal: 500, type: 'ouvrage' },
+      ] },
+    ] },
+  ];
+  const offre = (postes: OffreDocument['postesAjoutes']): OffreDocument => ({
+    id: 'o1', entrepriseId: 'e1', entrepriseNom: 'SAE', dateReception: '2026-01-01', fichierNom: 'x.xlsx',
+    importedAt: '2026-01-01', documentVersion: '1', prix: { a32: null, a34: 480 }, anomalies: [], statut: 'validee', postesAjoutes: postes,
+  });
+  const poste = (over: Partial<NonNullable<OffreDocument['postesAjoutes']>[number]> = {}) => ({
+    id: 'p1', numero: 'A.1', designation: 'Cuisine (poste 3.2 du DPGF, forfait)', unite: 'forf', quantite: 1, prixUnitaire: 6200, lotId: 'l1', ...over,
+  });
+
+  it('rattacher et détacher rendent une nouvelle liste, sans toucher les autres postes', () => {
+    const postes = [poste(), poste({ id: 'p2', designation: 'Autre' })];
+    const lies = rattacherPoste(postes, 'p1', 'a32');
+    expect(lies[0].articleId).toBe('a32');
+    expect(lies[1]).toBe(postes[1]);
+    expect(postes[0].articleId).toBeUndefined();
+    const detaches = rattacherPoste(lies, 'p1', null);
+    expect(detaches[0]).not.toHaveProperty('articleId');
+    expect(rattacherPoste(postes, 'p1', null)).toBe(postes);
+    expect(rattacherPoste(postes, 'inconnu', 'a32')).toBe(postes);
+  });
+
+  it('ignore un rattachement vers un article qui n\'existe plus', () => {
+    expect(articleRattache({ articleId: 'a32' }, new Set(['a32']))).toBe('a32');
+    expect(articleRattache({ articleId: 'disparu' }, new Set(['a32']))).toBeUndefined();
+    expect(articleRattache({}, new Set(['a32']))).toBeUndefined();
+  });
+
+  it('suggère l\'article cité dans le texte, seulement s\'il est unique', () => {
+    const articles = [{ id: 'a32', numero: '3.2' }, { id: 'a34', numero: '3.4' }];
+    expect(suggererRattachement('Cuisine (poste 3.2 du DPGF, chiffré en forfait)', articles)).toBe('a32');
+    expect(suggererRattachement('Sanitaires : poste n°3.4', articles)).toBe('a34');
+    expect(suggererRattachement('Poste 9.9 inconnu', articles)).toBeUndefined();
+    expect(suggererRattachement('Meuble vasque complet', articles)).toBeUndefined();
+    expect(suggererRattachement('poste 3.2', [...articles, { id: 'dup', numero: '3.2' }])).toBeUndefined();
+  });
+
+  it('verse la proposition sur la ligne de l\'article, sans doubler le total du lot', () => {
+    const { comparatif } = versComparatif(lotsAvecArticles(), [offre([poste({ articleId: 'a32' })])]);
+    const lot = comparatif[0];
+    const a32 = lot.articles.find(a => a.id === 'a32')!;
+    expect(a32.prix.e1).toBe(6200);
+    expect(a32.propositions).toEqual([{ entrepriseId: 'e1', entrepriseNom: 'SAE', designation: 'Cuisine (poste 3.2 du DPGF, forfait)', montant: 6200 }]);
+    expect(lot.articles.some(a => a.ajoute_par)).toBe(false);
+    expect(lot.articles.some(a => a.id === 'l1__ajouts')).toBe(false);
+    expect(lot.articles.find(a => a.is_subtotal)!.prix.e1).toBe(6200 + 480);
+  });
+
+  it('additionne la proposition au P.U. de l\'article et garde un poste non rattaché à part', () => {
+    const lies = poste({ articleId: 'a34', prixUnitaire: 100 });
+    const libre = poste({ id: 'p2', designation: 'Hors marché', prixUnitaire: 50 });
+    const { comparatif } = versComparatif(lotsAvecArticles(), [offre([lies, libre])]);
+    const lot = comparatif[0];
+    expect(lot.articles.find(a => a.id === 'a34')!.prix.e1).toBe(480 + 100);
+    expect(lot.articles.find(a => a.ajoute_par)!.titre).toBe('Hors marché');
+  });
+
+  it('retombe sur un poste ajouté ordinaire quand l\'article rattaché a disparu', () => {
+    const { comparatif } = versComparatif(lotsAvecArticles(), [offre([poste({ articleId: 'disparu' })])]);
+    expect(comparatif[0].articles.some(a => a.ajoute_par)).toBe(true);
   });
 });
 
