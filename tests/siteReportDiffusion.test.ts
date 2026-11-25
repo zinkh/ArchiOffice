@@ -235,3 +235,40 @@ describe('POST /api/reports/:reportId/diffuse : anciennes observations, TCE et m
     expect(mails['bet@ent.test']).not.toContain('Évacuer les gravats');
   });
 });
+
+describe('POST /api/reports/:reportId/diffuse : intervenants des entreprises', () => {
+  it("écrit à l'adresse de l'intervenant, avec les observations de son lot, sans jamais lire une adresse du client", async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const { projectId, reportId } = seedOperation(tenantId);
+    fakeSupabaseAdmin.seed('lot_intervenants', [
+      { id: `i1-${tenantId}`, tenant_id: tenantId, project_id: projectId, lot_id: `l1-${tenantId}`, entreprise: 'Maçonnerie Durand', nom: 'Léa Roux', role: 'Chef de chantier', email: 'lea@ent.test' },
+    ]);
+
+    const res = await diffuse(token, reportId, [`intervenant:i1-${tenantId}`]);
+    expect(res.status).toBe(200);
+    expect(res.body.sent.map((s: any) => [s.name, s.email])).toEqual([['Léa Roux', 'lea@ent.test']]);
+    expect(sendMail).toHaveBeenCalledTimes(1);
+    const [mail] = sendMail.mock.calls[0];
+    expect(mail.to).toBe('lea@ent.test');
+    expect(mail.text).toContain('Reprendre le chaînage');
+    expect(mail.text).not.toContain('réseau EU');
+  });
+
+  it("ignore l'intervenant d'une autre opération ou d'un autre cabinet, et signale celui sans adresse", async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const { projectId, reportId } = seedOperation(tenantId);
+    const autre = makeTenant();
+    fakeSupabaseAdmin.seed('lot_intervenants', [
+      { id: `i-sans-${tenantId}`, tenant_id: tenantId, project_id: projectId, lot_id: `l1-${tenantId}`, entreprise: 'X', nom: 'Sans mail', email: null },
+      { id: `i-etranger-${autre}`, tenant_id: autre, project_id: `p-${autre}`, lot_id: `l1-${autre}`, entreprise: 'Y', nom: 'Étranger', email: 'etranger@ent.test' },
+    ]);
+
+    const res = await diffuse(token, reportId, [`c1-${tenantId}`, `intervenant:i-sans-${tenantId}`, `intervenant:i-etranger-${autre}`]);
+    expect(res.status).toBe(200);
+    expect(res.body.sent.map((s: any) => s.email)).toEqual(['durand@ent.test']);
+    expect(res.body.skipped.map((s: any) => s.name)).toEqual(['Sans mail']);
+    expect(sendMail.mock.calls.map(([m]) => m.to)).not.toContain('etranger@ent.test');
+  });
+});

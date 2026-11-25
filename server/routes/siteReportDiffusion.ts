@@ -5,8 +5,9 @@
 // Le client envoie le PDF (généré dans le navigateur, avec les photos) et les
 // identifiants des contacts cochés. Il n'envoie JAMAIS d'adresse : le serveur
 // rejoue la liste des destinataires depuis l'opération (lots, intervenants,
-// observations du compte-rendu) et n'écrit qu'à ceux-là, à l'adresse de leur
-// fiche. Un identifiant étranger à l'opération est simplement ignoré.
+// observations du compte-rendu, intervenants des entreprises) et n'écrit qu'à
+// ceux-là, à l'adresse de leur fiche contact ou de leur ligne d'intervenant
+// (clé `intervenant:<id>`). Un identifiant étranger à l'opération est ignoré.
 //
 // L'envoi passe par le SMTP du cabinet, comme les autres envois avec pièce
 // jointe (POST /api/send-email) : les comptes Gmail/Outlook connectés n'ont pas
@@ -113,10 +114,15 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
           : Promise.resolve({ data: [] }),
       ]);
       const previousObservations = ((previousRes.data || []) as any[]).filter(o => !observationIds.includes(o.id));
+      // Intervenants saisis par entreprise dans l'onglet DET > Entreprises. Une instance non migrée n'a pas la table :
+      // la diffusion reste celle des fiches contacts, sans erreur.
+      const intervenantsRes = await tenantScopedFrom(supabaseAdmin, tenantId, 'lot_intervenants')
+        .select('id, lot_id, entreprise, nom, role, email').eq('project_id', projectId);
+      const intervenants: any[] = intervenantsRes.error ? [] : (intervenantsRes.data || []);
 
       const allowed = buildDiffusionRecipients({
         lots, stakeholders, contacts: (contactsRes.data || []) as any[], observations: (observationsRes.data || []) as any[],
-        previousObservations,
+        previousObservations, intervenants,
       });
       const chosen = allowed.filter(r => requestedIds.includes(r.contactId));
       const addressable = chosen.filter(r => r.email);

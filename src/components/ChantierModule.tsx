@@ -6,7 +6,7 @@ import { Toast } from './ui/Toast';
 import { PillTabs } from './ui/PillTabs';
 import { BottomSheet, SheetOption } from './ui/BottomSheet';
 import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
-import { buildDiffusionRecipients } from '../lib/crDiffusion';
+import { buildDiffusionRecipients, type LotIntervenantInput } from '../lib/crDiffusion';
 import { apiFetch, baseFetchJson, SERVER_UNAVAILABLE_CODE } from '../lib/api';
 import { checkAttachment, MAX_ATTACHMENTS } from '../lib/pdfAttachments';
 import { getAccessToken } from '../lib/authToken';
@@ -452,6 +452,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   }, [allObservations, reportObservations]);
   const previousOpenByLot = useMemo(() => groupObservationsByLot(previousOpenObservations, lots_list), [previousOpenObservations, lots_list]);
 
+  // Intervenants des entreprises (onglet Entreprises) : relus à chaque ouverture de la fenêtre, pour
+  // ne jamais proposer une personne retirée ou une adresse corrigée depuis.
+  const [lotIntervenants, setLotIntervenants] = useState<LotIntervenantInput[]>([]);
+
   const diffusionRecipients = useMemo(
     () => buildDiffusionRecipients({
       lots: lots_list,
@@ -459,11 +463,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       contacts,
       observations: reportObservations,
       previousObservations: includePrevious ? previousOpenObservations : [],
+      intervenants: lotIntervenants,
     }),
-    [lots_list, project.stakeholders_list, contacts, reportObservations, includePrevious, previousOpenObservations],
+    [lots_list, project.stakeholders_list, contacts, reportObservations, includePrevious, previousOpenObservations, lotIntervenants],
   );
 
-  const openDiffusion = () => {
+  const openDiffusion = async () => {
     if (!selectedReport) return;
     if (!navigator.onLine) { showToast('La diffusion nécessite une connexion : reconnectez-vous puis réessayez.', 'error'); return; }
     // Une saisie encore en attente de synchronisation n'est pas sur le serveur : le message partirait sans elle.
@@ -473,6 +478,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     }
     setDiffusionResult(null);
     setDiffusionError(null);
+    // Lecture avant l'ouverture : la fenêtre coche tous les destinataires à l'ouverture, une liste qui arrive
+    // après réinitialiserait la sélection de la personne. Table absente ou lecture en échec : liste vide.
+    const lus = await apiFetch<LotIntervenantInput[]>(`/api/projects/${project.id}/lot-intervenants`).catch(() => []);
+    setLotIntervenants(Array.isArray(lus) ? lus : []);
     setDiffusionOpen(true);
   };
 

@@ -655,7 +655,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | PUT | `/api/references/dossier/sheet/:source/:id` | [server/routes/referencesDossier.ts:73](../server/routes/referencesDossier.ts#L73) |
 | GET | `/api/referentiels` | [server/routes/referentiels.ts:64](../server/routes/referentiels.ts#L64) |
 | PUT | `/api/reports/:reportId` | [server/routes/siteReports.ts:154](../server/routes/siteReports.ts#L154) |
-| POST | `/api/reports/:reportId/diffuse` | [server/routes/siteReportDiffusion.ts:65](../server/routes/siteReportDiffusion.ts#L65) |
+| POST | `/api/reports/:reportId/diffuse` | [server/routes/siteReportDiffusion.ts:66](../server/routes/siteReportDiffusion.ts#L66) |
 | GET | `/api/reports/:reportId/notes` | [server/routes/siteReports.ts:117](../server/routes/siteReports.ts#L117) |
 | POST | `/api/reports/:reportId/notes` | [server/routes/siteReports.ts:130](../server/routes/siteReports.ts#L130) |
 | GET | `/api/reports/:reportId/observations` | [server/routes/observations.ts:335](../server/routes/observations.ts#L335) |
