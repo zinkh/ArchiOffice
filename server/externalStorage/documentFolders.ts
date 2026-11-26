@@ -27,7 +27,16 @@ export interface DocumentFolderResolver {
   loadFolderProject: (projectId: string | null, tenantId: string) => Promise<FolderProject | null>;
   /** Dossier d'une pièce jointe rattachée à une ressource (un projet compris). */
   folderPathForResource: (resourceType: string, resourceId: string | null, tenantId: string) => Promise<string[]>;
+  /**
+   * Les noms des dossiers libres de la GED (document_folders) qui mènent à `folderId`, du plus haut au plus
+   * bas. Vide sans dossier, pour un dossier introuvable ou d'un autre cabinet, ou sur une instance dont la
+   * base n'a pas la table : le fichier se range alors à la racine de sa phase, jamais en erreur.
+   */
+  loadFolderNames: (folderId: string | null | undefined, tenantId: string) => Promise<string[]>;
 }
+
+/** Profondeur maximale des dossiers libres (src/lib/gedFolders.ts) : borne la remontée, même sur une chaîne cyclique. */
+const MAX_FOLDER_CHAIN = 5;
 
 export function createDocumentFolderResolver(supabaseAdmin: any): DocumentFolderResolver {
   // Le numéro et le nom de l'affaire nomment son dossier (« 26014 - Villa Martin »).
@@ -48,5 +57,20 @@ export function createDocumentFolderResolver(supabaseAdmin: any): DocumentFolder
     return buildDocumentFolderPath(project, RESOURCE_FOLDER_LABELS[resourceType] || resourceType);
   }
 
-  return { loadFolderProject, folderPathForResource };
+  async function loadFolderNames(folderId: string | null | undefined, tenantId: string): Promise<string[]> {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = folderId || null;
+    while (cursor && names.length < MAX_FOLDER_CHAIN && !seen.has(cursor)) {
+      seen.add(cursor);
+      const { data, error } = await supabaseAdmin.from('document_folders')
+        .select('id, parent_id, name').eq('id', cursor).eq('tenant_id', tenantId).maybeSingle();
+      if (error || !data) return error ? [] : names.reverse();
+      names.push(String((data as any).name));
+      cursor = (data as any).parent_id || null;
+    }
+    return names.reverse();
+  }
+
+  return { loadFolderProject, folderPathForResource, loadFolderNames };
 }
