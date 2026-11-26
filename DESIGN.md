@@ -175,6 +175,9 @@ Une palette de neutres ardoise légèrement bleutés, un seul accent bleu franc,
 ### Status
 - **Vert réussite** (`success`), **orange attention** (`warning`), **rouge danger** (`danger`) : pastilles de statut, compteurs, bouton de suppression, messages d'erreur. Jamais décoratifs.
 
+### Data (étiquettes)
+- **Palette des étiquettes de la « Base de données »** (`--kb-<couleur>-bg`, `-fg`, `-dot`, définies dans `src/index.css`, claires et sombres) : gris, bleu, ciel, sarcelle, olive, ocre, brique, rose, violet, brun. Ce sont des couleurs de DONNÉES, choisies par la personne pour classer (produits d'un fabricant, par exemple) : elles ne signalent aucun état. Aucune ne reprend le vert, l'orange ou le rouge d'état. Une étiquette s'affiche par `.kb-tag[data-color]` (rayon de 4 px, texte de 13 px), jamais en couleur en dur, et son nom suffit à la comprendre : la couleur ne porte pas seule le sens.
+
 ### Named Rules
 **The Tabler Source Rule.** Une couleur s'écrit `var(--tblr-*)`, jamais en dur. `bg-blue-600`, `bg-zinc-*` et les hex isolés (environ 150 boutons en `bg-blue-600`, plus de 1 000 surfaces en `zinc`) sont une dette héritée à résorber quand on touche le fichier, pas un modèle à imiter.
 

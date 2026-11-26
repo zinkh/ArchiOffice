@@ -1,7 +1,7 @@
 // Logique pure de la base de données du cabinet : src/lib/kb.ts (filtres, tris, validation, arbre).
 import { describe, expect, it } from 'vitest';
 import {
-  applyKbView, kbContentToText, kbDepth, kbWouldCycle, sanitizeKbOptions, sanitizeKbValue,
+  applyKbView, kbContentToText, kbDepth, kbFilterOps, kbOpNeedsValue, kbWouldCycle, sanitizeKbOptions, sanitizeKbValue,
   type KbPage, type KbProperty,
 } from '../kb';
 
@@ -107,6 +107,22 @@ describe('arbre de pages', () => {
     expect(kbWouldCycle('a', 'a', tree)).toBe(true);
     expect(kbWouldCycle('c', 'a', tree)).toBe(false);
     expect(kbWouldCycle('c', null, tree)).toBe(false);
+  });
+});
+
+describe('kbFilterOps', () => {
+  it('propose des opérateurs adaptés au type de colonne, le premier par défaut', () => {
+    expect(kbFilterOps('multi_select')[0]).toBe('has');
+    expect(kbFilterOps('checkbox')).toEqual(['checked', 'unchecked']);
+    expect(kbFilterOps('text')[0]).toBe('contains');
+    expect(kbFilterOps('relation')).toEqual(['is_empty', 'is_not_empty']);
+  });
+
+  it('sait quels opérateurs attendent une valeur', () => {
+    expect(kbOpNeedsValue('contains')).toBe(true);
+    expect(kbOpNeedsValue('has')).toBe(true);
+    expect(kbOpNeedsValue('is_empty')).toBe(false);
+    expect(kbOpNeedsValue('checked')).toBe(false);
   });
 });
 

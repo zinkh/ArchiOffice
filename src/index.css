@@ -24,6 +24,20 @@
   --tblr-warning:       #f76707;
   --tblr-danger:        #d63939;
   --ease-out:           cubic-bezier(0.23, 1, 0.32, 1);
+
+  /* Palette des étiquettes de la « Base de données » : couleurs de DONNÉES (DESIGN.md, « Status Is
+     Not Decoration »), distinctes de success, warning et danger qui restent réservés à l'état.
+     Noms = KB_TAG_COLORS (src/lib/kb.ts). Fond, texte et pastille par couleur. */
+  --kb-gris-bg: #eceff3;     --kb-gris-fg: #3b4658;     --kb-gris-dot: #8a94a6;
+  --kb-bleu-bg: #dfeafa;     --kb-bleu-fg: #1b4f96;     --kb-bleu-dot: #4a86d6;
+  --kb-ciel-bg: #d9f0f7;     --kb-ciel-fg: #11627a;     --kb-ciel-dot: #3fb0d0;
+  --kb-sarcelle-bg: #d6f1ec; --kb-sarcelle-fg: #0f6558; --kb-sarcelle-dot: #2fb5a0;
+  --kb-olive-bg: #e7eed3;    --kb-olive-fg: #4a5a14;    --kb-olive-dot: #8aa22e;
+  --kb-ocre-bg: #f6e8c8;     --kb-ocre-fg: #7a5410;     --kb-ocre-dot: #d3a03a;
+  --kb-brique-bg: #f6dcd5;   --kb-brique-fg: #8a3320;   --kb-brique-dot: #cf6a52;
+  --kb-rose-bg: #f9dfeb;     --kb-rose-fg: #8c2a5c;     --kb-rose-dot: #d9679c;
+  --kb-violet-bg: #e8e1f7;   --kb-violet-fg: #51368f;   --kb-violet-dot: #8b6fd1;
+  --kb-brun-bg: #eadfd6;     --kb-brun-fg: #5e4025;     --kb-brun-dot: #a07850;
 }
 
 /* Native controls (checkboxes, radios, scrollbars) follow the app theme set by
@@ -57,6 +71,17 @@ select:-webkit-autofill {
   --tblr-success:       #2fb344;
   --tblr-warning:       #f76707;
   --tblr-danger:        #d63939;
+
+  --kb-gris-bg: #34445a;     --kb-gris-fg: #d3dbe6;     --kb-gris-dot: #8c9ab0;
+  --kb-bleu-bg: #1f3b66;     --kb-bleu-fg: #a9c8f2;     --kb-bleu-dot: #5a95e0;
+  --kb-ciel-bg: #14485a;     --kb-ciel-fg: #a6dcec;     --kb-ciel-dot: #45b8d8;
+  --kb-sarcelle-bg: #12493f; --kb-sarcelle-fg: #a0e0d3; --kb-sarcelle-dot: #34bfa8;
+  --kb-olive-bg: #3c4616;    --kb-olive-fg: #d4e19a;    --kb-olive-dot: #9bb336;
+  --kb-ocre-bg: #5a4311;     --kb-ocre-fg: #f0d596;     --kb-ocre-dot: #dca94a;
+  --kb-brique-bg: #5e2a1d;   --kb-brique-fg: #f2bfb1;   --kb-brique-dot: #d9765d;
+  --kb-rose-bg: #5e2342;     --kb-rose-fg: #f4bdd8;     --kb-rose-dot: #e07aa9;
+  --kb-violet-bg: #3e2f6b;   --kb-violet-fg: #d0c3f2;   --kb-violet-dot: #9b80df;
+  --kb-brun-bg: #4a3523;     --kb-brun-fg: #e2cdb8;     --kb-brun-dot: #b08a62;
 }
 
 /* ──────────────────────────────────────────────────
@@ -650,6 +675,69 @@ button, [role="button"], [role="tab"], .btn {
   content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--tblr-muted);
 }
 
+
+/* « Base de données » du cabinet (src/components/kb) : étiquettes colorées et contenu de l'éditeur de
+   blocs. Variables réelles uniquement (--tblr-border, --tblr-text, --tblr-surface-2...). */
+.kb-tag {
+  --kb-bg: var(--kb-gris-bg); --kb-fg: var(--kb-gris-fg); --kb-dot: var(--kb-gris-dot);
+  display: inline-flex; align-items: center; max-width: 100%;
+  padding: 1px 0.5rem; border-radius: var(--tblr-radius);
+  font-size: 0.8125rem; line-height: 1.45; font-weight: 500;
+  background: var(--kb-bg); color: var(--kb-fg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.kb-tag[data-color='bleu']     { --kb-bg: var(--kb-bleu-bg);     --kb-fg: var(--kb-bleu-fg);     --kb-dot: var(--kb-bleu-dot); }
+.kb-tag[data-color='ciel']     { --kb-bg: var(--kb-ciel-bg);     --kb-fg: var(--kb-ciel-fg);     --kb-dot: var(--kb-ciel-dot); }
+.kb-tag[data-color='sarcelle'] { --kb-bg: var(--kb-sarcelle-bg); --kb-fg: var(--kb-sarcelle-fg); --kb-dot: var(--kb-sarcelle-dot); }
+.kb-tag[data-color='olive']    { --kb-bg: var(--kb-olive-bg);    --kb-fg: var(--kb-olive-fg);    --kb-dot: var(--kb-olive-dot); }
+.kb-tag[data-color='ocre']     { --kb-bg: var(--kb-ocre-bg);     --kb-fg: var(--kb-ocre-fg);     --kb-dot: var(--kb-ocre-dot); }
+.kb-tag[data-color='brique']   { --kb-bg: var(--kb-brique-bg);   --kb-fg: var(--kb-brique-fg);   --kb-dot: var(--kb-brique-dot); }
+.kb-tag[data-color='rose']     { --kb-bg: var(--kb-rose-bg);     --kb-fg: var(--kb-rose-fg);     --kb-dot: var(--kb-rose-dot); }
+.kb-tag[data-color='violet']   { --kb-bg: var(--kb-violet-bg);   --kb-fg: var(--kb-violet-fg);   --kb-dot: var(--kb-violet-dot); }
+.kb-tag[data-color='brun']     { --kb-bg: var(--kb-brun-bg);     --kb-fg: var(--kb-brun-fg);     --kb-dot: var(--kb-brun-dot); }
+.kb-swatch { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 50%; background: var(--kb-dot); flex: none; }
+
+.kb-content { outline: none; font-size: 0.9375rem; line-height: 1.65; color: var(--tblr-text); }
+.kb-content > * + * { margin-top: 0.5em; }
+.kb-content h1 { font-size: 1.875rem; font-weight: 700; line-height: 1.25; margin-top: 1.4em; }
+.kb-content h2 { font-size: 1.4rem; font-weight: 700; line-height: 1.3; margin-top: 1.2em; }
+.kb-content h3 { font-size: 1.15rem; font-weight: 700; line-height: 1.35; margin-top: 1em; }
+.kb-content ul { list-style: disc; padding-left: 1.5em; }
+.kb-content ol { list-style: decimal; padding-left: 1.5em; }
+.kb-content li > p { margin: 0; }
+.kb-content ul[data-type='taskList'] { list-style: none; padding-left: 0.1em; }
+.kb-content ul[data-type='taskList'] li { display: flex; gap: 0.5rem; align-items: flex-start; }
+.kb-content ul[data-type='taskList'] li > label { margin-top: 0.35em; flex: none; }
+.kb-content ul[data-type='taskList'] li > div { flex: 1; min-width: 0; }
+.kb-content ul[data-type='taskList'] li[data-checked='true'] > div { color: var(--tblr-muted); text-decoration: line-through; }
+.kb-content blockquote { border-left: 3px solid var(--tblr-border); padding-left: 0.9em; color: var(--tblr-muted); }
+.kb-content hr { border: 0; border-top: 1px solid var(--tblr-border); margin: 1.2em 0; }
+.kb-content strong { font-weight: 700; }
+.kb-content em { font-style: italic; }
+.kb-content a { color: var(--tblr-primary); text-decoration: underline; }
+.kb-content code { font-family: var(--font-mono); font-size: 0.85em; background: var(--tblr-surface-2); border: 1px solid var(--tblr-border); border-radius: var(--tblr-radius); padding: 0 0.3em; }
+.kb-content pre { background: var(--tblr-surface-2); border: 1px solid var(--tblr-border); border-radius: var(--tblr-radius); padding: 0.75rem 1rem; overflow-x: auto; }
+.kb-content pre code { background: none; border: 0; padding: 0; }
+.kb-content img { max-width: 100%; height: auto; border-radius: var(--tblr-radius); }
+.kb-content .tableWrapper { overflow-x: auto; margin: 0.75em 0; }
+.kb-content table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.kb-content th, .kb-content td { border: 1px solid var(--tblr-border); padding: 0.4rem 0.6rem; vertical-align: top; position: relative; min-width: 4rem; }
+.kb-content th { background: var(--tblr-surface-2); font-weight: 600; text-align: left; }
+.kb-content td > p, .kb-content th > p { margin: 0; }
+.kb-content .selectedCell::after { content: ''; position: absolute; inset: 0; background: var(--tblr-primary-lt); opacity: 0.7; pointer-events: none; }
+.kb-content .column-resize-handle { position: absolute; right: -2px; top: 0; bottom: 0; width: 4px; background: var(--tblr-primary); pointer-events: none; }
+.kb-content [data-type='details'] { display: flex; gap: 0.25rem; margin: 0.4em 0; }
+.kb-content [data-type='details'] > button { flex: none; width: 1.5rem; height: 1.65em; display: flex; align-items: center; justify-content: center; background: transparent; border: 0; border-radius: var(--tblr-radius); color: var(--tblr-muted); cursor: pointer; }
+.kb-content [data-type='details'] > button::before { content: ''; border-style: solid; border-width: 0.3em 0 0.3em 0.5em; border-color: transparent transparent transparent currentColor; transition: transform 120ms var(--ease-out); }
+.kb-content [data-type='details'].is-open > button::before { transform: rotate(90deg); }
+.kb-content [data-type='details'] > div { flex: 1 1 auto; min-width: 0; }
+.kb-content [data-type='detailsContent'] > * + * { margin-top: 0.4em; }
+.kb-content .is-empty::before { content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--tblr-muted); }
+.kb-content .ProseMirror-selectednode { outline: 2px solid var(--tblr-primary); outline-offset: 2px; border-radius: var(--tblr-radius); }
+.kb-file-block { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem; border: 1px solid var(--tblr-border); border-radius: var(--tblr-radius); background: var(--tblr-surface-2); }
+.kb-drag-handle { display: flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.5rem; border-radius: var(--tblr-radius); color: var(--tblr-muted); cursor: grab; }
+@media (hover: hover) { .kb-drag-handle:hover { background: var(--tblr-surface-2); color: var(--tblr-text); } }
+@media (prefers-reduced-motion: reduce) { .kb-content [data-type='details'] > button::before { transition: none; } }
 
 /* Le planning garde le défilement tactile ; les dates précises restent dans la fiche. */
 @media (pointer: coarse), (max-width: 639px) {

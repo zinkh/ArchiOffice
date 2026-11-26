@@ -299,6 +299,21 @@ export function registerKnowledgeBaseRoutes(app: Express, { supabaseAdmin, getTe
     }
   });
 
+  // Lignes d'une base avec leurs valeurs de colonnes (l'arbre, lui, n'en porte pas).
+  app.get('/api/kb/databases/:id/rows', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await requireDatabase(tenantId, req.params.id))) return res.status(404).json({ error: 'Base de données introuvable.' });
+      const { data, error } = await table(tenantId, 'kb_pages')
+        .select('id, parent_id, kind, title, icon, properties, position, is_favorite, project_id, updated_at')
+        .eq('parent_id', req.params.id).is('trashed_at', null);
+      if (error) throw error;
+      res.json(((data || []) as any[]).sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0)));
+    } catch (e: any) {
+      fail(res, '[GET /api/kb/databases/:id/rows]', e, 'Impossible de lire les lignes.');
+    }
+  });
+
   app.post('/api/kb/databases/:id/properties', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);

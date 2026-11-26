@@ -4,7 +4,7 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-900 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+901 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
@@ -277,11 +277,12 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | PUT | `/api/invoices/:id` | [server/routes/invoices.ts:265](../server/routes/invoices.ts#L265) |
 | POST | `/api/invoices/:id/sync-retry` | [server/routes/invoices.ts:482](../server/routes/invoices.ts#L482) |
 | GET | `/api/kb/databases/:id/properties` | [server/routes/knowledgeBase.ts:292](../server/routes/knowledgeBase.ts#L292) |
-| POST | `/api/kb/databases/:id/properties` | [server/routes/knowledgeBase.ts:302](../server/routes/knowledgeBase.ts#L302) |
-| DELETE | `/api/kb/databases/:id/properties/:propertyId` | [server/routes/knowledgeBase.ts:352](../server/routes/knowledgeBase.ts#L352) |
-| PUT | `/api/kb/databases/:id/properties/:propertyId` | [server/routes/knowledgeBase.ts:324](../server/routes/knowledgeBase.ts#L324) |
-| GET | `/api/kb/databases/:id/views` | [server/routes/knowledgeBase.ts:368](../server/routes/knowledgeBase.ts#L368) |
-| PUT | `/api/kb/databases/:id/views/:viewId` | [server/routes/knowledgeBase.ts:380](../server/routes/knowledgeBase.ts#L380) |
+| POST | `/api/kb/databases/:id/properties` | [server/routes/knowledgeBase.ts:317](../server/routes/knowledgeBase.ts#L317) |
+| DELETE | `/api/kb/databases/:id/properties/:propertyId` | [server/routes/knowledgeBase.ts:367](../server/routes/knowledgeBase.ts#L367) |
+| PUT | `/api/kb/databases/:id/properties/:propertyId` | [server/routes/knowledgeBase.ts:339](../server/routes/knowledgeBase.ts#L339) |
+| GET | `/api/kb/databases/:id/rows` | [server/routes/knowledgeBase.ts:303](../server/routes/knowledgeBase.ts#L303) |
+| GET | `/api/kb/databases/:id/views` | [server/routes/knowledgeBase.ts:383](../server/routes/knowledgeBase.ts#L383) |
+| PUT | `/api/kb/databases/:id/views/:viewId` | [server/routes/knowledgeBase.ts:395](../server/routes/knowledgeBase.ts#L395) |
 | POST | `/api/kb/pages` | [server/routes/knowledgeBase.ts:106](../server/routes/knowledgeBase.ts#L106) |
 | DELETE | `/api/kb/pages/:id` | [server/routes/knowledgeBase.ts:250](../server/routes/knowledgeBase.ts#L250) |
 | GET | `/api/kb/pages/:id` | [server/routes/knowledgeBase.ts:94](../server/routes/knowledgeBase.ts#L94) |

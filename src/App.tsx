@@ -59,6 +59,7 @@ const Mailbox = lazy(() => import('./pages/Mailbox'));
 const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const References = lazy(() => import('./pages/References'));
+const BaseDeDonnees = lazy(() => import('./pages/BaseDeDonnees'));
 const Documents = lazy(() => import('./pages/Ged'));
 const ShareTarget = lazy(() => import('./pages/ShareTarget'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -203,7 +204,8 @@ function Header() {
   const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
-    const item = NAV_ITEMS.find(i => i.path === location.pathname);
+    // La base de données du cabinet porte l'identifiant de la page dans l'URL : même titre sur toutes ses pages.
+    const item = NAV_ITEMS.find(i => i.path === location.pathname || (i.path === '/base-de-donnees' && location.pathname.startsWith('/base-de-donnees/')));
     if (item) {
       setHeaderTitle(t(item.name));
     }
@@ -736,6 +738,8 @@ export default function App() {
               <Route path="/tenders/:id" element={<TenderDetail />} />
               <Route path="/specifications" element={<Specifications />} />
               <Route path="/specifications/:specId" element={<Specifications />} />
+              <Route path="/base-de-donnees" element={<BaseDeDonnees />} />
+              <Route path="/base-de-donnees/:pageId" element={<BaseDeDonnees />} />
               <Route path="/team" element={<Team />} />
               <Route path="/gantt" element={<Gantt />} />
               <Route path="/calendar" element={<CalendarPage />} />

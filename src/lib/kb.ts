@@ -40,6 +40,22 @@ export interface KbFilter { property_id: string; op: KbFilterOp; value?: string 
 export interface KbSort { property_id: string; direction: 'asc' | 'desc' }
 export interface KbViewConfig { filters?: KbFilter[]; sorts?: KbSort[]; hidden?: string[]; order?: string[] }
 
+/** Opérateurs de filtre proposés pour un type de colonne, le premier étant l'opérateur par défaut. */
+export function kbFilterOps(type: KbPropertyType): KbFilterOp[] {
+  switch (type) {
+    case 'select':
+    case 'multi_select': return ['has', 'has_not', 'is_empty', 'is_not_empty'];
+    case 'checkbox': return ['checked', 'unchecked'];
+    case 'relation': return ['is_empty', 'is_not_empty'];
+    default: return ['contains', 'equals', 'not_equals', 'is_empty', 'is_not_empty'];
+  }
+}
+
+/** Vrai si l'opérateur compare à une valeur saisie (les autres, « est vide » ou « coché », n'en ont pas). */
+export function kbOpNeedsValue(op: KbFilterOp): boolean {
+  return op === 'contains' || op === 'equals' || op === 'not_equals' || op === 'has' || op === 'has_not';
+}
+
 export const KB_MAX_DEPTH = 12;
 export const KB_MAX_OPTIONS = 100;
 

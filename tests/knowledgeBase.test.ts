@@ -174,10 +174,27 @@ describe('Bases de données', () => {
     expect((await t.put(`/api/kb/databases/${db.id}/views/${view.id}`, { config: [] })).status).toBe(400);
   });
 
-  it('ne laisse pas un autre cabinet lire les propriétés d\'une base', async () => {
+  it('liste les lignes d\'une base avec leurs valeurs, sans la corbeille ni les pages d\'ailleurs', async () => {
+    const t = setup();
+    const { db } = await newDatabase(t);
+    const texte = (await t.post(`/api/kb/databases/${db.id}/properties`, { name: 'Texte', type: 'text' })).body;
+    const a = (await t.post('/api/kb/pages', { parent_id: db.id, title: 'La Rochère', properties: { [texte.id]: 'Nancy' } })).body;
+    const b = (await t.post('/api/kb/pages', { parent_id: db.id, title: 'SOTTAS' })).body;
+    await t.post('/api/kb/pages', { title: 'Hors base' });
+    await t.del(`/api/kb/pages/${b.id}`);
+
+    const rows = await t.get(`/api/kb/databases/${db.id}/rows`);
+    expect(rows.status).toBe(200);
+    expect(rows.body.map((r: any) => r.title)).toEqual(['La Rochère']);
+    expect(rows.body[0].properties[texte.id]).toBe('Nancy');
+    expect(rows.body[0].id).toBe(a.id);
+  });
+
+  it('ne laisse pas un autre cabinet lire les lignes ni les propriétés d\'une base', async () => {
     const mine = setup();
     const other = setup();
     const { db } = await newDatabase(other);
     expect((await mine.get(`/api/kb/databases/${db.id}/properties`)).status).toBe(404);
+    expect((await mine.get(`/api/kb/databases/${db.id}/rows`)).status).toBe(404);
   });
 });
