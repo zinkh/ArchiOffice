@@ -321,3 +321,59 @@ describe('assemblage depuis la consultation', () => {
     expect(o.montant_base).toBe(10000);
   });
 });
+
+describe('remise commerciale d\'un tour', () => {
+  const lignes = [{ id: 'o1', kind: 'option' as const, libelle: 'O', montant_ouverture: 1000 }];
+
+  it('se déduit du prix de base seulement, pas des options', () => {
+    const n = neg({ lignes, tours: [tour('2026-09-01', {}, { remise: { mode: 'pourcentage', valeur: 5 } })] });
+    const o = offre('A', 10000);
+    expect(baseA(o, n, 'courant')).toBe(9500);
+    expect(optionsA(o, n, 'courant')).toBe(1000);
+    expect(totalA(o, n, 'courant')).toBe(10500);
+    // L'ouverture et le prix vérifié ne portent pas la remise des tours.
+    expect(baseA(o, n, 'ouverture')).toBe(10000);
+    expect(baseA(o, n, 'verifie')).toBe(10000);
+  });
+
+  it('une remise en montant se déduit du dernier prix proposé', () => {
+    const n = neg({ tours: [tour('2026-09-01', { [BASE_KEY]: 9600 }, { remise: { mode: 'montant', valeur: 600 } })] });
+    expect(baseA(offre('A', 10000), n, 'courant')).toBe(9000);
+  });
+
+  it('la dernière remise saisie s\'applique, un tour sans remise n\'y touche pas', () => {
+    const n = neg({
+      tours: [
+        tour('2026-09-01', {}, { remise: { mode: 'pourcentage', valeur: 2 } }),
+        tour('2026-09-05', { [BASE_KEY]: 9000 }, { remise: { mode: 'pourcentage', valeur: 4 } }),
+        tour('2026-09-10', { [BASE_KEY]: 8800 }),
+      ],
+    });
+    // 4 % du dernier prix proposé : 8 800 - 352.
+    expect(baseA(offre('A', 10000), n, 'courant')).toBe(8448);
+  });
+
+  it('une valeur 0 retire la remise d\'un tour précédent', () => {
+    const n = neg({
+      tours: [
+        tour('2026-09-01', {}, { remise: { mode: 'pourcentage', valeur: 5 } }),
+        tour('2026-09-05', {}, { remise: { mode: 'pourcentage', valeur: 0 } }),
+      ],
+    });
+    expect(baseA(offre('A', 10000), n, 'courant')).toBe(10000);
+  });
+
+  it('compte dans le gain obtenu et dans le prix lu par l\'analyse et l\'attribution', async () => {
+    const m = await import('../actNegociation');
+    const n = neg({ lignes, tours: [tour('2026-09-01', {}, { remise: { mode: 'pourcentage', valeur: 5 } })] });
+    const o = offre('A', 10000);
+    expect(gainObtenu(o, n)).toBe(500);
+    expect(m.offresAuPrixCourant([o], [n])[0].montant_base).toBe(9500);
+    expect(m.montantAttribution(o, [n])).toBe(10500);
+  });
+
+  it('ne rend pas le prix négatif', () => {
+    const n = neg({ tours: [tour('2026-09-01', {}, { remise: { mode: 'montant', valeur: 99999 } })] });
+    expect(baseA(offre('A', 10000), n, 'courant')).toBe(0);
+  });
+});

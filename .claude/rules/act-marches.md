@@ -213,9 +213,31 @@ Un bouton crée d'un coup un poste pour toutes les lignes non rattachées.
   `rattacherPostes` (`ACTModule`, une écriture par entreprise, offres seulement : le DPGF n'est jamais modifié). Si
   l'entreprise a aussi un P.U. sur l'article, la proposition s'AJOUTE à ce prix (à détacher si elle le remplace).
   `set_postes` du MCP conserve le rattachement quand il rejoue un poste. Tests : `src/lib/__tests__/postesAjoutes.test.ts`.
+  **Plusieurs postes pour un seul article** : une entreprise qui détaille un poste du DPGF en plusieurs lignes (meuble,
+  plan de travail, électroménager pour le poste 3.2) voit toutes ces lignes rattachées au MÊME article (plusieurs
+  `articleId` identiques, `versComparatif` les liste toutes dans `propositions` et additionne leurs montants). Geste : cocher
+  les postes ajoutés d'UNE entreprise (case devant la désignation, `ComparatifPrixUnitaires`), puis « Rattacher la sélection à
+  un poste du DPGF… » dans l'en-tête de la section (une seule écriture par entreprise via `onRattacher`). La sélection
+  est limitée à une entreprise ; « Détacher » reste par proposition.
   Pas encore fait : cartes mobiles du comparatif, rattachement à l'import d'un bordereau (`OffreImportDialog`), prise en
   compte dans le snapshot du marché (`marcheAct.ts`, le poste reste sous son chapitre dédié), interface non vérifiée
   dans un navigateur réel.
+- **Remise commerciale** (`src/lib/remiseCommerciale.ts`, jsonb de la consultation, aucune migration) : une entreprise peut
+  consentir une remise sur son prix final, en POURCENTAGE ou en MONTANT HT (`RemiseCommerciale { mode, valeur }`). Elle
+  s'applique au prix de BASE de l'offre (celui qui est comparé, noté et attribué) ; les options et variantes ne sont pas
+  remisées. Deux endroits. **Offres** (phase Collecte) : `Offre.remise` et `Offre.montant_brut` ; `montant_base` reste LE
+  prix final lu par tout le reste (classement, négociation, attribution, RAO), `montant_brut` mémorise le prix avant remise
+  et n'existe que si une remise s'applique. La remise se règle sous le montant (`RemiseInput`) ; en « total du lot » on
+  tape le prix avant remise, en « poste par poste » la remise s'applique au total calculé et survit à chaque
+  recalcul (`montantsAvecRemise` dans `changerMode`, `enregistrerSaisie`, `confirmerImport` et l'effet de lecture).
+  Un prix imposé de l'extérieur (acte d'engagement, dépôt d'offre) EFFACE la remise et le brut. **Négociation** :
+  `TourNegociation.remise`, saisie à chaque tour ; la dernière remise saisie s'applique au dernier prix de base
+  (`remiseCourante`, `baseA(..., 'courant')`), un tour sans remise n'y touche pas, une valeur 0 la retire. Elle compte dans
+  le gain obtenu, le prix lu par l'analyse (`offresAuPrixCourant`), le montant d'attribution et la fiche PDF
+  (lignes « Remise commerciale » et « Base après remise »). Plafonnée au prix (jamais négatif). Tests :
+  `remiseCommerciale.test.ts` et `actNegociation.test.ts`. Pas encore fait : le comparatif des prix unitaires
+  (`versComparatif`) et son export Excel n'affichent pas la remise (ils restent aux P.U. de l'entreprise), la remise
+  n'est pas répartie sur les options, interface non vérifiée dans un navigateur réel.
 - **Même dialogue pour remplir un document vierge** (`mode="document"`) : onglet PRO, menu « Importer un fichier
   (créer les postes) » du DPGF, du DQE/BPU et du CCTP (bouton). Pas d'entreprise ni de prix obligatoire
   (`detectHeader(..., { prixOptionnel })`, un CCTP n'a que des désignations) ; les lignes absentes du document
