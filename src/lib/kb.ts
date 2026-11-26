@@ -56,6 +56,11 @@ export function kbOpNeedsValue(op: KbFilterOp): boolean {
   return op === 'contains' || op === 'equals' || op === 'not_equals' || op === 'has' || op === 'has_not';
 }
 
+/** Couleur proposée à une nouvelle étiquette : la palette tourne, pour que deux étiquettes voisines diffèrent. */
+export function kbNextTagColor(count: number): KbTagColor {
+  return KB_TAG_COLORS[(count + 1) % KB_TAG_COLORS.length];
+}
+
 export const KB_MAX_DEPTH = 12;
 export const KB_MAX_OPTIONS = 100;
 

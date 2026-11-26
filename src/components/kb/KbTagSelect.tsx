@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { IconCheck, IconPalette, IconPlus } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
-import { KB_TAG_COLORS, type KbOption, type KbTagColor } from '../../lib/kb';
+import { KB_TAG_COLORS, kbNextTagColor, type KbOption, type KbTagColor } from '../../lib/kb';
 import { foldText } from '../../lib/slashMenu';
 import { KbPopover } from './KbPopover';
 import { KbSwatch, KbTag } from './KbTag';
@@ -19,11 +19,6 @@ interface KbTagSelectProps {
   onChange: (next: string[]) => void;
   /** Remplace la liste des options de la colonne (création ou changement de couleur) ; rend la liste enregistrée. */
   onOptionsChange: (next: KbOption[]) => Promise<KbOption[]>;
-}
-
-/** Couleur proposée à une nouvelle option : la palette tourne, pour que deux étiquettes voisines diffèrent. */
-export function nextKbColor(count: number): KbTagColor {
-  return KB_TAG_COLORS[(count + 1) % KB_TAG_COLORS.length];
 }
 
 export function KbTagSelect({ options, value, multiple, label, disabled, onChange, onOptionsChange }: KbTagSelectProps) {
@@ -51,7 +46,7 @@ export function KbTagSelect({ options, value, multiple, label, disabled, onChang
     if (!labelText || busy) return;
     setBusy(true);
     try {
-      const saved = await onOptionsChange([...options, { id: '', label: labelText, color: nextKbColor(options.length) }]);
+      const saved = await onOptionsChange([...options, { id: '', label: labelText, color: kbNextTagColor(options.length) }]);
       const created = saved.find(o => foldText(o.label) === foldText(labelText));
       if (created) toggle(created.id);
       setQuery('');

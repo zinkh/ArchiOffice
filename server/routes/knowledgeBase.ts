@@ -9,6 +9,7 @@ import {
   KB_MAX_DEPTH, isKbPropertyType, kbContentToText, kbDepth, kbIsPlainContent, kbTextToContent, kbWouldCycle,
   sanitizeKbOptions, sanitizeKbValue, type KbProperty,
 } from '../../src/lib/kb';
+import { planKbImport } from '../../src/lib/kbImportPlan';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -356,6 +357,69 @@ export function registerKnowledgeBaseRoutes(app: Express, { supabaseAdmin, getTe
       res.json(((data || []) as any[]).sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0)));
     } catch (e: any) {
       fail(res, '[GET /api/kb/databases/:id/rows]', e, 'Impossible de lire les lignes.');
+    }
+  });
+
+  // Import en lot (CSV, classeur, export Notion lus dans le navigateur) : une fiche par ligne. Tout ou rien :
+  // les lignes sont validées avant la moindre écriture (planKbImport) ; au moindre refus, 422 et rien n'est créé.
+  // `dry_run` rend le même rapport sans écrire (aperçu). Au plus 500 lignes et 30 colonnes par appel.
+  app.post('/api/kb/databases/:id/import', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await requireDatabase(tenantId, req.params.id))) return res.status(404).json({ error: 'Base de données introuvable.' });
+      const body = req.body || {};
+      const existing = await loadProperties(tenantId, req.params.id);
+      const plan = planKbImport(body, existing, () => crypto.randomUUID(), { maxContentBytes: MAX_CONTENT_BYTES });
+      if (plan.fatal) return res.status(400).json({ error: plan.fatal });
+
+      const summary = {
+        properties_created: plan.newProperties.map(p => p.name),
+        options_created: plan.optionsCreated,
+        errors: plan.errors,
+      };
+      if (body.dry_run === true) return res.json({ created: 0, would_create: plan.errors.length ? 0 : plan.rows.length, ...summary });
+      if (plan.errors.length > 0) {
+        return res.status(422).json({ error: 'Des lignes sont refusées : rien n\'a été importé.', code: 'KB_IMPORT_REFUSED', created: 0, ...summary });
+      }
+
+      const previousOptions = new Map(plan.optionUpdates.map(update => [update.propertyId, existing.find(p => p.id === update.propertyId)?.options ?? []]));
+      const createdPropertyIds: string[] = [];
+      const rollback = async () => {
+        // Retour arrière au mieux : les colonnes créées disparaissent, les étiquettes ajoutées sont retirées.
+        for (const propertyId of createdPropertyIds) await table(tenantId, 'kb_properties').delete().eq('id', propertyId);
+        for (const [propertyId, options] of previousOptions) await table(tenantId, 'kb_properties').update({ options }).eq('id', propertyId);
+      };
+
+      try {
+        const basePosition = existing.length ? Math.max(...existing.map(p => p.position)) + 1 : 0;
+        for (const [index, property] of plan.newProperties.entries()) {
+          const { error } = await table(tenantId, 'kb_properties').insert({
+            id: property.id, database_id: req.params.id, name: property.name, type: property.type, options: property.options, position: basePosition + index,
+          });
+          if (error) throw error;
+          createdPropertyIds.push(property.id);
+        }
+        for (const update of plan.optionUpdates) {
+          const { error } = await table(tenantId, 'kb_properties').update({ options: update.options }).eq('id', update.propertyId);
+          if (error) throw error;
+        }
+        const { data: siblings, error: readError } = await table(tenantId, 'kb_pages').select('position').eq('parent_id', req.params.id);
+        if (readError) throw readError;
+        const start = (siblings || []).length ? Math.max(...(siblings as any[]).map(s => Number(s.position) || 0)) + 1 : 0;
+        const records = plan.rows.map((row, index) => ({
+          id: crypto.randomUUID(), parent_id: req.params.id, kind: 'page', title: row.title, icon: null,
+          content: row.content, content_text: row.content ? kbContentToText(row.content) : '',
+          properties: row.properties, position: start + index, created_by: req.user.id,
+        }));
+        const { error } = await table(tenantId, 'kb_pages').insert(records);
+        if (error) throw error;
+      } catch (e) {
+        await rollback().catch(() => {});
+        throw e;
+      }
+      res.status(201).json({ created: plan.rows.length, ...summary });
+    } catch (e: any) {
+      fail(res, '[POST /api/kb/databases/:id/import]', e, 'Impossible d\'importer les lignes.');
     }
   });
 

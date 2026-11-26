@@ -2,6 +2,15 @@
 // jeton et en-tête de cabinet posés par lui. Types dans src/lib/kb.ts.
 import { apiFetch } from './api';
 import type { KbOption, KbPage, KbProperty, KbPropertyType, KbViewConfig } from './kb';
+import type { KbImportRequest } from './kbImport';
+
+export interface KbImportReport {
+  created: number;
+  would_create?: number;
+  properties_created: string[];
+  options_created: number;
+  errors: Array<{ row: number; column?: string; error: string }>;
+}
 
 export interface KbView {
   id: string;
@@ -59,6 +68,10 @@ export const kbApi = {
     apiFetch<KbProperty>(`/api/kb/databases/${encodeURIComponent(databaseId)}/properties/${encodeURIComponent(propertyId)}`, json('PUT', patch)),
   deleteProperty: (databaseId: string, propertyId: string) =>
     apiFetch<{ success: boolean }>(`/api/kb/databases/${encodeURIComponent(databaseId)}/properties/${encodeURIComponent(propertyId)}`, json('DELETE')),
+
+  /** Import en lot : `dryRun` valide sans écrire. Un refus (422) porte `errors` par ligne et par colonne. */
+  importRows: (databaseId: string, body: KbImportRequest, dryRun = false) =>
+    apiFetch<KbImportReport>(`/api/kb/databases/${encodeURIComponent(databaseId)}/import`, json('POST', { ...body, ...(dryRun ? { dry_run: true } : {}) })),
 
   views: (databaseId: string) => apiFetch<KbView[]>(`/api/kb/databases/${encodeURIComponent(databaseId)}/views`),
   updateView: (databaseId: string, viewId: string, patch: { name?: string; config?: KbViewConfig }) =>

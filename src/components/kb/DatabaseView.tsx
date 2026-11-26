@@ -2,9 +2,10 @@
 // étiquettes colorées, recherche, filtres, tris, colonnes masquables, ajout de ligne et de colonne.
 // Les modifications s'appliquent tout de suite puis partent au serveur ; un échec recharge les lignes.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence } from 'motion/react';
 import {
   IconArrowUpRight, IconCalendar, IconCheckbox, IconDots, IconHash, IconLink, IconList, IconPlus, IconSearch,
-  IconTags, IconTrash, IconTypography, IconLayoutList,
+  IconTags, IconTrash, IconTypography, IconLayoutList, IconUpload,
 } from '@tabler/icons-react';
 import type { Icon } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
@@ -17,6 +18,7 @@ import { useConfirmDialog } from '../ui/ConfirmDialog';
 import { Toast } from '../ui/Toast';
 import { ErrorState, ListSkeleton } from '../DataState';
 import { KbCell } from './KbCell';
+import { KbImportDialog } from './KbImportDialog';
 import { KbPopover } from './KbPopover';
 import { KbViewControls } from './KbViewControls';
 
@@ -135,6 +137,7 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
@@ -264,6 +267,9 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
           <IconSearch size={14} aria-hidden className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--tblr-muted)' }} />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('kb_search_rows') as string} className="tblr-input pl-8 w-40 sm:w-52" />
         </label>
+        <button type="button" onClick={() => setImportOpen(true)} className="btn btn-secondary inline-flex items-center gap-1.5" aria-label={t('kb_import') as string} aria-haspopup="dialog">
+          <IconUpload size={16} aria-hidden /><span className="hidden sm:inline">{t('kb_import')}</span>
+        </button>
         <button type="button" onClick={() => void addRow()} className="btn btn-primary inline-flex items-center gap-1.5">
           <IconPlus size={16} aria-hidden />{t('kb_new')}
         </button>
@@ -341,6 +347,16 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
 
       {dialog}
       <Toast toast={toast} />
+      <AnimatePresence>
+        {importOpen && (
+          <KbImportDialog
+            key="import"
+            database={database}
+            onClose={() => setImportOpen(false)}
+            onDone={() => { setImportOpen(false); void load(); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

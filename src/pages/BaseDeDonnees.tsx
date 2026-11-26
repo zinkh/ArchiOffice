@@ -2,7 +2,8 @@
 // (tableaux typés comme « Fabricants »). Route /base-de-donnees/:pageId?. API : server/routes/knowledgeBase.ts.
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { IconDatabase, IconMenu2 } from '@tabler/icons-react';
+import { AnimatePresence } from 'motion/react';
+import { IconDatabase, IconMenu2, IconUpload } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import type { KbPage } from '../lib/kb';
 import { kbApi } from '../lib/kbApi';
@@ -11,6 +12,7 @@ import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { useConfirmDialog } from '../components/ui/ConfirmDialog';
 import { Toast } from '../components/ui/Toast';
 import { ErrorState, ListSkeleton } from '../components/DataState';
+import { KbImportDialog } from '../components/kb/KbImportDialog';
 import { KbSidebar } from '../components/kb/KbSidebar';
 import { KbPageView } from '../components/kb/KbPageView';
 
@@ -35,6 +37,7 @@ export default function BaseDeDonnees() {
   const [pageLoading, setPageLoading] = useState(false);
   const [pageFailed, setPageFailed] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const errorText = (e: any) => e?.message || (t('kb_error_generic') as string);
   const openPage = useCallback((id: string | null) => {
@@ -180,6 +183,9 @@ export default function BaseDeDonnees() {
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => void create('page', null)} className="btn btn-primary">{t('kb_new_page')}</button>
               <button type="button" onClick={() => void create('database', null)} className="btn btn-secondary">{t('kb_new_database')}</button>
+              <button type="button" onClick={() => setImportOpen(true)} className="btn btn-secondary inline-flex items-center gap-1.5" aria-haspopup="dialog">
+                <IconUpload size={16} aria-hidden />{t('kb_import_file')}
+              </button>
             </div>
             <h2 className="mt-6 mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('kb_templates')}</h2>
             <div className="flex flex-wrap gap-2">
@@ -192,6 +198,16 @@ export default function BaseDeDonnees() {
 
       {dialog}
       <Toast toast={toast} />
+      <AnimatePresence>
+        {importOpen && (
+          <KbImportDialog
+            key="import"
+            database={null}
+            onClose={() => setImportOpen(false)}
+            onDone={id => { setImportOpen(false); void loadTree().then(() => openPage(id)); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

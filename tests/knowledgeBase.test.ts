@@ -1,5 +1,5 @@
 // « Base de données » du cabinet : server/routes/knowledgeBase.ts (pages, bases, propriétés, vues, corbeille).
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
@@ -181,6 +181,129 @@ describe('Pages pour les agents IA : liste et texte brut', () => {
     expect(row.status).toBe(201);
     expect(row.body.content_text).toContain('Ville');
     expect((await t.get('/api/kb/pages')).body.map((p: any) => p.title).sort()).toEqual(['Fabricants', 'La Rochère']);
+  });
+});
+
+describe('Import en lot dans une base', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const columns = [{ name: 'Produits', type: 'multi_select' }, { name: 'Texte', type: 'text' }];
+  const rows = [
+    { title: 'La Rochère', cells: { Produits: ['Construction vitrée', 'Pavés de verre'], Texte: '123 Rue de La Rochère' } },
+    { title: 'SOTTAS', cells: { Produits: ['Construction vitrée', 'Structure métallique'], Texte: 'Rue de la Gare 12' } },
+  ];
+  async function newDatabase(t: ReturnType<typeof setup>) {
+    return (await t.post('/api/kb/pages', { kind: 'database', title: 'Fabricants' })).body;
+  }
+
+  it('crée les colonnes, les étiquettes et les fiches, puis les relit avec leurs valeurs', async () => {
+    const t = setup();
+    const db = await newDatabase(t);
+    const res = await t.post(`/api/kb/databases/${db.id}/import`, { columns, rows });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ created: 2, properties_created: ['Produits', 'Texte'], options_created: 3, errors: [] });
+
+    const props = (await t.get(`/api/kb/databases/${db.id}/properties`)).body;
+    expect(props.map((p: any) => p.name)).toEqual(['Nom', 'Produits', 'Texte']);
+    const produits = props.find((p: any) => p.name === 'Produits');
+    const texte = props.find((p: any) => p.name === 'Texte');
+    expect(produits.options.map((o: any) => o.label)).toEqual(['Construction vitrée', 'Pavés de verre', 'Structure métallique']);
+
+    const list = (await t.get(`/api/kb/databases/${db.id}/rows`)).body;
+    expect(list.map((r: any) => r.title)).toEqual(['La Rochère', 'SOTTAS']);
+    expect(list[0].properties[texte.id]).toBe('123 Rue de La Rochère');
+    expect(list[0].properties[produits.id]).toEqual([produits.options[0].id, produits.options[1].id]);
+  });
+
+  it('reprend les colonnes et les étiquettes existantes au deuxième envoi, sans doublon', async () => {
+    const t = setup();
+    const db = await newDatabase(t);
+    await t.post(`/api/kb/databases/${db.id}/import`, { columns, rows });
+    const second = await t.post(`/api/kb/databases/${db.id}/import`, {
+      columns, rows: [{ title: 'FPEE', cells: { produits: ['pavés de verre', 'Menuiseries extérieures'] } }],
+    });
+    expect(second.status).toBe(201);
+    expect(second.body).toMatchObject({ created: 1, properties_created: [], options_created: 1 });
+    const props = (await t.get(`/api/kb/databases/${db.id}/properties`)).body;
+    expect(props).toHaveLength(3);
+    expect(props.find((p: any) => p.name === 'Produits').options).toHaveLength(4);
+    expect((await t.get(`/api/kb/databases/${db.id}/rows`)).body.map((r: any) => r.title)).toEqual(['La Rochère', 'SOTTAS', 'FPEE']);
+  });
+
+  it('importe le contenu des pages et l\'indexe pour la recherche', async () => {
+    const t = setup();
+    const db = await newDatabase(t);
+    const content = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Isolation répartie en laine de bois' }] }] };
+    const res = await t.post(`/api/kb/databases/${db.id}/import`, { columns: [], rows: [{ title: 'Fiche', cells: {}, content }] });
+    expect(res.status).toBe(201);
+    expect((await t.get('/api/kb/search?q=laine')).body.map((p: any) => p.title)).toEqual(['Fiche']);
+  });
+
+  it('l\'aperçu (dry_run) rapporte sans rien écrire', async () => {
+    const t = setup();
+    const db = await newDatabase(t);
+    const res = await t.post(`/api/kb/databases/${db.id}/import`, { columns, rows, dry_run: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: 0, would_create: 2, properties_created: ['Produits', 'Texte'], options_created: 3 });
+    expect((await t.get(`/api/kb/databases/${db.id}/properties`)).body).toHaveLength(1);
+    expect((await t.get(`/api/kb/databases/${db.id}/rows`)).body).toEqual([]);
+  });
+
+  it('tout ou rien : une ligne refusée empêche tout l\'import, colonnes comprises', async () => {
+    const t = setup();
+    const db = await newDatabase(t);
+    const bad = [{ title: 'OK', cells: { Prix: 12 } }, { title: 'Mauvais', cells: { Prix: 'abc' } }];
+    const res = await t.post(`/api/kb/databases/${db.id}/import`, { columns: [{ name: 'Prix', type: 'number' }], rows: bad });
+    expect(res.status).toBe(422);
+    expect(res.body).toMatchObject({ code: 'KB_IMPORT_REFUSED', created: 0, errors: [{ row: 2, column: 'Prix' }] });
+    expect((await t.get(`/api/kb/databases/${db.id}/properties`)).body).toHaveLength(1);
+    expect((await t.get(`/api/kb/databases/${db.id}/rows`)).body).toEqual([]);
+    const preview = await t.post(`/api/kb/databases/${db.id}/import`, { columns: [{ name: 'Prix', type: 'number' }], rows: bad, dry_run: true });
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({ would_create: 0, errors: [{ row: 2 }] });
+  });
+
+  it('refuse un corps mal formé, trop de lignes ou une colonne incohérente (400)', async () => {
+    const t = setup();
+    const db = await newDatabase(t);
+    const url = `/api/kb/databases/${db.id}/import`;
+    expect((await t.post(url, {})).status).toBe(400);
+    expect((await t.post(url, { columns: [], rows: [] })).status).toBe(400);
+    expect((await t.post(url, { columns: [], rows: Array.from({ length: 501 }, () => ({ title: 'x', cells: {} })) })).status).toBe(400);
+    expect((await t.post(url, { columns: [{ name: 'nom', type: 'text' }], rows: [{ title: 'x', cells: {} }] })).status).toBe(400);
+    expect((await t.post(url, { columns: [{ name: 'A', type: 'relation' }], rows: [{ title: 'x', cells: {} }] })).status).toBe(400);
+  });
+
+  it('ne laisse pas importer dans la base d\'un autre cabinet ni dans une page ordinaire', async () => {
+    const mine = setup();
+    const other = setup();
+    const foreign = await newDatabase(other);
+    const payload = { columns: [], rows: [{ title: 'x', cells: {} }] };
+    expect((await mine.post(`/api/kb/databases/${foreign.id}/import`, payload)).status).toBe(404);
+    const page = (await mine.post('/api/kb/pages', { title: 'Page libre' })).body;
+    expect((await mine.post(`/api/kb/databases/${page.id}/import`, payload)).status).toBe(404);
+    expect((await other.get(`/api/kb/databases/${foreign.id}/rows`)).body).toEqual([]);
+  });
+
+  it('défait les colonnes et étiquettes créées si l\'insertion des fiches échoue', async () => {
+    const t = setup();
+    const db = await newDatabase(t);
+    const props = (await t.get(`/api/kb/databases/${db.id}/properties`)).body;
+    await t.post(`/api/kb/databases/${db.id}/properties`, { name: 'Produits', type: 'multi_select', options: [{ label: 'Construction vitrée', color: 'bleu' }] });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const from = fakeSupabaseAdmin.from.bind(fakeSupabaseAdmin);
+    vi.spyOn(fakeSupabaseAdmin, 'from').mockImplementation((name: string) => {
+      const query: any = from(name);
+      if (name === 'kb_pages') query.insert = () => Promise.resolve({ data: null, error: { message: 'Database unavailable' } });
+      return query;
+    });
+
+    const res = await t.post(`/api/kb/databases/${db.id}/import`, { columns, rows });
+    expect(res.status).toBe(500);
+    vi.restoreAllMocks();
+    const after = (await t.get(`/api/kb/databases/${db.id}/properties`)).body;
+    expect(after.map((p: any) => p.name)).toEqual([props[0].name, 'Produits']);
+    expect(after[1].options.map((o: any) => o.label)).toEqual(['Construction vitrée']);
   });
 });
 
