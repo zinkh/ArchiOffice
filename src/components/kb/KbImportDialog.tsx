@@ -94,6 +94,8 @@ export function KbImportDialog({ database, onClose, onDone }: KbImportDialogProp
   };
 
   const readFile = async (file: File) => {
+    // Les colonnes existantes de la base ne sont pas encore chargées : leurs types ne seraient pas repris.
+    if (!existing) return;
     setMessage(null);
     const extension = file.name.toLowerCase().split('.').pop() ?? '';
     const isZip = extension === 'zip';

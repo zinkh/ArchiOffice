@@ -1,6 +1,6 @@
 // « Base de données » du cabinet (mini-Notion) : pages imbriquées, éditeur de blocs et bases de données
 // (tableaux typés comme « Fabricants »). Route /base-de-donnees/:pageId?. API : server/routes/knowledgeBase.ts.
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'motion/react';
 import { IconDatabase, IconMenu2, IconUpload } from '@tabler/icons-react';
@@ -45,9 +45,20 @@ export default function BaseDeDonnees() {
     navigate(id ? `/base-de-donnees/${id}` : '/base-de-donnees');
   }, [navigate]);
 
+  // Modifications faites à l'écran et pas encore vues du serveur (enregistrement automatique en attente) :
+  // une relecture de l'arbre ne doit pas les écraser (titre tapé puis sous-page créée aussitôt).
+  const localEdits = useRef(new Map<string, Partial<KbPage>>());
+
   const loadTree = useCallback(async () => {
     try {
-      setPages(await kbApi.tree());
+      const fresh = await kbApi.tree();
+      setPages(fresh.map(p => {
+        const edit = localEdits.current.get(p.id);
+        if (!edit) return p;
+        const stale = (Object.keys(edit) as Array<keyof KbPage>).some(k => edit[k] !== p[k]);
+        if (!stale) { localEdits.current.delete(p.id); return p; }
+        return { ...p, ...edit };
+      }));
       setTreeFailed(false);
     } catch { setTreeFailed(true); }
     finally { setTreeLoading(false); }
@@ -67,7 +78,10 @@ export default function BaseDeDonnees() {
     return () => { cancelled = true; };
   }, [pageId]);
 
-  const updateLocal = (id: string, patch: Partial<KbPage>) => setPages(prev => prev.map(p => (p.id === id ? { ...p, ...patch } : p)));
+  const updateLocal = (id: string, patch: Partial<KbPage>) => {
+    localEdits.current.set(id, { ...localEdits.current.get(id), ...patch });
+    setPages(prev => prev.map(p => (p.id === id ? { ...p, ...patch } : p)));
+  };
 
   const create = async (kind: 'page' | 'database', parentId: string | null) => {
     try {

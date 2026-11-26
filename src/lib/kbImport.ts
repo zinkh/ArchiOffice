@@ -133,14 +133,16 @@ export function inferImportType(values: string[]): Exclude<KbImportType, 'title'
   return 'text';
 }
 
-/** Valeur d'une cellule selon le type choisi ; `null` pour une cellule vide ou illisible dans ce type. */
+/** Valeur d'une cellule selon le type choisi ; `null` pour une cellule vide, la valeur brute si elle est illisible dans ce type. */
 export function convertImportCell(value: string, type: KbImportType): KbImportCell {
   const v = value.trim();
   if (!v) return null;
   switch (type) {
-    case 'number': return parseNumberCell(v);
-    case 'date': return parseDateCell(v);
-    case 'checkbox': return parseCheckboxCell(v);
+    // Illisible dans le type choisi : la valeur brute est transmise, le serveur refuse la ligne (« Nombre attendu. »)
+    // et rien n'est importé, plutôt que de perdre la cellule en silence.
+    case 'number': return parseNumberCell(v) ?? v;
+    case 'date': return parseDateCell(v) ?? v;
+    case 'checkbox': return parseCheckboxCell(v) ?? v;
     case 'select': return splitLabels(v)[0] ?? null;
     case 'multi_select': { const labels = splitLabels(v); return labels.length ? labels : null; }
     case 'url': return v.slice(0, 2000);

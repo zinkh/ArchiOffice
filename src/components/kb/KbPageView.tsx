@@ -155,9 +155,9 @@ export function KbPageView({ page, pages, onOpen, onLocalChange, onTrash }: KbPa
         ? <DatabaseView key={page.id} database={{ ...page, title }} onOpenRow={onOpen} />
         : (
           <>
-            {isRow && parent && <RowProperties key={page.id} page={page} database={parent} />}
+            {isRow && parent && <RowProperties key={`props-${page.id}`} page={page} database={parent} />}
             <BlockEditor
-              key={page.id}
+              key={`editor-${page.id}`}
               pageId={page.id}
               value={page.content ?? null}
               onChange={(json: JSONContent) => schedule({ content: json })}

@@ -138,11 +138,13 @@ export function BlockEditor({ pageId, value, onChange, disabled }: BlockEditorPr
       attributes: { class: 'kb-content', role: 'textbox', 'aria-multiline': 'true', 'aria-label': t('kb_editor_label') as string },
       handleKeyDown: (_view, event) => {
         const { slash: s, items: list, active: idx } = live.current;
-        if (!s || !list.length) return false;
+        if (!s) return false;
+        // Échap ferme le menu même quand aucun bloc ne correspond à la recherche.
+        if (event.key === 'Escape') { dismissedRef.current = s.from; setSlash(null); return true; }
+        if (!list.length) return false;
         if (event.key === 'ArrowDown') { setActive((idx + 1) % list.length); return true; }
         if (event.key === 'ArrowUp') { setActive((idx - 1 + list.length) % list.length); return true; }
         if (event.key === 'Enter' || event.key === 'Tab') { runItemRef.current(list[idx] ?? list[0]); return true; }
-        if (event.key === 'Escape') { dismissedRef.current = s.from; setSlash(null); return true; }
         return false;
       },
     },

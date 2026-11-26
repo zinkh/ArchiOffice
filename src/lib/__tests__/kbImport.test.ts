@@ -86,7 +86,10 @@ describe('inferImportType', () => {
 describe('convertImportCell', () => {
   it('convertit selon le type, null pour le vide ou l\'illisible', () => {
     expect(convertImportCell('1 234,5', 'number')).toBe(1234.5);
-    expect(convertImportCell('abc', 'number')).toBeNull();
+    // Illisible dans le type choisi : la valeur brute est gardée, le serveur refuse la ligne (rien n'est perdu en silence).
+    expect(convertImportCell('abc', 'number')).toBe('abc');
+    expect(convertImportCell('pas une date', 'date')).toBe('pas une date');
+    expect(convertImportCell('peut-être', 'checkbox')).toBe('peut-être');
     expect(convertImportCell('26/11/2026', 'date')).toBe('2026-11-26');
     expect(convertImportCell('Oui', 'checkbox')).toBe(true);
     expect(convertImportCell('A, B', 'multi_select')).toEqual(['A', 'B']);
@@ -132,9 +135,9 @@ describe('proposeImportColumns et buildImportRows', () => {
     // « 12 » et « abc » : la colonne est proposée en texte, rien n'est perdu.
     expect(columns.find(c => c.name === 'Prix')!.type).toBe('text');
     expect(buildImportRows(table, columns)).toEqual([{ title: 'A', cells: { Prix: '12' } }, { title: 'B', cells: { Prix: 'abc' } }]);
-    // Forcée en nombre : « abc » est illisible, la cellule reste vide plutôt que fausse.
+    // Forcée en nombre : « abc » est gardé tel quel pour que l'import soit refusé, plutôt que perdu en silence.
     const asNumber = columns.map(c => (c.name === 'Prix' ? { ...c, type: 'number' as const } : c));
-    expect(buildImportRows(table, asNumber)).toEqual([{ title: 'A', cells: { Prix: 12 } }, { title: 'B', cells: {} }]);
+    expect(buildImportRows(table, asNumber)).toEqual([{ title: 'A', cells: { Prix: 12 } }, { title: 'B', cells: { Prix: 'abc' } }]);
   });
 });
 
