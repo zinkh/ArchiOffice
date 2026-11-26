@@ -1076,6 +1076,7 @@ export default {
       "global_search_contacts": "Contacts",
       "global_search_tenders": "Appels d’offres",
       "global_search_invoices": "Factures",
+      "global_search_kb_pages": "Base de données",
       "new_project": "Nouveau Projet",
       "active_projects": "Projets Actifs",
       "upcoming_deadlines": "Échéances à venir",

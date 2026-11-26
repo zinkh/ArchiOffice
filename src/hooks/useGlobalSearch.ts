@@ -12,10 +12,12 @@ export interface GlobalSearchResults {
   contacts: GlobalSearchItem[];
   tenders: GlobalSearchItem[];
   invoices: GlobalSearchItem[];
+  /** Pages de la « Base de données » du cabinet (mini-Notion). */
+  kb_pages: GlobalSearchItem[];
 }
 export type GlobalSearchStatus = 'idle' | 'loading' | 'success' | 'error';
-const emptyResults: GlobalSearchResults = { projects: [], contacts: [], tenders: [], invoices: [] };
-const groups = ['projects', 'contacts', 'tenders', 'invoices'] as const;
+const emptyResults: GlobalSearchResults = { projects: [], contacts: [], tenders: [], invoices: [], kb_pages: [] };
+const groups = ['projects', 'contacts', 'tenders', 'invoices', 'kb_pages'] as const;
 type SearchRequest = (url: string, options: RequestInit) => Promise<GlobalSearchResults>;
 
 /** A response belongs to one query, retry and cabinet/user context. */

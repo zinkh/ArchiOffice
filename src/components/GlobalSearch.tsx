@@ -62,6 +62,7 @@ export function GlobalSearch({ scopeKey }: { scopeKey: string }) {
                 { key: 'contacts', label: t('global_search_contacts'), path: () => '/contacts', color: '#2fb344', letter: 'C' },
                 { key: 'tenders', label: t('global_search_tenders'), path: (id: string) => `/tenders/${id}`, color: '#f76707', letter: 'A' },
                 { key: 'invoices', label: t('global_search_invoices'), path: () => '/invoices', color: '#ae3ec9', letter: 'F' },
+                { key: 'kb_pages', label: t('global_search_kb_pages'), path: (id: string) => `/base-de-donnees/${id}`, color: 'var(--kb-brun-dot)', letter: 'B' },
               ] as const).map(({ key, label, path, color, letter }) => !results[key].length ? null : (
                 <div key={key}>
                   <div className="px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider border-b" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}>{label}</div>

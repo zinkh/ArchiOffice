@@ -7,7 +7,7 @@ import { GlobalSearch } from '../src/components/GlobalSearch';
 const mocks = vi.hoisted(() => ({ request: vi.fn(), t: (key: string, opts?: any) => opts?.query ? `${key} ${opts.query}` : key }));
 vi.mock('../src/lib/api', () => ({ apiFetch: mocks.request }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: mocks.t }) }));
-const data = (label?: string) => ({ projects: label ? [{ id: label, _label: label }] : [], contacts: [], tenders: [], invoices: [] });
+const data = (label?: string) => ({ projects: label ? [{ id: label, _label: label }] : [], contacts: [], tenders: [], invoices: [], kb_pages: [] });
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => { vi.useFakeTimers(); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); mocks.request.mockReset(); });

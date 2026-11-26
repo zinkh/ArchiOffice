@@ -1029,6 +1029,7 @@ export default {
       "global_search_contacts": "Contacts",
       "global_search_tenders": "Tenders",
       "global_search_invoices": "Invoices",
+      "global_search_kb_pages": "Database",
       "new_project": "New Project",
       "active_projects": "Active Projects",
       "upcoming_deadlines": "Upcoming Deadlines",
