@@ -591,7 +591,7 @@ en-tête, adresse et SIRET en pied de page, pagination « P1|2 » en bas à droi
 ### Remplir un modèle Word (`fill_docx_template`) et affaire ouverte à l'écran
 
 `fill_docx_template` (`docxFillTool.ts`, testé dans `tests/agentDocxFill.test.ts`) remplit un modèle `.docx` joint au chat ou rangé
-sur une fiche, au lieu de « recopier le texte dans la conversation ». Exposé aux agents qui ont `docsRead` ET le scope `projects` (pas au MCP).
+sur une fiche, au lieu de « recopier le texte dans la conversation ». Exposé aux agents qui ont `docsRead` ET le scope `projects`, et donc aussi au MCP (`buildAgentTools(MCP_CAPS)`), comme `fill_pdf_form` ci-dessous.
 
 - **Deux temps** : `inspect` rend les paragraphes numérotés (corps, tableaux, en-têtes, pieds), puis `fill` applique des
   modifications ciblées : `{ paragraph, replace }` (tout le paragraphe), `{ paragraph, find, replace }` ou `{ find, replace }`
