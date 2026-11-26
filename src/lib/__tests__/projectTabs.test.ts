@@ -5,10 +5,10 @@ import {
 } from '../projectTabs';
 
 describe('navigation de la fiche affaire', () => {
-  it('range chacun des seize onglets dans une seule famille', () => {
+  it('range chacun des dix-sept onglets dans une seule famille', () => {
     const all = PROJECT_TAB_GROUPS.flatMap(g => g.tabs);
-    expect(all).toHaveLength(16);
-    expect(new Set(all).size).toBe(16);
+    expect(all).toHaveLength(17);
+    expect(new Set(all).size).toBe(17);
   });
 
   it('accepte les identifiants des liens existants (?tab=) et refuse le reste', () => {
@@ -32,11 +32,17 @@ describe('navigation de la fiche affaire', () => {
 
   it('hors mission chantier, ne garde que cinq entrées', () => {
     const groups = visibleTabGroups(tab => !CHANTIER_ONLY_TABS.includes(tab));
-    expect(groups.map(g => g.id)).toEqual(['INFOS', 'TACHES', 'HONOS', 'ETUDES', 'CORRESPONDANCE']);
+    expect(groups.map(g => g.id)).toEqual(['INFOS', 'TACHES', 'HONOS', 'ETUDES', 'DOCUMENTS', 'CORRESPONDANCE']);
   });
 
-  it('en mission chantier, ramène seize onglets à sept entrées', () => {
-    expect(visibleTabGroups(() => true)).toHaveLength(7);
+  it("place l'onglet Documents juste avant la correspondance", () => {
+    expect(groupOfTab('DOCS')?.id).toBe('DOCUMENTS');
+    const ids = PROJECT_TAB_GROUPS.map(g => g.id);
+    expect(ids.indexOf('DOCUMENTS')).toBe(ids.indexOf('CORRESPONDANCE') - 1);
+  });
+
+  it('en mission chantier, ramène dix-sept onglets à huit entrées', () => {
+    expect(visibleTabGroups(() => true)).toHaveLength(8);
   });
 
   it("retire d'une famille les onglets masqués sans la vider", () => {

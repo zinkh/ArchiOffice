@@ -309,6 +309,32 @@ Don't see something you expected here, or know of a gap this page is missing? Op
 - **To build**: model the co-contracting group on the lot (mandatary and co-contractors, joint or several liability), so an OS or FTM can address the whole group with a single number, as `marche_ids` already does for several companies; adapt the `key` (`cleEntrepriseLot`), the number formats (`formatNumeroOs`, `formatNumeroFtm`) and the unique index together, with a test on two companies sharing a lot.
 - **Related**: the DOE workshop and the construction site panel also read one company per lot; they will need the same group notion.
 
+### Document management (GED): general view, per-project view and folders under phases
+
+🚧 Step 1 done: the "Mémoire technique collective" panel moved to `/settings` > Données et RGPD (`KnowledgeSharingSettings`), the Drive reader block lives in `/settings` > Mon profil (`DriveAccessPanel`) and, per project, in the new project tab **Documents** (`DOCS`, family "Documents", which mounts `Documents` with `embedded` + `projectId`). Step 2 done: `/documents` is now the general GED (`src/pages/Ged.tsx`, pure logic in `src/lib/gedView.ts`): navigation (all, recent, favourites, to classify, by project and phase, by phase, by type, by quality status), filters, accent-insensitive search with highlighting, list/details/thumbnail views, sortable columns, detail panel (properties with reclassification, versions, activity), import into the open project/phase. Favourites are stored per browser (`localStorage`). Not done yet: search inside file contents, offline and conflict entries (desktop-sync statuses are not read here), editable metadata beyond project and phase, permissions and workflow.
+
+Step 3 done: **folders under phases** (`supabase/migrate_document_folders.sql`, applied on the production project; `server/routes/documentFolders.ts`; pure logic in `src/lib/gedFolders.ts`). Free folders belong to one project and one phase, up to 3 levels, unique names per place (case, accents and spaces ignored), names safe for Windows/macOS. A document sits in a folder of its own project and phase (`documents.folder_id`); changing its project or phase takes it out of the folder unless a new one is chosen. A non-empty folder (documents or sub-folders) cannot be deleted. Folders are **logical**: the file does not move at the storage provider, and desktop sync does not know them yet. Still to do: mirror folders in the external storage tree (`<root>/<code> - <project>/<phase>/<folder>`) and in `server/desktop/nodes.ts`, the Electron readable tree, folder rights, and a per-tenant template of default folders per phase.
+
+The `/documents` screen is a simple list. It currently mixes two jobs and carries settings that do not belong to it. Mock-up: a three-pane GED inspired by ArchiOffice Drive and M-Files (published as a private artifact during design; nothing is coded yet).
+
+- **Move settings to the global settings** (`/settings`): the "Mémoire technique collective" block (anonymous sharing consent, automatic sharing, analysed and shared documents, manual sharing, Mistral link check) and the "Lecteur A:" block (connection, projects added to the drive, open and disconnect). `/documents` keeps neither.
+- **Per-project view**: today's simple documents view moves into each project file (project sheet), where it already fits the project context.
+- **General view `/documents` as a real GED**:
+  - Command bar: New, Open, Classify, Versions, Available offline, sync status, global search.
+  - Left navigation: Home, Recent, Favourites, tree by project and phase (with folders), by phase, by type, To classify, Offline, Conflicts (with a count).
+  - Central list: Phase, Type and Status filters; three display modes (list, details, thumbnails); columns Document, Project, Phase, Type, Index, State (synced, offline, conflict).
+  - Right panel: preview; Properties, Versions and Activity tabs; "Open in ArchiOffice" and "View versions".
+  - M-Files-inspired search: full-text with highlighted terms, faceted filters (metadata or file contents, class, extension, user, year), editable metadata, permissions and workflow.
+  - Builds on the desktop-sync groundwork already on the server (`/api/desktop/v1`: versions, index, locks, conflicts, change journal).
+- **Folders under phases**: not possible today, the project and phase folders are derived from the documents themselves and none can be created. Needs:
+  - a folders table (tenant, project, phase, parent folder, name), with `tenant_id` scoping and `assertTenantEntity` on `project_id`; add it to `TABLES_RATTACHEES` so archived projects stay read-only;
+  - a folder column on `documents` (and on `plans`/visas if they follow), moving a document between folders from the GED and from `PUT /api/documents/:id`;
+  - creating the same folder at the external storage provider (Nextcloud, kDrive, Drive, Dropbox) under `<root>/<code> - <project>/<phase>/<folder>`, with the folder cache `external_storage_folders` and the "renamed on the drive" recovery already in place;
+  - server-computed paths for desktop sync (`server/desktop/nodes.ts`), which only knows project and phase today, plus unique sibling names and Windows/macOS-safe names;
+  - the readable local tree of the Electron client (`localTreePath.ts`) and its migration, which would need the folder segment too;
+  - the CAD rule (no CAD, BIM or 3D bytes in Supabase Storage) still applies whatever the folder.
+- **Open decisions**: free-form folders versus a per-tenant template of default folders per phase (Plans, Written documents, Structure...); whether a folder can exist across several phases; rights per folder.
+
 ### PRO workshop: linked quantities, associated items and library hygiene
 
 🟡 Partly built. A line can follow another line's quantity (`Ligne.quantiteLiee`, `src/lib/quantitesLiees.ts`), copy, paste, duplicate and delete handle those links, and a library article carries associated items (`articles_type.associes`) that are offered at insertion. What remains:
