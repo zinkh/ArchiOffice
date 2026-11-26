@@ -33,7 +33,7 @@ import { buildEvents, currentCursor, getFloor, maybePrune, parseCursor, parseLim
 import { issueDevice, listDevices, parseDeviceInput, revokeDevice, TooManyDevicesError } from '../desktop/deviceTokens';
 import { acquireLock, getLockMode, releaseLock, renewLock, toLockView } from '../desktop/locks';
 import {
-  canDeleteRole, DesktopError, getNode, listChildren, listVersions, loadDocument, nodesForDocuments,
+  canDeleteRole, DesktopError, getNode, listChildren, listVersions, loadDocument, loadFolders, nodesForDocuments,
   type NodeContext,
 } from '../desktop/nodes';
 import {
@@ -426,14 +426,24 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
     if (body.parentId !== undefined || body.phase !== undefined) {
       let projectId = doc.project_id;
       let phase: string | null;
+      // Dossier libre de la GED : un dossier choisi, `null` pour en sortir, `undefined` pour ne pas y toucher.
+      let folderId: string | null | undefined;
       if (body.parentId !== undefined) {
         const parent = parseNodeId(body.parentId);
-        if (parent?.kind === 'phase' || parent?.kind === 'prj') {
+        if (parent?.kind === 'fld') {
+          const folder = (await loadFolders(ctx)).find(f => f.id === parent.folderId);
+          if (!folder) throw new DesktopError(404, 'NODE_NOT_FOUND', 'Dossier de destination introuvable.');
+          projectId = folder.project_id;
+          phase = folder.phase !== DEFAULT_PHASE_CODE ? folder.phase : null;
+          folderId = folder.id;
+        } else if (parent?.kind === 'phase' || parent?.kind === 'prj') {
           projectId = parent.projectId;
           phase = parent.kind === 'phase' && parent.code !== DEFAULT_PHASE_CODE ? parent.code : null;
+          folderId = null;
         } else if (parent?.kind === 'inbox' && parent.tenantId === ctx.tenantId) {
           projectId = null;
           phase = null;
+          folderId = null;
         } else {
           throw new DesktopError(400, 'INVALID_PARENT', 'Dossier de destination invalide.');
         }
@@ -455,6 +465,11 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
         update.resource_id = projectId;
       }
       update.phase = phase;
+      // Changer de phase sort le document de son dossier libre (un dossier ne vaut que pour sa phase). On
+      // n'écrit la colonne que si elle change : une base sans la migration des dossiers n'a pas folder_id.
+      if (folderId === undefined && doc.folder_id && (phase ?? DEFAULT_PHASE_CODE) !== (doc.phase ?? DEFAULT_PHASE_CODE)) folderId = null;
+      if (folderId && folderId !== doc.folder_id) update.folder_id = folderId;
+      else if (folderId === null && doc.folder_id) update.folder_id = null;
     }
 
     if (body.docType !== undefined) {

@@ -11,9 +11,10 @@
 import { projectFolderName } from '../externalStorage/businessFolderPath';
 import { sanitizeFolderSegment } from '../externalStorage/folderNaming';
 import {
-  comparePhaseCodes, DEFAULT_PHASE_CODE, documentNodeId, inboxNodeId, parseNodeId, phaseCode,
+  comparePhaseCodes, DEFAULT_PHASE_CODE, documentNodeId, folderNodeId, inboxNodeId, parseNodeId, phaseCode,
   phaseNodeId, projectNodeId, tenantNodeId, uniqueSiblingNames,
 } from '../../src/lib/desktopNodes';
+import { folderPath, type DocFolder } from '../../src/lib/gedFolders';
 import { getLiveLocks, toLockView, type LockMode, type LockRow, type LockView } from './locks';
 
 /** Erreur métier du module : porte son code HTTP et un code stable pour le client natif. */
@@ -149,15 +150,42 @@ export async function loadDocuments(ctx: NodeContext, ids: readonly string[]): P
   return rows;
 }
 
-/** Les documents vivants d'un dossier (une phase d'une affaire, ou « À classer »). */
-async function folderSiblings(ctx: NodeContext, projectId: string | null, code: string | null): Promise<DocRow[]> {
-  return fetchAll(() => {
+/** Table ou colonne des dossiers libres absente : instance dont la base n'a pas la migration document_folders. */
+const isMissingFoldersTable = (e: any): boolean =>
+  e?.code === '42P01' || (/document_folders/.test(String(e?.message || '')) && /does not exist|schema cache/i.test(String(e?.message || '')));
+const isMissingFolderColumn = (e: any): boolean =>
+  e?.code === '42703' || (/folder_id/.test(String(e?.message || '')) && /does not exist|schema cache|column/i.test(String(e?.message || '')));
+
+/** Les dossiers libres du cabinet (ou d'une affaire). Sans la migration, il n'y en a aucun : l'arbre reste celui d'avant. */
+export async function loadFolders(ctx: NodeContext, projectId?: string): Promise<DocFolder[]> {
+  try {
+    return await fetchAll(() => {
+      const q = ctx.db.from('document_folders').select('id, project_id, phase, parent_id, name').eq('tenant_id', ctx.tenantId).order('id');
+      return projectId ? q.eq('project_id', projectId) : q;
+    }) as DocFolder[];
+  } catch (e) {
+    if (isMissingFoldersTable(e)) return [];
+    throw e;
+  }
+}
+
+/**
+ * Les documents vivants d'un dossier : une phase d'une affaire (hors dossiers libres), un dossier libre
+ * (`folderId`), ou « À classer ».
+ */
+async function folderSiblings(ctx: NodeContext, projectId: string | null, code: string | null, folderId: string | null = null): Promise<DocRow[]> {
+  const run = (withFolder: boolean) => fetchAll(() => {
     let q = documentsOf(ctx).is('deleted_at', null).order('id');
     if (!projectId) return q.is('project_id', null);
     q = q.eq('project_id', projectId);
+    if (withFolder) q = folderId ? q.eq('folder_id', folderId) : q.is('folder_id', null);
     if (code === DEFAULT_PHASE_CODE) return q.or(`phase.is.null,phase.eq.${DEFAULT_PHASE_CODE},phase.eq.`);
     return q.eq('phase', code);
   }) as Promise<DocRow[]>;
+  try { return await run(true); } catch (e) {
+    if (isMissingFolderColumn(e)) return run(false);
+    throw e;
+  }
 }
 
 const projectFolder = (project: ProjectRow): string => projectFolderName(project);
@@ -196,24 +224,43 @@ const phaseFolderNode = (ctx: NodeContext, project: ProjectRow, code: string) =>
     name: phaseFolder(code), path: `${projectFolder(project)}/${phaseFolder(code)}`, archived: !!project.archived_at,
   });
 
+/** Les segments des dossiers libres menant à `folderId` (du plus haut au plus bas), vides sans dossier ou inconnu. */
+const folderSegments = (folderId: string | null | undefined, folders: readonly DocFolder[]): string[] =>
+  folderId ? folderPath(folderId, folders).map(sanitizeFolderSegment) : [];
+
+/** Un dossier libre de la GED : sous sa phase, ou sous son dossier parent. */
+const libreFolderNode = (ctx: NodeContext, project: ProjectRow, folder: DocFolder, folders: readonly DocFolder[]) =>
+  folderNode(ctx, {
+    id: folderNodeId(folder.id),
+    parentId: folder.parent_id ? folderNodeId(folder.parent_id) : phaseNodeId(project.id, phaseCode(folder.phase)),
+    name: sanitizeFolderSegment(folder.name),
+    path: [projectFolder(project), phaseFolder(phaseCode(folder.phase)), ...folderSegments(folder.id, folders)].join('/'),
+    archived: !!project.archived_at,
+  });
+
 function documentNode(
   ctx: NodeContext,
   doc: DocRow,
   name: string,
   project: ProjectRow | null,
   lock: LockRow | undefined,
+  folders: readonly DocFolder[] = [],
 ): DesktopNode {
   const archived = !!project?.archived_at;
   const approved = doc.doc_statut === 'approuve';
   const lockedByOther = !!lock && lock.user_id !== ctx.userId;
   const readOnlyReason: DesktopNode['readOnlyReason'] =
     archived ? 'archived' : approved ? 'approved' : lockedByOther && ctx.lockMode === 'enforced' ? 'locked' : null;
-  const parentId = project ? phaseNodeId(project.id, phaseCode(doc.phase)) : inboxNodeId(ctx.tenantId);
-  const folderPath = project ? `${projectFolder(project)}/${phaseFolder(phaseCode(doc.phase))}` : INBOX_NAME;
+  // Un document rangé dans un dossier libre en est l'enfant ; sans dossier (ou dossier inconnu), il reste sous sa phase.
+  const chain = project ? folderSegments(doc.folder_id, folders) : [];
+  const parentId = project
+    ? (chain.length ? folderNodeId(doc.folder_id as string) : phaseNodeId(project.id, phaseCode(doc.phase)))
+    : inboxNodeId(ctx.tenantId);
+  const folderPathText = project ? [projectFolder(project), phaseFolder(phaseCode(doc.phase)), ...chain].join('/') : INBOX_NAME;
   const version = doc.version ?? 1;
   return {
     projectId: doc.project_id, phase: doc.phase ?? null, documentType: doc.doc_type ?? null,
-    id: documentNodeId(doc.id), kind: 'file', parentId, name, path: `${folderPath}/${name}`,
+    id: documentNodeId(doc.id), kind: 'file', parentId, name, path: `${folderPathText}/${name}`,
     size: doc.size_bytes ?? null, mimeType: doc.mime_type ?? null, sha256: doc.content_sha256 ?? null,
     modifiedAt: doc.updated_at ?? doc.uploaded_at ?? null,
     version, indice: doc.indice ?? null, etag: `v${version}`,
@@ -237,23 +284,26 @@ export async function nodesForDocuments(ctx: NodeContext, docs: readonly DocRow[
     getLiveLocks(ctx.db, ctx.tenantId, docs.map(d => d.id)),
   ]);
 
+  // Un dossier libre de la GED est un dossier à part entière : ses voisins sont ceux de CE dossier.
   const folders = new Map<string, DocRow[]>();
   for (const doc of docs) {
-    const key = doc.project_id ? `${doc.project_id}|${phaseCode(doc.phase)}` : 'inbox';
+    const key = doc.project_id ? `${doc.project_id}|${phaseCode(doc.phase)}|${doc.folder_id || ''}` : 'inbox';
     const list = folders.get(key) ?? [];
     list.push(doc);
     folders.set(key, list);
   }
+  // Les dossiers libres ne se lisent que si un des documents en porte un (la plupart des appels n'en ont pas).
+  const libres = docs.some(d => d.project_id && d.folder_id) ? await loadFolders(ctx) : [];
   const names = new Map<string, string>();
   for (const [key, members] of folders) {
     const projectId = key === 'inbox' ? null : members[0].project_id;
-    const siblings = await folderSiblings(ctx, projectId, key === 'inbox' ? null : phaseCode(members[0].phase));
+    const siblings = await folderSiblings(ctx, projectId, key === 'inbox' ? null : phaseCode(members[0].phase), key === 'inbox' ? null : members[0].folder_id ?? null);
     const unique = uniqueSiblingNames(siblings.map(s => ({ id: s.id, name: s.name })));
     // Un document absent du dossier (supprimé entre-temps) garde son nom propre.
     for (const m of members) names.set(m.id, unique.get(m.id) ?? uniqueSiblingNames([{ id: m.id, name: m.name }]).get(m.id)!);
   }
   return docs.map(doc => documentNode(
-    ctx, doc, names.get(doc.id)!, doc.project_id ? projects.get(doc.project_id) ?? null : null, locks.get(doc.id),
+    ctx, doc, names.get(doc.id)!, doc.project_id ? projects.get(doc.project_id) ?? null : null, locks.get(doc.id), libres,
   ));
 }
 
@@ -275,6 +325,12 @@ export async function getNode(ctx: NodeContext, rawId: string): Promise<DesktopN
     case 'phase': {
       const project = await loadProject(ctx, parsed.projectId);
       return project ? phaseFolderNode(ctx, project, parsed.code) : null;
+    }
+    case 'fld': {
+      const all = await loadFolders(ctx);
+      const folder = all.find(f => f.id === parsed.folderId);
+      const project = folder ? await loadProject(ctx, folder.project_id) : null;
+      return folder && project ? libreFolderNode(ctx, project, folder, all.filter(f => f.project_id === project.id)) : null;
     }
     case 'doc': {
       const doc = await loadDocument(ctx, parsed.documentId);
@@ -328,15 +384,32 @@ export async function listChildren(
       const project = await loadProject(ctx, parsed.projectId);
       if (!project) throw new DesktopError(404, 'NODE_NOT_FOUND', 'Nœud introuvable.');
       const rows = await fetchAll(() => documentsOf(ctx).is('deleted_at', null).eq('project_id', project.id).order('id'));
-      const codes = [...new Set(rows.map((r: any) => phaseCode(r.phase)))].sort(comparePhaseCodes);
+      // Une phase qui n'a que des dossiers libres (encore vides) apparaît aussi.
+      const libres = await loadFolders(ctx, project.id);
+      const codes = [...new Set([...rows.map((r: any) => phaseCode(r.phase)), ...libres.map(f => phaseCode(f.phase))])].sort(comparePhaseCodes);
       all = codes.map(code => phaseFolderNode(ctx, project, code));
       break;
     }
     case 'phase': {
       const project = await loadProject(ctx, parsed.projectId);
       if (!project) throw new DesktopError(404, 'NODE_NOT_FOUND', 'Nœud introuvable.');
+      const libres = await loadFolders(ctx, project.id);
+      const dossiers = libres.filter(f => !f.parent_id && phaseCode(f.phase) === parsed.code)
+        .map(f => libreFolderNode(ctx, project, f, libres)).sort(byName);
       const siblings = await folderSiblings(ctx, project.id, parsed.code);
-      all = (await nodesForDocuments(ctx, siblings)).sort(byName);
+      all = [...dossiers, ...(await nodesForDocuments(ctx, siblings)).sort(byName)];
+      break;
+    }
+    case 'fld': {
+      const libres = await loadFolders(ctx);
+      const folder = libres.find(f => f.id === parsed.folderId);
+      const project = folder ? await loadProject(ctx, folder.project_id) : null;
+      if (!folder || !project) throw new DesktopError(404, 'NODE_NOT_FOUND', 'Nœud introuvable.');
+      const projectFolders = libres.filter(f => f.project_id === project.id);
+      const dossiers = projectFolders.filter(f => f.parent_id === folder.id)
+        .map(f => libreFolderNode(ctx, project, f, projectFolders)).sort(byName);
+      const siblings = await folderSiblings(ctx, project.id, phaseCode(folder.phase), folder.id);
+      all = [...dossiers, ...(await nodesForDocuments(ctx, siblings)).sort(byName)];
       break;
     }
     case 'doc':

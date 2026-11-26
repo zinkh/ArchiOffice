@@ -79,7 +79,7 @@ Un **nœud** est un dossier ou un fichier.
 }
 ```
 
-- `id` : `tenant:<id>` (racine), `prj:<projectId>`, `phase:<projectId>:<code>`, `doc:<documentId>`. Une phase est un dossier virtuel : il n'existe en base que par la valeur de `documents.phase`.
+- `id` : `tenant:<id>` (racine), `prj:<projectId>`, `phase:<projectId>:<code>`, `fld:<folderId>`, `doc:<documentId>`. Une phase est un dossier virtuel : il n'existe en base que par la valeur de `documents.phase`. Un dossier libre (`fld:`) est une vraie ligne, voir 4.2.
 - `sha256` : absent tant que non calculé pour un document ancien ; le serveur le calcule à la demande et le stocke (colonne `content_sha256`).
 - `readOnlyReason` : `archived`, `locked`, `role`, `approved` ou `null`.
 - `status` : `doc_statut` actuel (`en_cours`, `approuve`, `perime`). Un fichier approuvé n'est pas modifiable depuis le disque (`readOnlyReason: "approved"`), il faut une nouvelle version explicite depuis l'application.
@@ -96,6 +96,18 @@ Un **nœud** est un dossier ou un fichier.
 | `GET /nodes/{id}/versions` | Versions techniques : `[{ version, indice, uploadedAt, uploadedBy, size, sha256, description }]`. |
 
 Seules les affaires visibles du cabinet apparaissent. Une affaire archivée apparaît, en lecture seule.
+
+### 4.2 Dossiers libres sous les phases
+
+Le cabinet crée des dossiers dans l'écran Documents (GED) : `document_folders`, une ligne par dossier (affaire, phase, dossier parent, nom), trois niveaux au plus, `documents.folder_id` pour y ranger un fichier (`supabase/migrate_document_folders.sql`). Côté desktop :
+
+- Un dossier est un nœud `kind: "folder"` d'identifiant `fld:<id>`, **enfant de sa phase** (`parentId: "phase:<projet>:<code>"`) ou de son dossier parent (`fld:<parent>`). Son chemin est `<affaire>/<phase>/<dossier>/<sous-dossier>`, les mêmes segments que chez le stockage externe.
+- `GET /nodes/phase:…/children` rend **les dossiers d'abord, puis les fichiers restés à la racine de la phase** ; `GET /nodes/fld:…/children` rend ses sous-dossiers puis ses fichiers. Un fichier rangé dans un dossier a ce dossier pour `parentId` et son chemin en tient compte. Une phase qui n'a que des dossiers (encore vides) apparaît sous l'affaire.
+- **Déplacer** (`PATCH /nodes/{doc}` avec `parentId: "fld:…"`) range le fichier dans ce dossier (l'affaire doit être la sienne : sinon `MOVE_ACROSS_PROJECTS`, la phase devient celle du dossier). Une destination « phase » ou « affaire » le sort de son dossier, et **changer de phase sort toujours le fichier de son dossier** (un dossier ne vaut que pour sa phase). **Créer** un fichier avec `target.create.parentId: "fld:…"` le dépose dans ce dossier ; un dossier inconnu est refusé (`404`) avant le premier octet. Une nouvelle version rejoint le dossier du fichier.
+- **Le client ne crée, ne renomme ni ne supprime de dossier** : cela se fait dans l'application (un dossier créé depuis l'Explorateur n'a pas de nœud à lui). Un fichier déposé hors de tout dossier libre reste à la racine de sa phase.
+- **Journal** : créer, renommer ou supprimer un dossier change le chemin de ses fichiers ; le déclencheur de `document_folders` écrit un événement `scope` sur l'affaire (`prj:<id>`), comme un changement de nom d'affaire, et le client relit alors son dossier (`supabase/migrate_desktop_sync_folders.sql`). Déplacer un fichier est un `upsert` du document, par le déclencheur existant.
+- **Instance non migrée** : sans la table `document_folders`, ou sans `documents.folder_id`, l'arborescence reste celle d'avant (aucun dossier libre, aucune erreur).
+- **Limites** : un fichier et un dossier qui porteraient le même nom dans un même dossier ne sont pas dédoublonnés entre eux (les noms de fichiers le sont, voir plus haut). Comme pour une phase, un déplacement demandé par le desktop ne déplace pas le fichier chez le fournisseur de stockage, alors que le classement depuis l'écran Documents le fait.
 
 ## 5. Téléchargement (hydratation)
 
@@ -131,7 +143,7 @@ Le client natif garde un **curseur** et ne relit jamais l'arbre.
 - **Curseur trop ancien** (30 jours de conservation) : `410 CURSOR_EXPIRED` ; le client refait une synchronisation complète.
 - Les événements sont **idempotents et ordonnés** par `seq`. Un `upsert` porte l'état complet du nœud.
 - **Indication de temps réel** (optionnelle, **pas encore implémentée**) : `GET /events` en flux SSE n'enverrait que `{ "hint": "changes" }`. Le client rappellerait `/changes`. Sans ce flux, un sondage toutes les 60 s suffit (même principe que la file `notification_outbox` des notifications desktop).
-- L'écriture dans le journal se fait par **déclencheurs en base** (sur `documents`, `document_versions`, `document_locks`, `project_*`), pas dans le code des routes : plusieurs chemins du serveur modifient `documents` (dépôts, DOE, agents, MCP, migration de stockage).
+- L'écriture dans le journal se fait par **déclencheurs en base** (sur `documents`, `document_versions`, `document_locks`, `document_folders`, `project_*`), pas dans le code des routes : plusieurs chemins du serveur modifient `documents` (dépôts, DOE, agents, MCP, migration de stockage).
 
 ## 7. Verrous
 

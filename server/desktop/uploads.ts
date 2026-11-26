@@ -26,8 +26,9 @@ import { sanitizeFilename } from '../sanitizeFilename';
 import { safeSegment } from '../storageKey';
 import { isProjectArchived } from '../routes/projectArchive';
 import { getLiveLock, toLockView } from './locks';
+import { folderPath } from '../../src/lib/gedFolders';
 import {
-  DesktopError, loadDocument, loadProject, nodesForDocuments,
+  DesktopError, loadDocument, loadFolders, loadProject, nodesForDocuments,
   type DesktopNode, type DocRow, type NodeContext,
 } from './nodes';
 
@@ -156,15 +157,23 @@ export async function assertWritableDocument(
   }
 }
 
-interface CreateTarget { projectId: string | null; phase: string | null; conflictOf: string | null }
+interface CreateTarget { projectId: string | null; phase: string | null; folderId: string | null; conflictOf: string | null }
 
 async function resolveCreateTarget(ctx: NodeContext, create: { parentId?: string; conflictOf?: string | null }): Promise<CreateTarget> {
   const parent = parseNodeId(create?.parentId);
   let projectId: string | null = null;
   let phase: string | null = null;
+  let folderId: string | null = null;
   if (parent?.kind === 'phase') {
     projectId = parent.projectId;
     phase = parent.code === DEFAULT_PHASE_CODE ? null : parent.code;
+  } else if (parent?.kind === 'fld') {
+    // Dépôt dans un dossier libre de la GED : l'affaire et la phase sont celles du dossier.
+    const folder = (await loadFolders(ctx)).find(f => f.id === parent.folderId);
+    if (!folder) throw new DesktopError(404, 'NODE_NOT_FOUND', 'Dossier de destination introuvable.');
+    projectId = folder.project_id;
+    phase = folder.phase === DEFAULT_PHASE_CODE ? null : folder.phase;
+    folderId = folder.id;
   } else if (parent?.kind === 'prj') {
     projectId = parent.projectId;
   } else if (parent?.kind === 'inbox' && parent.tenantId === ctx.tenantId) {
@@ -187,7 +196,7 @@ async function resolveCreateTarget(ctx: NodeContext, create: { parentId?: string
     }
     conflictOf = String(create.conflictOf);
   }
-  return { projectId, phase, conflictOf };
+  return { projectId, phase, folderId, conflictOf };
 }
 
 // ── Ouverture ────────────────────────────────────────────────────────────────
@@ -384,9 +393,11 @@ export async function completeUpload(
     const project = doc.project_id ? await loadProject(ctx, doc.project_id) : null;
     const existingPhase = doc.phase ?? null;
     const phaseSegment = existingPhase ? `${safeSegment(existingPhase)}/` : '';
+    // Une nouvelle version rejoint le dossier libre du document, comme sa phase.
+    const libres = doc.project_id && doc.folder_id ? await loadFolders(ctx, doc.project_id) : [];
     const stored = await deps.storeBusinessFile({
       tenantId: ctx.tenantId, bucket: 'documents',
-      folderPath: buildDocumentFolderPath(project, existingPhase),
+      folderPath: buildDocumentFolderPath(project, existingPhase, folderPath(doc.folder_id, libres)),
       fileName: row.name,
       supabasePath: `${ctx.tenantId}/${doc.project_id || 'general'}/${phaseSegment}${doc.id}/v${version}-${sanitizeFilename(row.name)}`,
     }, buffer, mime);
@@ -418,9 +429,10 @@ export async function completeUpload(
     version = 1;
     const project = target.projectId ? await loadProject(ctx, target.projectId) : null;
     const phaseSegment = target.phase ? `${safeSegment(target.phase)}/` : '';
+    const libres = target.projectId && target.folderId ? await loadFolders(ctx, target.projectId) : [];
     const stored = await deps.storeBusinessFile({
       tenantId: ctx.tenantId, bucket: 'documents',
-      folderPath: buildDocumentFolderPath(project, target.phase),
+      folderPath: buildDocumentFolderPath(project, target.phase, folderPath(target.folderId, libres)),
       fileName: row.name,
       supabasePath: `${ctx.tenantId}/${target.projectId || 'general'}/${phaseSegment}${documentId}/${sanitizeFilename(row.name)}`,
     }, buffer, mime);
@@ -432,6 +444,7 @@ export async function completeUpload(
       uploaded_by: userName, uploaded_at: uploadedAt, description: row.description,
       indice: 'A', doc_statut: 'en_cours', validation_status: 'pending',
       content_sha256: digest, conflict_of: target.conflictOf,
+      ...(target.folderId ? { folder_id: target.folderId } : {}),
     });
     if (error) {
       await deps.removeBusinessFile(ctx.tenantId, 'documents', stored.fileUrl).catch(() => undefined);
