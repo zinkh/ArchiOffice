@@ -30,6 +30,7 @@ import type { Express } from 'express';
 import * as Sentry from '@sentry/node';
 import { aiGenerationLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { contactLabel } from '../../src/lib/crDiffusion';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -264,9 +265,10 @@ Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec envelo
       const { data: specialties } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_specialties').select('specialty_name, contact_id').eq('tender_id', tenderId);
       const specialtyContactIds = [...new Set((specialties || []).map((s: any) => s.contact_id).filter(Boolean))];
       const { data: specialtyContacts } = specialtyContactIds.length
-        ? await supabaseAdmin.from('contacts').select('id, name').eq('tenant_id', tenantId).in('id', specialtyContactIds)
+        ? await supabaseAdmin.from('contacts').select('id, company_name, first_name, last_name').eq('tenant_id', tenantId).in('id', specialtyContactIds)
         : { data: [] as any[] };
-      const contactNameById = new Map((specialtyContacts || []).map((c: any) => [c.id, c.name]));
+      // `contacts` n'a pas de colonne `name` : le libellé vient de la raison sociale, à défaut de la personne.
+      const contactNameById = new Map((specialtyContacts || []).map((c: any) => [c.id, contactLabel(c)]));
       const specialtyLabels = (specialties || [])
         .map((s: any) => {
           const contactName = s.contact_id ? contactNameById.get(s.contact_id) : null;
