@@ -28,6 +28,7 @@ import {
   loadDraft, saveDraft, appendDictated,
 } from './AgentChat.js';
 import type { DocMeta } from './AgentChat.js';
+import { uploadChatDocument, imagesFromClipboard } from './chatUpload.js';
 import { useDictation } from './useDictation.js';
 import { useSpeech } from './useSpeech.js';
 import type { Agent, AgentMessage, AgentArtifact } from '../types.js';
@@ -297,6 +298,27 @@ export default function AgentChatPage() {
     navigate(`/agents/${id}/chat`);
   };
 
+  // Ctrl+V d'une image (capture d'écran...) : elle part en pièce jointe, le texte collé reste intact.
+  const attachPastedImage = async (file: File) => {
+    setUploadingFile(file.name);
+    setErrorMsg(null);
+    try {
+      const doc = await uploadChatDocument(file);
+      setAttachedDocs(prev => prev.some(d => d.id === doc.id) ? prev : [...prev, doc]);
+    } catch {
+      setErrorMsg(t('agent_chat_upload_error') as string);
+    } finally {
+      setUploadingFile(null);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const images = imagesFromClipboard(e.clipboardData);
+    if (images.length === 0) return;
+    e.preventDefault();
+    images.forEach(attachPastedImage);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); sendMessage(); }
   };
@@ -461,6 +483,7 @@ export default function AgentChatPage() {
                 value={input}
                 onChange={e => { setInput(e.target.value); if (agentId) saveDraft(agentId, e.target.value); }}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 placeholder={t('agent_chat_placeholder') as string}
                 aria-label={t('agent_chat_message_label')}
                 className="flex-1 min-w-0 resize-none rounded-lg px-3 py-[9px] text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] border transition-colors"
