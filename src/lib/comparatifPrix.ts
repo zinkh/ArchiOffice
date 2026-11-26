@@ -11,7 +11,8 @@
 //                contrediraient sans que rien ne le dise.
 import type { Lot, Ligne, OffreDocument, PosteAjoute } from '../types/dpgf';
 import { versComparatif, type ComparatifLot } from './bpuToAct';
-import { montantPoste } from './postesAjoutes';
+import { articleRattache, montantPoste } from './postesAjoutes';
+import type { BaseQuantites } from './quantitesOffre';
 
 export type ModeSaisie = 'total' | 'postes';
 
@@ -51,6 +52,8 @@ export interface LigneComparee {
   /** Plus bas prix unitaire chiffré (au moins deux entreprises en comparaison). */
   meilleur: number | null;
   mediane: number | null;
+  /** Postes que des entreprises ont rattachés à cet article (leur proposition pour ce poste du document). */
+  propositions?: AjoutCompare[];
 }
 
 export interface ChapitreCompare {
@@ -70,6 +73,8 @@ export interface AjoutCompare {
   entrepriseNom: string;
   prixUnitaire: number | null;
   montant: number;
+  /** Article du lot auquel le poste est rattaché ; absent si non rattaché ou si l'article n'existe plus. */
+  articleId?: string;
 }
 
 export interface LotCompare {
@@ -190,6 +195,14 @@ export function construireLot(lot: Lot, offres: OffreDocument[], entreprises: En
   const parEntreprise = new Map(entreprises.map(e => [e.id, prixEntreprise(offres, e.id)]));
   const enPostes = entreprises.filter(e => e.mode === 'postes');
 
+  const idsArticles = new Set(chapitresDuLot(lot).flatMap(c => c.lignes.map(l => l.id)));
+  const ajouts: AjoutCompare[] = enPostes.flatMap(e =>
+    ajoutsEntreprise(offres, e.id, lot.id).map(p => ({
+      id: p.id, code: p.numero, titre: p.designation, unite: p.unite, quantite: p.quantite ?? 1,
+      entrepriseId: e.id, entrepriseNom: e.nom, prixUnitaire: p.prixUnitaire, montant: montantPoste(p),
+      articleId: articleRattache(p, idsArticles),
+    })));
+
   const chapitres: ChapitreCompare[] = chapitresDuLot(lot).map(c => ({
     id: c.id, code: c.numero, titre: c.titre,
     lignes: c.lignes.map(l => {
@@ -205,15 +218,10 @@ export function construireLot(lot: Lot, offres: OffreDocument[], entreprises: En
         estimation: l.prixUnitaire || 0, horsBase: estHorsBase(l), prix,
         meilleur: chiffres.length > 1 ? Math.min(...chiffres) : null,
         mediane: chiffres.length > 1 ? mediane(chiffres) : null,
+        propositions: ajouts.filter(a => a.articleId === l.id),
       };
     }),
   }));
-
-  const ajouts: AjoutCompare[] = enPostes.flatMap(e =>
-    ajoutsEntreprise(offres, e.id, lot.id).map(p => ({
-      id: p.id, code: p.numero, titre: p.designation, unite: p.unite, quantite: p.quantite ?? 1,
-      entrepriseId: e.id, entrepriseNom: e.nom, prixUnitaire: p.prixUnitaire, montant: montantPoste(p),
-    })));
 
   const estimationTotale = chapitres.reduce(
     (s, c) => s + c.lignes.reduce((t, l) => t + (l.horsBase ? 0 : l.estimation * l.quantite), 0), 0);
@@ -249,6 +257,9 @@ export interface MiseAJourOffre {
   id: string | null;
   prix: Record<string, number | null>;
   postesAjoutes: PosteAjoute[];
+  /** Présents seulement quand la saisie a géré les quantités de l'entreprise (celles qui diffèrent du document) et les articles acceptés. */
+  quantites?: Record<string, number>;
+  quantitesAcceptees?: string[];
 }
 
 /**
@@ -265,6 +276,12 @@ export function repartirSaisie(
   idsLot: string[],
   prixLot: Record<string, PrixSaisi>,
   ajoutsLot: PosteAjoute[],
+  /**
+   * Quantités voulues par l'entreprise sur ce lot (article -> quantité ; undefined : même quantité que le document)
+   * et articles dont l'architecte accepte la quantité. Omis : les quantités déjà enregistrées ne sont pas touchées.
+   */
+  quantitesLot?: Record<string, number | undefined>,
+  accepteesLot?: ReadonlySet<string>,
 ): MiseAJourOffre[] {
   const miennes = offres.filter(o => retenue(o, entrepriseId))
     .sort((a, b) => (b.importedAt || '').localeCompare(a.importedAt || ''));
@@ -291,6 +308,29 @@ export function repartirSaisie(
     }
   }
 
+  // Quantités de l'entreprise : posées dans l'offre qui porte déjà le prix de l'article (à défaut « Saisie
+  // manuelle »), retirées partout quand elles reprennent celle du document. L'acceptation suit la quantité.
+  if (quantitesLot) {
+    const qEtat = (o: OffreDocument | null) => {
+      const e = etat(o);
+      e.quantites ??= { ...(o?.quantites ?? {}) };
+      e.quantitesAcceptees ??= [...(o?.quantitesAcceptees ?? [])];
+      return e as MiseAJourOffre & { quantites: Record<string, number>; quantitesAcceptees: string[] };
+    };
+    for (const id of idsLot) {
+      const voulue = quantitesLot[id];
+      const porteuses = miennes.filter(o => Object.prototype.hasOwnProperty.call(o.prix ?? {}, id));
+      for (const o of miennes) {
+        if (Object.prototype.hasOwnProperty.call(o.quantites ?? {}, id)) delete qEtat(o).quantites[id];
+        if ((o.quantitesAcceptees ?? []).includes(id)) qEtat(o).quantitesAcceptees = qEtat(o).quantitesAcceptees.filter(x => x !== id);
+      }
+      if (typeof voulue !== 'number') continue;
+      const porteuse = qEtat(porteuses[0] ?? manuelle);
+      porteuse.quantites[id] = voulue;
+      if (accepteesLot?.has(id)) porteuse.quantitesAcceptees.push(id);
+    }
+  }
+
   const voulus = new Map(ajoutsLot.map(p => [p.id, p]));
   const places = new Set<string>();
   for (const o of miennes) {
@@ -306,9 +346,11 @@ export function repartirSaisie(
   const originaux = new Map(miennes.map(o => [o.id, o]));
   return [...etats.values()].filter(e => {
     const o = e.id ? originaux.get(e.id) : null;
-    if (!o) return Object.keys(e.prix).length > 0 || e.postesAjoutes.length > 0;
+    if (!o) return Object.keys(e.prix).length > 0 || e.postesAjoutes.length > 0 || Object.keys(e.quantites ?? {}).length > 0;
     return JSON.stringify(e.prix) !== JSON.stringify(o.prix ?? {})
-      || JSON.stringify(e.postesAjoutes) !== JSON.stringify(o.postesAjoutes ?? []);
+      || JSON.stringify(e.postesAjoutes) !== JSON.stringify(o.postesAjoutes ?? [])
+      || (e.quantites !== undefined && JSON.stringify(e.quantites) !== JSON.stringify(o.quantites ?? {}))
+      || (e.quantitesAcceptees !== undefined && JSON.stringify([...e.quantitesAcceptees].sort()) !== JSON.stringify([...(o.quantitesAcceptees ?? [])].sort()));
   });
 }
 
@@ -335,6 +377,8 @@ export function comparatifDepuisOffres(
   /** Entreprises d'un lot du projet (project_lots.id), chacune avec son mode de saisie. */
   entreprisesDuLot: (projectLotId: string) => EntrepriseComparee[],
   existant: ComparatifLot[] = [],
+  /** Base de quantités des montants par article (voir quantitesOffre.ts). */
+  base: BaseQuantites = 'moe',
 ): ComparatifLot[] {
   const sortie: ComparatifLot[] = [];
   const faits = new Set<string>();
@@ -344,7 +388,7 @@ export function comparatifDepuisOffres(
     const entreprises = entreprisesDuLot(lot.projectLotId);
     // Une entreprise saisie au total n'a pas de détail : ses fichiers éventuels ne comptent pas.
     const enPostes = new Set(entreprises.filter(e => e.mode === 'postes').map(e => e.id));
-    const { comparatif } = versComparatif([lot], offres.filter(o => o.entrepriseId && enPostes.has(o.entrepriseId)));
+    const { comparatif } = versComparatif([lot], offres.filter(o => o.entrepriseId && enPostes.has(o.entrepriseId)), base);
     const c = comparatif[0];
     if (!c) continue;
     const articles = c.articles.map(a => (a.is_subtotal ? { ...a, prix: { ...a.prix } } : a));

@@ -227,7 +227,7 @@ describe('Contact Sync', () => {
 
     const res = await request(app).post('/api/sync/carddav').set(authHeader(token)).send({ url: 'https://carddav.example.com', username: 'u', password: 'p' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ imported: 1, updated: 0 });
+    expect(res.body).toEqual({ imported: 1, updated: 0, pushedCreated: 0, pushedUpdated: 0, pushConflicts: 0, pushFailed: 0, pushRemaining: 0, pushUnavailable: false });
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.email === 'jean@example.com')?.tenant_id).toBe(tenantId);
   });
 

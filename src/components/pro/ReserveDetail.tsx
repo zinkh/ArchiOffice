@@ -4,18 +4,20 @@ import Select from 'react-select';
 import { motion, animate, useDragControls, useMotionValue, useReducedMotion } from 'motion/react';
 import {
   IconX, IconCamera, IconPhotoPlus, IconTrash, IconDeviceFloppy, IconMapPin, IconLoader2, IconArrowsExchange,
+  IconChevronLeft, IconChevronRight,
 } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import { launchOriginRef } from '../../lib/launchOrigin';
 import { PANEL_SPRING, FLICK_SPRING, FLICK_VELOCITY, projectMomentum } from '../../lib/motion';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
-import { openSignedUrl } from '../../lib/signedStorageUrl';
 import { apiFetch } from '../../lib/api';
 import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import { prepareSitePhoto } from '../../lib/sitePhoto';
 import { keepLocalCopy } from '../../lib/localPhotoCopy';
 import { PlanAnnotator } from '../PlanAnnotator';
+import { responsableDe, couleurDe, RESERVE_COULEUR_NEUTRE } from '../../lib/reserveCouleurs';
 import { useReserveOptions } from './useReserveOptions';
+import { ReservePhotoViewer } from './ReservePhotoViewer';
 import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
 import type { Plan, ReservePhoto } from '../../types';
 import {
@@ -32,15 +34,22 @@ interface ReserveDetailProps {
   reserve: ReserveLike | null;
   plans: Plan[];
   lotsList?: LotOption[];
+  /** Couleur de chaque entreprise ou lot (clé `responsableDe`), calculée sur toutes les réserves de l'affaire. */
+  couleurs?: Map<string, string>;
   /** Position choisie sur le plan avant la création (mode création seulement). */
   pendingPlan?: { planId: string | null; x?: number; y?: number } | null;
   /** Repères des réserves déjà posées (tous plans) : montrés sur le plan du sélecteur d'emplacement. */
-  existingMarkers?: { id: string; planId: string; x: number; y: number; number?: number; title?: string }[];
+  existingMarkers?: { id: string; planId: string; x: number; y: number; number?: number; title?: string; couleur?: string }[];
   onClose: () => void;
   onSaved: (reserve: ReserveLike) => void;
   onDeleted: (id: string) => void;
   /** Réserve d'OPR transformée en réserve GPA : reçoit la nouvelle réserve GPA (l'appelant la range dans sa liste). */
   onConvertedToGpa?: (gpa: ReserveLike) => void;
+  /**
+   * Navigation entre les réserves de la liste affichée (flèches de l'en-tête, touches ← →). Absente en création,
+   * et quand la réserve n'est plus dans la liste filtrée : sa position serait inconnue.
+   */
+  nav?: { index: number; total: number; onPrev?: () => void; onNext?: () => void } | null;
 }
 
 interface FormState {
@@ -90,7 +99,7 @@ const labelClass = 'text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercas
  * puis envoyées une à une une fois la réserve créée (il faut son id pour les
  * rattacher) ; en modification, chaque photo part immédiatement.
  */
-export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pendingPlan, existingMarkers, onClose, onSaved, onDeleted, onConvertedToGpa }: ReserveDetailProps) {
+export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, couleurs, pendingPlan, existingMarkers, onClose, onSaved, onDeleted, onConvertedToGpa, nav }: ReserveDetailProps) {
   const { t } = useTranslation();
   const isNew = !reserve;
   const [form, setForm] = useState<FormState>(() => formFromReserve(reserve));
@@ -120,7 +129,16 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   // montage, et non à chaque saisie dans la fiche.
   const setPanelRef = useCallback((el: HTMLDivElement | null) => { panelRef.current = el; launchOriginRef(el); }, []);
 
-  useEffect(() => { setForm(formFromReserve(reserve)); setPhotos(reserve?.photos || []); }, [reserve?.id]);
+  // Photo ouverte en grand (position dans `photos`) ; null = visionneuse fermée.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const closeViewer = useCallback(() => setViewerIndex(null), []);
+
+  // La fiche reste montée quand on passe d'une réserve à la suivante (pas de réanimation de la fenêtre) : tout
+  // ce qui est propre à une réserve repart de la sienne.
+  useEffect(() => {
+    setForm(formFromReserve(reserve)); setPhotos(reserve?.photos || []);
+    setError(null); setViewerIndex(null);
+  }, [reserve?.id]);
   queuedRef.current = queued;
   useEffect(() => () => { queuedRef.current.forEach(q => URL.revokeObjectURL(q.preview)); }, []);
 
@@ -144,7 +162,11 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const pickPlan = useMemo(() => plans.find(p => p.id === pickPlanId) || null, [plans, pickPlanId]);
 
   // Mêmes lots (triés par numéro) et entreprises (lots + marchés) que les actions en masse du suivi.
-  const { lotOptions, entrepriseOptions } = useReserveOptions(projectId, lotsList);
+  const { lotOptions, entrepriseOptions, entrepriseDuLot } = useReserveOptions(projectId, lotsList);
+  // La couleur suit la saisie : changer l'entreprise ou le lot dans la fiche change la pastille tout de suite.
+  const responsableEnCours = { entreprises: form.entreprises, lots: form.lots };
+  const responsable = responsableDe(responsableEnCours);
+  const couleurResponsable = couleurDe(responsableEnCours, couleurs ?? new Map());
   // Une valeur déjà enregistrée qui ne figure plus dans les lots du projet
   // reste sélectionnable : la retirer silencieusement perdrait une donnée.
   const withCurrent = (options: { value: string; label: string }[], current: string[]) => [
@@ -153,6 +175,31 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   ];
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm(prev => ({ ...prev, [key]: value }));
+
+  // Choisir un lot désigne son entreprise responsable. Retirer le lot retire cette entreprise SEULEMENT si elle
+  // a été ajoutée d'office pendant cette saisie (et qu'aucun autre lot retenu ne la porte) : une entreprise saisie
+  // à la main, ou déjà enregistrée sur la réserve, n'est jamais retirée en douce.
+  const nomNorm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+  const entreprisesAuto = useRef(new Set<string>());
+  useEffect(() => { entreprisesAuto.current = new Set(); }, [reserve?.id]);
+  const changerLots = (lots: string[]) => {
+    let entreprises = form.entreprises;
+    for (const lot of lots.filter(l => !form.lots.includes(l))) {
+      const nom = entrepriseDuLot(lot);
+      if (nom && !entreprises.some(e => nomNorm(e) === nomNorm(nom))) {
+        entreprises = [...entreprises, nom];
+        entreprisesAuto.current.add(nomNorm(nom));
+      }
+    }
+    for (const lot of form.lots.filter(l => !lots.includes(l))) {
+      const nom = entrepriseDuLot(lot);
+      if (!nom || !entreprisesAuto.current.has(nomNorm(nom))) continue;
+      if (lots.some(l => { const autre = entrepriseDuLot(l); return !!autre && nomNorm(autre) === nomNorm(nom); })) continue;
+      entreprises = entreprises.filter(e => nomNorm(e) !== nomNorm(nom));
+      entreprisesAuto.current.delete(nomNorm(nom));
+    }
+    setForm(prev => ({ ...prev, lots, entreprises }));
+  };
 
   const reserveKind = apiBase === '/api/gpa-reserves' ? 'gpa' : 'opr';
   const entity = apiBase === '/api/gpa-reserves' ? 'gpaReserve' : 'reserve';
@@ -237,7 +284,35 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
     return prev.filter((_, i) => i !== index);
   });
 
-  const handleSave = async () => {
+  // Saisie non enregistrée : les champs modifiés ou un repère posé. Les photos d'une réserve existante partent
+  // tout de suite, elles ne comptent pas ; en création, il n'y a pas de navigation.
+  const dirty = !isNew && (JSON.stringify(form) !== JSON.stringify(formFromReserve(reserve)) || placed !== null);
+
+  const naviguer = (sens: 'prev' | 'next') => {
+    const cible = sens === 'prev' ? nav?.onPrev : nav?.onNext;
+    if (!cible) return;
+    if (dirty && !confirm(t('reserve_detail_discard_confirm'))) return;
+    cible();
+  };
+  const naviguerRef = useRef(naviguer);
+  naviguerRef.current = naviguer;
+
+  // ← et → changent de réserve, sauf pendant une saisie (champ, liste déroulante), le choix d'emplacement ou la visionneuse.
+  useEffect(() => {
+    if (!nav) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (picking || viewerIndex !== null || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      e.preventDefault();
+      naviguerRef.current(e.key === 'ArrowLeft' ? 'prev' : 'next');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [nav, picking, viewerIndex]);
+
+  const handleSave = async (thenNext = false) => {
     if (!form.title.trim()) { setError("L'intitulé est obligatoire."); return; }
     setSaving(true); setError(null);
     try {
@@ -289,7 +364,8 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
         saved = { ...(reserve as ReserveLike), ...payload, photos: photos.filter(p => !p.pendingSync) } as ReserveLike;
       }
       onSaved(saved);
-      onClose();
+      // « Enregistrer et suivante » : la voisine est celle de la liste telle qu'elle était à l'ouverture de la fiche.
+      if (thenNext && nav?.onNext) nav.onNext(); else onClose();
     } catch (err: any) {
       setError(err.message || 'Enregistrement impossible.');
     } finally {
@@ -389,6 +465,21 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
               </div>
               <div className="font-bold text-[var(--tblr-text)] truncate">{form.title || (isNew ? '' : reserve?.title)}</div>
             </div>
+            {nav && (
+              <div className="flex items-center gap-0.5" role="group" aria-label={t('reserve_detail_nav_label')}>
+                <button
+                  type="button" onClick={() => naviguer('prev')} disabled={!nav.onPrev}
+                  className="p-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11 rounded-lg hover:bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] disabled:opacity-30"
+                  aria-label={t('reserve_detail_prev')} title={t('reserve_detail_prev')}
+                ><IconChevronLeft size={18} /></button>
+                <span className="px-1 text-[0.6875rem] font-bold tabular-nums text-[var(--tblr-muted)]" aria-live="polite">{nav.index + 1} / {nav.total}</span>
+                <button
+                  type="button" onClick={() => naviguer('next')} disabled={!nav.onNext}
+                  className="p-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11 rounded-lg hover:bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] disabled:opacity-30"
+                  aria-label={t('reserve_detail_next')} title={t('reserve_detail_next')}
+                ><IconChevronRight size={18} /></button>
+              </div>
+            )}
             <StatusSelect value={form.status} onChange={s => set('status', s)} />
             <button onClick={onClose} className="p-2 rounded-lg hover:bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]" aria-label="Fermer">
               <IconX size={18} />
@@ -428,17 +519,21 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                 <IconPhotoPlus size={24} />
                 <span className="text-[0.6875rem] font-bold">Depuis la galerie</span>
               </button>
-              {photos.map(photo => (
+              {photos.map((photo, photoIndex) => (
                 <div key={photo.id} className="relative aspect-square group">
                   {photo.pendingSync ? (
-                    <img src={photo.localPreviewUrl} alt={photo.caption || 'Photo de la réserve'} className="w-full h-full object-cover rounded-lg opacity-90" />
+                    <img
+                      src={photo.localPreviewUrl} alt={photo.caption || 'Photo de la réserve'}
+                      className="w-full h-full object-cover rounded-lg opacity-90 cursor-zoom-in"
+                      onClick={() => setViewerIndex(photoIndex)}
+                    />
                   ) : (
-                    // Miniature dans la grille ; un appui ouvre la photo complète dans un nouvel onglet.
+                    // Miniature dans la grille ; un appui ouvre la photo complète dans la visionneuse (au-dessus de la fiche).
                     <ReservePhotoImage
                       photo={photo}
                       alt={photo.caption || 'Photo de la réserve'}
                       className="w-full h-full object-cover rounded-lg cursor-zoom-in"
-                      onClick={() => { void openSignedUrl(photo.file_url); }}
+                      onClick={() => setViewerIndex(photoIndex)}
                     />
                   )}
                   {photo.pendingSync && (
@@ -475,7 +570,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
             <div className="space-y-1">
               <label className={labelClass}>Repérage sur le plan</label>
               <div className="flex gap-3 items-start">
-                <PlanExcerpt fileUrl={plan.file_url} x={planX} y={planY} label={String(reserve?.number ?? '+')} className="w-40 h-40 object-cover shrink-0" />
+                <PlanExcerpt fileUrl={plan.file_url} x={planX} y={planY} label={String(reserve?.number ?? '+')} couleur={responsable ? couleurResponsable : undefined} className="w-40 h-40 object-cover shrink-0" />
                 <div className="text-xs text-[var(--tblr-muted)] space-y-2 pt-1">
                   <div className="flex items-center gap-1"><IconMapPin size={14} /> {plan.name}</div>
                   <button type="button" onClick={openPicker} className="px-3 py-1.5 pointer-coarse:min-h-11 rounded-lg bg-[var(--tblr-surface-2)] text-[var(--tblr-text)] font-bold">Déplacer le repère</button>
@@ -533,7 +628,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                 isMulti
                 options={withCurrent(lotOptions, form.lots)}
                 value={form.lots.map(v => ({ value: v, label: v }))}
-                onChange={(vals: any) => set('lots', (vals || []).map((v: any) => v.value))}
+                onChange={(vals: any) => changerLots((vals || []).map((v: any) => v.value))}
                 placeholder="Choisir…"
                 className="text-sm"
                 menuPortalTarget={document.body}
@@ -554,6 +649,16 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
               />
             </div>
           </div>
+
+          {responsable && (
+            <p className="flex items-center gap-2 text-xs text-[var(--tblr-muted)]" data-testid="reserve-couleur">
+              <span aria-hidden className="inline-block h-3.5 w-3.5 shrink-0 rounded-full" style={{ backgroundColor: couleurResponsable }} />
+              <span>
+                Couleur de suivi : <strong className="text-[var(--tblr-text)]">{responsable.nom}</strong>
+                {couleurResponsable === RESERVE_COULEUR_NEUTRE && ' (couleur attribuée à l\'enregistrement)'}
+              </span>
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -599,9 +704,19 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           )}
           <div className="flex-1" />
           <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm font-bold text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]">Annuler</button>
+          {!isNew && nav?.onNext && (
+            <button
+              type="button"
+              onClick={() => handleSave(true)}
+              disabled={saving || preparing > 0}
+              className="hidden sm:flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold bg-[var(--tblr-surface-2)] text-[var(--tblr-text)] hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50"
+            >
+              {t('reserve_detail_save_next')} <IconChevronRight size={16} />
+            </button>
+          )}
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => handleSave()}
             disabled={saving || preparing > 0}
             className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold disabled:opacity-50"
           >
@@ -610,6 +725,10 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           </button>
         </div>
       </motion.div>
+
+      {viewerIndex !== null && (
+        <ReservePhotoViewer photos={photos} index={viewerIndex} onIndexChange={setViewerIndex} onClose={closeViewer} />
+      )}
 
       {/* Choix de l'emplacement sur le plan, plein écran au-dessus de la fiche */}
       {picking && (

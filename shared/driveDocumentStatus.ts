@@ -2,7 +2,7 @@
  * an application has no newer unsent edits. */
 export type DriveDocumentTransferState = 'none' | 'queued' | 'uploading' | 'retry' | 'blocked' | 'conflict' | 'uploaded' | 'reconciled';
 export interface DriveDocumentStatus {
-  nodeId: string;
+  nodeId: string; errorCode?: string | null;
   state: DriveDocumentTransferState;
   version?: number;
   preservation?: 'pending' | 'blocked' | 'done';

@@ -24,6 +24,11 @@ interface ProjectTabBarProps {
   chantierTabState: Record<string, { visible: boolean; horsMission: boolean } | undefined>;
   /** Contenu à droite du sélecteur sur téléphone (état d'enregistrement). */
   mobileTrailing?: React.ReactNode;
+  /**
+   * Visibilité imposée par l'appelant, en plus de la règle chantier : la fiche d'un confrère
+   * invité ne montre que les ateliers que le cabinet lui a accordés.
+   */
+  isTabVisible?: (tab: ProjectTabId) => boolean;
 }
 
 const GROUP_ICONS: Record<ProjectTabGroupId, React.ElementType> = {
@@ -48,7 +53,7 @@ const GROUP_HINTS: Partial<Record<ProjectTabGroupId, string>> = { ETUDES: 'ESQ�
  * niveau. Les inspirations, le PRO et les notices vivent sous « Études » ; les missions de
  * chantier (VISA, DET, RDT, AOR) vivent sous « Chantier ».
  */
-export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabState, mobileTrailing, panelId }: ProjectTabBarProps) {
+export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabState, mobileTrailing, panelId, isTabVisible }: ProjectTabBarProps) {
   const { t } = useTranslation();
   // Sous 768 px, deux barres défilantes cédaient la place au contenu et
   // tronquaient leurs libellés : un seul sélecteur ouvre une feuille en liste.
@@ -60,7 +65,8 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
   const subTabsRef = useHorizontalScrollHints<HTMLDivElement>('[aria-selected="true"]', activeTab);
 
   const isVisible = (tab: ProjectTabId) =>
-    !(CHANTIER_ONLY_TABS.includes(tab) && (!isChantier || chantierTabState[tab]?.visible === false));
+    (isTabVisible ? isTabVisible(tab) : true)
+    && !(CHANTIER_ONLY_TABS.includes(tab) && (!isChantier || chantierTabState[tab]?.visible === false));
   const groups = visibleTabGroups(isVisible);
   const activeGroup = groupOfTab(activeTab);
   useEffect(() => {

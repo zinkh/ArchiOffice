@@ -52,6 +52,23 @@ export const ATTACHABLE_RESOURCE_TYPES: string[] = [
   'agency_library', 'custom_references', 'ftm', 'devis_travaux_modificatifs',
 ];
 
+/** Type MIME porté par les pièces jointes qui sont des liens web (aucun fichier derrière). */
+export const LINK_MIME_TYPE = 'text/uri-list';
+
+/** Adresse web http(s) normalisée, ou null : jamais de javascript:, data:, file:... */
+export function normalizeWebLink(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  let value = raw.trim();
+  if (!value || value.length > 2000) return null;
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(value)) value = `https://${value}`;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (!parsed.hostname.includes('.')) return null;
+    return parsed.toString();
+  } catch { return null; }
+}
+
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
@@ -198,6 +215,45 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       logActivity(tenantId, req.user.id, uploaded_by, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id, file_url, size_bytes: stored.sizeBytes, uploaded_at });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document", ...(e.code === 'EXTERNAL_STORAGE_REQUIRED' ? { code: e.code } : {}) }); }
+  });
+
+  // Lien vers un site web rattaché à une fiche (pièce jointe sans fichier) :
+  // une ligne `documents` avec storage_backend='link' et mime_type=LINK_MIME_TYPE,
+  // file_url portant l'adresse elle-même. Aucun fichier stocké, donc ni version,
+  // ni quota, ni nettoyage de stockage à la suppression.
+  app.post("/api/documents/link", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const resourceType = String(req.body?.resource_type || '');
+      const resourceId = String(req.body?.resource_id || '');
+      if (!ATTACHABLE_RESOURCE_TYPES.includes(resourceType) || resourceType === 'projects') {
+        return res.status(400).json({ error: `resource_type "${resourceType}" non pris en charge pour un lien.` });
+      }
+      const url = normalizeWebLink(req.body?.url);
+      if (!url) return res.status(400).json({ error: "Adresse invalide : saisissez un lien commençant par http:// ou https://." });
+      if (resourceType === 'agency_library') {
+        if (resourceId !== tenantId) return res.status(400).json({ error: 'resource_id invalide pour la bibliothèque du cabinet.' });
+      } else {
+        if (!resourceId) return res.status(400).json({ error: 'resource_id est requis.' });
+        if (!(await assertTenantEntity(supabaseAdmin, resourceType, resourceId, tenantId))) {
+          return res.status(400).json({ error: `Fiche "${resourceType}" introuvable pour ce cabinet.` });
+        }
+      }
+      const rawName = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+      const name = (rawName || new URL(url).hostname.replace(/^www\./, '')).slice(0, 200);
+      const category = typeof req.body?.category === 'string' && req.body.category.trim() ? req.body.category.trim() : 'Lien';
+      const uploaded_by = await getUserName(tenantId, req.user.id, req.user.email);
+      const id = crypto.randomUUID();
+      const uploaded_at = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('documents').insert({
+        id, tenant_id: tenantId, project_id: null, resource_type: resourceType, resource_id: resourceId,
+        name, category, phase: null, version: 1, file_url: url, storage_backend: 'link', mime_type: LINK_MIME_TYPE,
+        size_bytes: null, uploaded_by, uploaded_at, description: null, indice: 'A', doc_statut: 'en_cours', validation_status: 'pending',
+      });
+      if (error) throw error;
+      logActivity(tenantId, req.user.id, uploaded_by, `Ajout du lien "${name}"`, name, id, 'document', 'Documents');
+      res.status(201).json({ id, name, file_url: url, mime_type: LINK_MIME_TYPE, uploaded_at });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: "Failed to add link" }); }
   });
 
   // admin/manager/pm only — any authenticated tenant member (including the

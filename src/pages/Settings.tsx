@@ -1,3 +1,4 @@
+import { ZohoSignConnection, SignatureProviderSettings } from '../components/proposal/SignatureProviderSettings';
 import { DriveAccessPanel } from '../components/DriveAccessPanel';
 import { KnowledgeSharingSettings } from '../components/KnowledgeSharingSettings';
 import { DeleteProjectCard } from '../components/settings/DeleteProjectCard';
@@ -16,12 +17,16 @@ import {
   IconShieldLock, IconUserCircle
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
-import { IconLanguage } from '@tabler/icons-react';
+import { IconLanguage, IconDatabase } from '@tabler/icons-react';
+import { StorageUsageCard } from '../components/StorageUsageCard';
 import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
 import { checkCloudLinkStatus, upgradeToCloud, retryImport, reconnectCloud } from '../lib/cloudSync';
 import { CloudReconnectForm } from '../components/CloudReconnectForm';
+import { TurnstileField } from '../components/TurnstileField';
+import { useCaptcha } from '../lib/turnstile';
 import { desktopBridge } from '../lib/desktopBridge';
+import { signatureParDefaut } from '../lib/mailSignatureCabinet';
 import { changeLanguageLazy } from '../i18n';
 import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
 import type { ProjectCategory } from '../types';
@@ -84,6 +89,16 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconBg: 'bg-orange-50',
     iconColor: 'text-orange-600',
     iconLabel: 'ZI',
+  },
+  {
+    id: 'zoho_sign', name: 'Zoho Sign', vendor: 'Zoho Corporation',
+    description: 'Signature électronique des propositions avec le compte Zoho Sign du cabinet.',
+    category: 'compliance', status: 'active', iconBg: 'bg-[var(--tblr-primary-lt)]', iconColor: 'text-[var(--tblr-primary)]', iconLabel: 'ZS',
+  },
+  {
+    id: 'docuseal', name: 'DocuSeal', vendor: 'DocuSeal',
+    description: 'Signature électronique des propositions avec le compte DocuSeal du cabinet.',
+    category: 'compliance', status: 'active', iconBg: 'bg-[var(--tblr-primary-lt)]', iconColor: 'text-[var(--tblr-primary)]', iconLabel: 'DS',
   },
   {
     id: 'zoho_books',
@@ -273,6 +288,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconLabel: 'GC',
   },
   {
+    id: 'carddav',
+    name: 'CardDAV (envoi)',
+    vendor: 'Nextcloud, kDrive, iCloud et serveurs compatibles',
+    description: "Choisissez quelles catégories de contacts du cabinet sont envoyées vers votre carnet d'adresses CardDAV lors d'une synchronisation (l'import CardDAV → ArchiOffice reste actif sans réglage). Le contact modifié le plus récemment l'emporte, et rien n'est jamais supprimé.",
+    category: 'crm',
+    status: 'active',
+    iconBg: 'bg-sky-50',
+    iconColor: 'text-sky-700',
+    iconLabel: 'CD',
+  },
+  {
     id: 'ted',
     name: 'TED (API)',
     vendor: 'Office des publications de l\'Union européenne',
@@ -373,6 +399,7 @@ export default function Settings() {
     tender_boamp_enabled: false,
     tender_ted_enabled: false,
     googleContactsSyncCategories: [] as string[],
+    carddavSyncCategories: [] as string[],
   });
   const [contactCategories, setContactCategories] = useState<{ id: string; name: string }[]>([]);
 
@@ -461,6 +488,9 @@ export default function Settings() {
   const [cloudUpgradeConfirmed, setCloudUpgradeConfirmed] = useState(false);
   const [isUpgradingToCloud, setIsUpgradingToCloud] = useState(false);
   const [cloudUpgradeError, setCloudUpgradeError] = useState<string | null>(null);
+  // Défi Turnstile partagé par la reconnexion et la bascule vers le cloud
+  // (jamais affichés ensemble) : voir server/localCloudUpgrade.ts.
+  const cloudCaptcha = useCaptcha();
 
   // Chorus Pro
   const [chorusProStatus, setChorusProStatus] = useState<{ connected: boolean; sandbox?: boolean } | null>(null);
@@ -497,6 +527,11 @@ export default function Settings() {
     mailSenderEmail: '',
   });
   const [emailNotice, setEmailNotice] = useState<string | null>(null);
+  // Signature du cabinet, posée en repli quand la signature personnelle reste vide (voir MailComposeModal).
+  const signatureCabinet = signatureParDefaut({
+    nom: userSettings.name || currentUser?.name,
+    agencyName: settings.agencyName, address: settings.address, phone: settings.phone, email: settings.email,
+  });
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1011,7 +1046,8 @@ export default function Settings() {
     setCloudReconnectError(null);
     setIsReconnectingCloud(true);
     try {
-      await reconnectCloud(cloudReconnectPassword);
+      await reconnectCloud(cloudReconnectPassword, cloudCaptcha.token);
+      cloudCaptcha.reset();
       setCloudReconnectPassword('');
       setShowCloudReconnectForm(false);
       // La session cloud est rétablie — enchaîner directement sur la relance
@@ -1020,6 +1056,8 @@ export default function Settings() {
       await handleRetryCloudImport();
     } catch (err: any) {
       setCloudReconnectError(err?.message || 'Échec de la reconnexion.');
+      // Un jeton Turnstile n'est utilisable qu'une fois : nouveau défi.
+      cloudCaptcha.reset();
     } finally {
       setIsReconnectingCloud(false);
     }
@@ -1031,10 +1069,12 @@ export default function Settings() {
     setCloudUpgradeError(null);
     setIsUpgradingToCloud(true);
     try {
-      const result = await upgradeToCloud(cloudUpgradeEmail, cloudUpgradePassword);
+      const result = await upgradeToCloud(cloudUpgradeEmail, cloudUpgradePassword, cloudCaptcha.token);
       navigate(`/cloud-import-progress?phase=export&exportJobId=${result.exportJobId}&importJobId=${result.importJobId}`);
     } catch (err: any) {
       setCloudUpgradeError(err?.message || 'Échec de la bascule vers le cloud.');
+      // Un jeton Turnstile n'est utilisable qu'une fois : nouveau défi.
+      cloudCaptcha.reset();
       setIsUpgradingToCloud(false);
     }
   };
@@ -1267,13 +1307,21 @@ export default function Settings() {
     { key: 'notifications', label: 'Notifications', icon: IconBell, adminOnly: true },
     { key: 'integrations', label: 'Intégrations', icon: IconPuzzle, adminOnly: true },
     { key: 'donnees', label: 'Données et RGPD', icon: IconShieldLock, adminOnly: true },
+    // Visible de tous : un collaborateur y voit sa propre part, l'équipe entière n'est rendue qu'aux administrateurs.
+    { key: 'stockage', label: 'Stockage', icon: IconDatabase, adminOnly: false },
     { key: 'profil', label: 'Mon profil', icon: IconUserCircle, adminOnly: false },
   ] as const;
   const visibleTabs = SETTINGS_TABS.filter(tab => isAdmin || !tab.adminOnly);
-  const [activeTab, setActiveTab] = useState<string>('cabinet');
+  const [activeTab, setActiveTab] = useState<string>(() => new URLSearchParams(location.search).get('tab') || 'cabinet');
   useEffect(() => {
     if (!visibleTabs.some(tab => tab.key === activeTab)) setActiveTab('profil');
   }, [isAdmin]);
+  // Un lien vers `?tab=…` (le cartouche « Stockage » de la barre latérale) doit aussi fonctionner quand la page
+  // des paramètres est déjà ouverte : l'état initial ne lit l'adresse qu'au premier affichage.
+  useEffect(() => {
+    const wanted = new URLSearchParams(location.search).get('tab');
+    if (wanted && SETTINGS_TABS.some(tab => tab.key === wanted && (isAdmin || !tab.adminOnly))) setActiveTab(wanted);
+  }, [location.search]);
 
   // ── Marketplace helpers ────────────────────────────────────────────────────
 
@@ -1758,6 +1806,8 @@ export default function Settings() {
       </div>
     );
 
+    if (pluginId === 'zoho_sign') return <div className="space-y-5"><ZohoSignConnection /><SignatureProviderSettings plugin="zoho" /></div>;
+    if (pluginId === 'docuseal') return <SignatureProviderSettings plugin="docuseal" />;
     if (pluginId === 'zoho_books') return (
       <div className="space-y-4">
         {zohoBooksNotice && (
@@ -1958,6 +2008,43 @@ export default function Settings() {
         )}
         {renderSaveButton('google_contacts', () => saveSection('google_contacts', {
           googleContactsSyncCategories: (settings as any).googleContactsSyncCategories,
+        }))}
+      </div>
+    );
+
+    if (pluginId === 'carddav') return (
+      <div className="space-y-4">
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>Import et envoi</p>
+          <p>L'import (CardDAV → ArchiOffice) reste actif sans réglage, depuis Contacts › CardDAV. Les catégories cochées ci-dessous sont en plus envoyées vers votre carnet d'adresses à chaque synchronisation. Aucune catégorie cochée : rien n'est envoyé. Les contacts marqués « Personnel » ne sont jamais envoyés, et aucune fiche n'est supprimée du carnet ni d'ArchiOffice.</p>
+        </div>
+        {contactCategories.length === 0 ? (
+          <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>
+            Aucune catégorie de contact définie pour l'instant — créez-en depuis Contacts › Catégories.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {contactCategories.map(cat => {
+              const selected = (settings as any).carddavSyncCategories.includes(cat.name);
+              return (
+                <label key={cat.id} className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+                  <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{cat.name}</span>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={e => {
+                      const current: string[] = (settings as any).carddavSyncCategories;
+                      const next = e.target.checked ? [...current, cat.name] : current.filter(n => n !== cat.name);
+                      setSettings({ ...settings, carddavSyncCategories: next } as any);
+                    }}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {renderSaveButton('carddav', () => saveSection('carddav', {
+          carddavSyncCategories: (settings as any).carddavSyncCategories,
         }))}
       </div>
     );
@@ -3190,11 +3277,12 @@ export default function Settings() {
                       autoFocus
                     />
                   </div>
+                  <TurnstileField captcha={cloudCaptcha} />
                   {cloudReconnectError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{cloudReconnectError}</p>}
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      disabled={isReconnectingCloud}
+                      disabled={isReconnectingCloud || (cloudCaptcha.enabled && !cloudCaptcha.token)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
                       style={{ background: 'var(--tblr-warning, #f59f00)' }}
                     >
@@ -3268,6 +3356,8 @@ export default function Settings() {
                   busy={isReconnectingCloud}
                   onPasswordChange={setCloudReconnectPassword}
                   onSubmit={handleReconnectCloud}
+                  captcha={<TurnstileField captcha={cloudCaptcha} />}
+                  canSubmit={!cloudCaptcha.enabled || !!cloudCaptcha.token}
                   onCancel={() => { setShowCloudReconnectForm(false); setCloudReconnectPassword(''); setCloudReconnectError(null); }}
                 />
               )}
@@ -3328,11 +3418,12 @@ export default function Settings() {
                     Toutes les données de ce poste seront envoyées vers ce compte cloud. Cette action ne peut pas être
                     annulée depuis l'application.
                   </label>
+                  <TurnstileField captcha={cloudCaptcha} />
                   {cloudUpgradeError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{cloudUpgradeError}</p>}
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      disabled={isUpgradingToCloud || !cloudUpgradeConfirmed}
+                      disabled={isUpgradingToCloud || !cloudUpgradeConfirmed || (cloudCaptcha.enabled && !cloudCaptcha.token)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
                       style={{ background: 'var(--tblr-primary)' }}
                     >
@@ -3399,6 +3490,8 @@ export default function Settings() {
           </div>
         </>
       )}
+
+      {activeTab === 'stockage' && <StorageUsageCard />}
 
       {/* ── User section ── */}
       {activeTab === 'profil' && <DriveAccessPanel key={currentUser?.tenantId} />}
@@ -3519,10 +3612,23 @@ export default function Settings() {
           maxLength={2000}
           value={userSettings.mailSignature}
           onChange={e => setUserSettings({ ...userSettings, mailSignature: e.target.value })}
-          placeholder={t('settings_mail_signature_placeholder') as string}
+          placeholder={(signatureCabinet || t('settings_mail_signature_placeholder')) as string}
           className="w-full p-2.5 rounded-lg text-sm resize-y"
           style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
         />
+        {signatureCabinet && (
+          <div className="space-y-1.5">
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_fallback_hint')}</p>
+            <button
+              type="button"
+              onClick={() => setUserSettings({ ...userSettings, mailSignature: signatureCabinet })}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-medium"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            >
+              {t('settings_mail_signature_use_agency')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Contacts personnels ── */}

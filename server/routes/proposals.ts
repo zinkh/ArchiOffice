@@ -1,3 +1,4 @@
+import { stripProposalTracking, followUpDate } from '../../src/lib/proposalFollowUp';
 // Phase 7 extraction — moved out of server.ts's inline Proposals section
 // (the last domain of the deliberately-deferred core, alongside Invoices).
 // getNextDocNumber (auto-numbering, shared with notesHonoraires.ts and the
@@ -8,7 +9,12 @@ import { proposalToXml, xmlToProposal } from '../../src/lib/xmlHelper';
 import { validateBody } from '../../src/lib/validateRequest';
 import { proposalSchema } from '../../src/schemas/proposal.schema';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { erreurTranchesJson, donneesPourContrat, totauxParTranche, tranchesActives, listeTranches, trancheDeMission } from '../../src/lib/tranches';
+import { serializeProposalIllustrations } from '../../src/lib/proposalIllustrations';
 import { dispatchWebhookEvent } from '../webhookDispatch';
+
+import { projectRowFromProposal } from '../../src/lib/proposalToProject';
+import { nextProjectCode } from '../projectCode';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -39,7 +45,9 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
   app.post("/api/proposals", validateBody(proposalSchema), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const p = req.body;
+      const p = stripProposalTracking(req.body);
+      const erreurTranches = erreurTranchesJson(p.fee_distribution);
+      if (erreurTranches) return res.status(400).json({ error: `Tranches invalides : ${erreurTranches}` });
       const id = p.id || crypto.randomUUID();
       const created_at = new Date().toISOString();
       const { specialties_list, client_name: _cn, construction_cost_num: _ccn, ...proposalData } = p;
@@ -53,7 +61,7 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       if (!proposalData.reference) {
         proposalData.reference = await getNextDocNumber(tenantId, 'num_prefix_devis', 'proposals', 'DEVIS');
       }
-      const { error: insErr } = await supabaseAdmin.from('proposals').insert({ ...proposalData, id, tenant_id: tenantId, created_at, amount: p.amount || 0, status: p.status || 'Draft' });
+      const { error: insErr } = await supabaseAdmin.from('proposals').insert({ ...proposalData, id, tenant_id: tenantId, created_at, ...(p.status === 'Sent' ? { sent_at: created_at, next_follow_up_at: followUpDate(created_at) } : {}), amount: p.amount || 0, status: p.status || 'Draft' });
       if (insErr) throw insErr;
       if (specialties_list && Array.isArray(specialties_list)) {
         const specs = specialties_list.map((spec: any) => ({ id: crypto.randomUUID(), proposal_id: id, tenant_id: tenantId, specialty_name: spec.specialty_name, contact_id: spec.contact_id || null }));
@@ -77,15 +85,25 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
     try {
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const p = req.body;
+      const p = stripProposalTracking(req.body);
+      const erreurTranches = erreurTranchesJson(p.fee_distribution);
+      if (erreurTranches) return res.status(400).json({ error: `Tranches invalides : ${erreurTranches}` });
 
       // Fetch old proposal to check status transition
-      const { data: oldProposal } = await supabaseAdmin.from('proposals').select('status').eq('id', id).eq('tenant_id', tenantId).single();
+      const { data: oldProposal } = await supabaseAdmin.from('proposals').select('*').eq('id', id).eq('tenant_id', tenantId).single();
 
+      if (!oldProposal) return res.status(404).json({ error: 'Proposition introuvable.' });
+      if (['creating', 'draft', 'unknown', 'inprogress'].includes(oldProposal.signature_status)) return res.status(409).json({ error: 'Terminez ou retirez la demande de signature avant de modifier la proposition.' });
+      if (oldProposal.archived_at) return res.status(409).json({ error: 'Restaurez cette proposition avant de la modifier.' });
       const { specialties_list, proposal_specialties: _ps, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, construction_cost_num: _ccn2, ...updateData } = p;
       if (updateData.client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', updateData.client_id, tenantId))) {
         return res.status(400).json({ error: "Client introuvable pour ce cabinet." });
       }
+      if (p.status === 'Sent' && oldProposal.status !== 'Sent') {
+        updateData.sent_at = oldProposal.sent_at || new Date().toISOString();
+        updateData.next_follow_up_at = followUpDate(updateData.sent_at);
+      }
+      if (p.status === 'Accepted' || p.status === 'Rejected') updateData.next_follow_up_at = null;
       const { error: updErr } = await supabaseAdmin.from('proposals').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 
@@ -105,28 +123,16 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
           const { data: clientData } = await supabaseAdmin.from('contacts').select('first_name, last_name').eq('id', p.client_id).eq('tenant_id', tenantId).single();
           if (clientData) clientName = `${clientData.first_name || ''} ${clientData.last_name || ''}`.trim();
         }
-        const { error: projErr } = await supabaseAdmin.from('projects').insert({
-          id: projectId, tenant_id: tenantId,
-          name: p.title, client: clientName, status: 'Planning', budget: p.amount, description: p.description,
-          start_date: new Date().toISOString().split('T')[0],
-          end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          address: p.adresse_terrain ? `${p.adresse_terrain}, ${p.cp_ville_terrain || ''}` : '',
-          reference: p.reference, projet_detail: p.projet_detail, is_entreprise: p.is_entreprise,
-          nom_societe: p.nom_societe, rcs: p.rcs, representant: p.representant, qualite: p.qualite,
-          adresse_client: p.adresse_client, cp_client: p.cp_client, ville_client: p.ville_client,
-          telephone: p.telephone, portable: p.portable, email_client: p.email_client,
-          adresse_terrain: p.adresse_terrain, cp_ville_terrain: p.cp_ville_terrain,
-          ban_id_terrain: p.ban_id_terrain, city_code_terrain: p.city_code_terrain,
-          ref_cadastrale: p.ref_cadastrale, zone_plu: p.zone_plu, surface_parcelle: p.surface_parcelle,
-          nom_etablissement: p.nom_etablissement, avant_trav: p.avant_trav, apres_trav: p.apres_trav,
-          type_et_cat: p.type_et_cat, type_projet: p.type_projet, categorie_projet: p.categorie_projet,
-          surface_plancher: p.surface_plancher, surface_plancher_ext: p.surface_plancher_ext,
-          surface_erp: p.surface_erp, surface_ert: p.surface_ert,
-          effectif_public: p.effectif_public, effectif_personnel: p.effectif_personnel,
-          ind: p.ind, date_modification: p.date_modification,
-          maf_intercalaire: p.maf_intercalaire, taux_mission: p.taux_mission, part_interet: p.part_interet
-        });
+        // Toutes les informations de la proposition passent dans l'affaire (src/lib/proposalToProject.ts).
+        // La ligne enregistrée complète le corps de la requête : un champ absent du formulaire n'est pas perdu.
+        // Le numéro d'affaire est attribué ici, à la suite du dernier numéro du cabinet (server/projectCode.ts) :
+        // celui que la proposition porte éventuellement (`project_code`) n'est qu'une référence de devis.
+        const projectRow = projectRowFromProposal({ ...oldProposal, ...p, id }, { projectId, tenantId, clientName, today: new Date() });
+        projectRow.project_code = await nextProjectCode(supabaseAdmin, tenantId);
+        const { error: projErr } = await supabaseAdmin.from('projects').insert(projectRow);
         if (projErr) throw projErr;
+        // Les réunions préparées sur la proposition rejoignent l'affaire (le lien à la proposition reste).
+        await supabaseAdmin.from('meetings').update({ project_id: projectId }).eq('proposal_id', id).eq('tenant_id', tenantId).is('project_id', null);
         // Copy specialties to cotraitants
         if (specialties_list && Array.isArray(specialties_list) && specialties_list.length > 0) {
           const cots = specialties_list.map((spec: any) => ({ id: crypto.randomUUID(), project_id: projectId, tenant_id: tenantId, specialty: spec.specialty_name, contact_id: spec.contact_id || null }));
@@ -137,7 +143,12 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
         // so the project's HONOS tab has real mission %/cotraitant data instead of
         // starting empty (fee_distribution otherwise stays orphaned on the proposal).
         try {
-          const feeData = p.fee_distribution ? JSON.parse(p.fee_distribution) : null;
+          const feeBrut = p.fee_distribution ? JSON.parse(p.fee_distribution) : null;
+          // Tranches : le contrat reprend la tranche ferme seule ou toutes les tranches,
+          // selon le choix enregistré avec la répartition (`contrat_tranches`).
+          const feeData = feeBrut && Array.isArray(feeBrut.missions) ? donneesPourContrat(feeBrut) : feeBrut;
+          const avecTranches = tranchesActives(feeData);
+          const listeT = listeTranches(feeData);
           const missions: any[] = feeData?.missions || [];
           if (missions.length > 0) {
             const totalBaseAmount = missions
@@ -156,8 +167,13 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
               id: m.id, name: m.name, incluse: true,
               pct: totalBaseAmount > 0 ? (m.amount || 0) / totalBaseAmount * 100 : 0,
               category: categoryOf(m.category),
+              ...(avecTranches ? { tranche: trancheDeMission(m, listeT).label } : {}),
             }));
-            const totalHonoraires = p.amount || totalBaseAmount || 1;
+            // Ferme seule : le montant du contrat est celui de la tranche ferme, pas le total.
+            const montantContrat = avecTranches && feeBrut.contrat_tranches === 'ferme'
+              ? totauxParTranche(feeData).ferme
+              : p.amount;
+            const totalHonoraires = montantContrat || totalBaseAmount || 1;
             const cotraitants = (specialties_list || []).map((spec: any) => {
               const montant_honoraires = missions.reduce((acc: number, m: any) =>
                 acc + (m.amount || 0) * ((m.percentages?.[spec.contact_id] || 0) / 100), 0);
@@ -170,13 +186,19 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
               id: crypto.randomUUID(), tenant_id: tenantId, project_id: projectId,
               client_id: p.client_id || null, intitule_projet: p.title,
               type_contrat: 'construction_neuve', type_moa: 'prive', status: 'Brouillon',
-              mode_honoraires: 'forfait', montant_honoraires: p.amount || null,
+              mode_honoraires: 'forfait', montant_honoraires: montantContrat || null,
               missions_list, cotraitants,
             });
           }
         } catch (err) {
           console.error('Failed to auto-create ContratMOE from accepted proposal:', err);
         }
+        // Une proposition convertie est rangée d'elle-même : elle n'attend plus de réponse
+        // du client, donc ni relance ni rappel téléphonique. « Restaurer » la rouvre.
+        const { error: archiveErr } = await supabaseAdmin.from('proposals')
+          .update({ archived_at: new Date().toISOString(), archive_reason: 'converted', next_follow_up_at: null })
+          .eq('id', id).eq('tenant_id', tenantId);
+        if (archiveErr) console.error('Failed to archive converted proposal:', archiveErr.message);
         dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.accepted', { id, title: p.title, amount: p.amount, client_id: p.client_id || null, project_id: projectId });
       } else if (p.status === 'Rejected' && oldProposal?.status !== 'Rejected') {
         dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.declined', { id, title: p.title, amount: p.amount, client_id: p.client_id || null });
@@ -191,6 +213,22 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       captureWithContext(error, { route: 'PUT /api/proposals/:id', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to update proposal: " + error.message });
     }
+  });
+
+  // Plan et photos de la proposition : enregistrés à part du formulaire, car les images sont
+  // déjà déposées comme documents au moment où l'architecte les ajoute.
+  app.put("/api/proposals/:id/illustrations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!Array.isArray(req.body?.illustrations)) return res.status(400).json({ error: "Liste d'illustrations invalide." });
+      if (!(await assertTenantEntity(supabaseAdmin, 'proposals', req.params.id, tenantId))) {
+        return res.status(404).json({ error: "Proposition introuvable." });
+      }
+      const illustrations = serializeProposalIllustrations(req.body.illustrations);
+      const { error } = await supabaseAdmin.from('proposals').update({ illustrations }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ illustrations });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Échec de l'enregistrement du plan et des photos." }); }
   });
 
   app.delete("/api/proposals/:id", async (req: any, res: any) => {

@@ -26,6 +26,8 @@ import { AccordCadreDialog, type ConditionsAccordCadreBody } from './AccordCadre
 import { AccordCadrePanel, SignatureDialog, type MarcheAC } from './AccordCadrePanel';
 import { SubsequentDialog } from './SubsequentDialog';
 import { ConsultationsSection } from './ConsultationsSection';
+import { RecapSituationsLot } from './RecapSituationsLot';
+import { avecEntrepriseAttribuee, entrepriseAttribuee, type ConsultationAttribution } from '../../../lib/attributionMarche';
 
 type Marche = MarcheTravaux & MarcheAccordCadreChamps & { project_id?: string; duree_mois?: number | null; notes?: string | null };
 
@@ -62,6 +64,8 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
   const nouvelleId = useRef<string | null>(null);
   const [dpgf, setDpgf] = useState<DPGF | null>(null);
   const [offres, setOffres] = useState<OffreDocument[]>([]);
+  // Attribution de l'ACT : c'est elle qui désigne l'entreprise de chaque marché.
+  const [consultation, setConsultation] = useState<ConsultationAttribution | null>(null);
   const [plateformes, setPlateformes] = useState<{ chorus_pro: boolean; superpdp: boolean }>({ chorus_pro: false, superpdp: false });
 
   const charger = useCallback(async () => {
@@ -101,6 +105,14 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
 
   useEffect(() => {
     let vivant = true;
+    apiFetch<{ consultation?: ConsultationAttribution } | null>(`/api/projects/${projectId}/act`)
+      .then((d) => { if (vivant) setConsultation(d?.consultation && Object.keys(d.consultation).length ? d.consultation : null); })
+      .catch(() => { if (vivant) setConsultation(null); });
+    return () => { vivant = false; };
+  }, [projectId]);
+
+  useEffect(() => {
+    let vivant = true;
     Promise.all([
       apiFetch<{ connected: boolean }>('/api/chorus-pro/status').catch(() => ({ connected: false })),
       apiFetch<{ connected: boolean }>('/api/superpdp/status').catch(() => ({ connected: false })),
@@ -115,10 +127,10 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
 
   // Un accord-cadre précède ses marchés subséquents, qui suivent dans l'ordre de leur numéro.
   const marchesTries = useMemo(
-    () => [...marches].sort((a, b) =>
+    () => marches.map((m) => avecEntrepriseAttribuee(m, lots, consultation)).sort((a, b) =>
       String(a.lot_numero ?? '').localeCompare(String(b.lot_numero ?? ''), 'fr', { numeric: true })
       || (a.numero_subsequent ?? 0) - (b.numero_subsequent ?? 0)),
-    [marches],
+    [marches, lots, consultation],
   );
   const syntheses = useMemo(() => marchesTries.map((m) => syntheseMarche(m, situations)), [marchesTries, situations]);
   const totaux = useMemo(() => {
@@ -139,13 +151,13 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
 
   // Lots du projet qui ont une entreprise mais pas encore de marché.
   const lotsSansMarche = useMemo(() => lots.filter((l) =>
-    l.contact_name && !marches.some((m) => String(m.lot_numero ?? '') === String(l.lot_number ?? '')),
-  ), [lots, marches]);
+    (entrepriseAttribuee(l.id, consultation) || l.contact_name) && !marches.some((m) => String(m.lot_numero ?? '') === String(l.lot_number ?? '')),
+  ), [lots, marches, consultation]);
 
   const reprendreLots = async () => {
     try {
       const crees = await Promise.all(lotsSansMarche.map((l) => apiFetch<Marche>('/api/marches-entreprises', {
-        method: 'POST', body: JSON.stringify({ project_id: projectId, ...marcheDepuisLot(l) }),
+        method: 'POST', body: JSON.stringify({ project_id: projectId, ...marcheDepuisLot(l, entrepriseAttribuee(l.id, consultation)) }),
       })));
       setMarches((prev) => [...prev, ...crees]);
       showToast(t('situations_travaux_lots_imported', { count: crees.length }));
@@ -405,6 +417,8 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
         )}
       </div>
 
+      {loaded && !loadError && <RecapSituationsLot marches={marchesTries} situations={situations} />}
+
       {loaded && !loadError && syntheses.map((syn) => {
         const m = syn.marche as Marche;
         const liste = situationsDuMarche(situations, m.id) as SituationLiee[];
@@ -607,6 +621,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
         open={marcheEdite !== null}
         marche={marcheEdite && marcheEdite !== 'new' ? marcheEdite : null}
         lots={lots.filter((l) => !!(l.lot_number || l.lot_title))}
+        consultation={consultation}
         onClose={() => setMarcheEdite(null)}
         onSave={enregistrerMarche}
       />

@@ -151,20 +151,32 @@ export async function getMemberRole(
   return { role: membership.role, systemRole: membership.systemRole, managerId: membership.managerId };
 }
 
-/** Les identifiants des personnes rattachées à ce cabinet (adhésions ∪ profils). */
+/**
+ * Les identifiants des personnes rattachées à ce cabinet (adhésions ∪ profils).
+ *
+ * Les collaborateurs externes (rôle `guest`, confrères invités sur une affaire)
+ * n'en font PAS partie : ils ne sont ni de l'équipe, ni mentionnables, ni
+ * destinataires des notifications internes, ni comptés dans le quota
+ * d'utilisateurs — la gratuité des invités tient à ce filtre. Ils restent
+ * visibles par `findMembership` et les routes de partage.
+ */
 export async function listTenantMemberIds(supabaseAdmin: any, tenantId: string): Promise<string[]> {
   const ids = new Set<string>();
+  const guestIds = new Set<string>();
   try {
     const { data, error } = await supabaseAdmin
       .from('tenant_memberships')
-      .select('user_id')
+      .select('user_id, system_role')
       .eq('tenant_id', tenantId);
-    if (!error) (data || []).forEach((r: any) => ids.add(r.user_id));
+    if (!error) (data || []).forEach((r: any) => {
+      if (r.system_role === 'guest') guestIds.add(r.user_id);
+      else ids.add(r.user_id);
+    });
   } catch {
     // Table absente : le repli sur `profiles` ci-dessous suffit.
   }
   const { data: profiles } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId);
-  (profiles || []).forEach((p: any) => ids.add(p.id));
+  (profiles || []).forEach((p: any) => { if (!guestIds.has(p.id)) ids.add(p.id); });
   return [...ids];
 }
 

@@ -7,6 +7,7 @@ import {
   IconBriefcase,
   IconBooks,
   IconUsers,
+  IconUsersGroup,
   IconChartBar,
   IconClipboardCheck,
   IconAddressBook,
@@ -83,6 +84,7 @@ export const NAV_SECTIONS = [
     label: 'Affaires',
     items: [
       { name: 'projects',  path: '/projects',  icon: IconBriefcase },
+      { name: 'shared_projects', path: '/partages', icon: IconUsersGroup },
       { name: 'tenders',   path: '/tenders',   icon: IconClipboardCheck },
       { name: 'proposals', path: '/proposals', icon: IconFileSpreadsheet },
       { name: 'contrats',  path: '/contrats',  icon: IconContract },
@@ -291,7 +293,13 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
     <>
       {/* Navigation */}
       <nav className={cn('flex-1 py-3 space-y-1 overflow-y-auto overflow-x-hidden', collapsed ? 'px-1.5' : 'px-2')}>
-        {NAV_SECTIONS.map((section, sectionIndex) => {
+        {/* Un confrère invité (sans cabinet) ne voit que l'espace partagé. */}
+        {(currentUser?.system_role === 'guest'
+          ? NAV_SECTIONS
+              .map(s => ({ ...s, items: s.items.filter(item => item.path === '/partages') }))
+              .filter(s => s.items.length > 0)
+          : NAV_SECTIONS
+        ).map((section, sectionIndex) => {
           const isCollapsed = !!collapsed_[section.key];
           const hasActive = section.items.some(item =>
             location.pathname === item.path ||

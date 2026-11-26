@@ -19,7 +19,8 @@ beforeEach(async()=>{
     if(msg.type==='init'||msg.type==='map')void(async()=>{root=msg.root;
      if(msg.type==='init'&&!msg.resume){created.push(root);for(const e of msg.entries){const file=path.join(root,...e.path.split('\\'));if(e.folder)await fs.mkdir(file,{recursive:true});else await fs.writeFile(file,'v'+(e.path.includes('Added')?1:versions.get(e.path.split('\\')[0].slice(1))));}if(lateDirty&&created.length>1)dirty.add(created[0]);}
      child.stdout.write(JSON.stringify({type:'ready'})+'\n');})();
-    if(msg.type==='verify')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'verified',requestId:msg.requestId,valid:!dirty.has(root)})+'\n'));
+    if(msg.type==='verify')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'verified',requestId:msg.requestId,valid:!dirty.has(root)||!!msg.except})+'\n'));
+    if(msg.type==='lock')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'locked',requestId:msg.requestId,valid:true})+'\n'));
     if(msg.type==='stop')queueMicrotask(()=>child.emit('exit',0));
    }});return child;
   })};
@@ -68,4 +69,16 @@ it('keeps existing aliases on rename and reports removals and directory moves',(
  const old={catalog:makeCatalog('p',1).entries};const remote=makeCatalog('p',2);remote.entries[0].path='_Renamed';for(const entry of remote.entries.slice(1))entry.path=entry.path.replace('_p\\','_Renamed\\');
  const result=normalizeCatalog(old,remote,identity);expect(result.entries[0].path).toBe('_p');expect(result.entries[1].path).toBe('_p\\_Plan.txt');
  const removed=normalizeCatalog(old,{identity,entries:[remote.entries[0]]},identity);expect(removed.summary.removed).toBe(1);
+});
+
+it('switches a preserved native conflict generation and keeps the old bytes and recovery pointer',async()=>{
+ const drive=make();await drive.start('p');const old=await fs.realpath(path.join(base(),'_p'));dirty.add(created[0]);await fs.writeFile(path.join(old,'_Plan.txt'),'local-conflict');const before=(await drive.shellSnapshot()).projects[0];versions.set('p',2);
+ const original=config.agent.windowsPreview.getMockImplementation();config.agent.windowsPreview.mockImplementation(async(action:string,input:any)=>action==='conflictProof'?{identity,key:hash('doc:p'),conflictId:'preserved-id',nodeId:'doc:p',sha256:'a'.repeat(64)}:action==='conflictReconcile'?{identity,ok:true}:original(action,input));
+ expect(await drive.resolveConflict('p',hash('doc:p'),before.rootKey)).toEqual({status:'refreshed'});expect(await fs.readFile(path.join(old,'_Plan.txt'),'utf8')).toBe('local-conflict');expect(await fs.readFile(path.join(base(),'_p','_Plan.txt'),'utf8')).toBe('v2');expect(drive.status().previousProjectIds).toContain('p');
+ expect(config.agent.windowsPreview).toHaveBeenCalledWith('conflictReconcile',expect.objectContaining({rootKey:before.rootKey,conflictId:'preserved-id',version:2}));
+});
+it('does not switch a conflict when its proof changes after the native read lock',async()=>{
+ const drive=make();await drive.start('p');const before=(await drive.shellSnapshot()).projects[0],old=await fs.realpath(path.join(base(),'_p'));versions.set('p',2);const original=config.agent.windowsPreview.getMockImplementation();let count=0;
+ config.agent.windowsPreview.mockImplementation(async(action:string,input:any)=>action==='conflictProof'?{identity,key:hash('doc:p'),conflictId:'preserved-id',nodeId:'doc:p',sha256:(++count===1?'a':'b').repeat(64)}:original(action,input));
+ expect(await drive.resolveConflict('p',hash('doc:p'),before.rootKey)).toMatchObject({status:'error',code:'DRIVE_LOCAL_CHANGES'});expect(await fs.realpath(path.join(base(),'_p'))).toBe(old);expect(frames.some(frame=>frame.type==='unlock')).toBe(true);
 });

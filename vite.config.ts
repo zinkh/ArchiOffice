@@ -36,6 +36,8 @@ export default defineConfig(({mode}) => {
       // Use process.env directly — guaranteed to read DigitalOcean OS env vars at build time
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || ''),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || ''),
+      // Clé publique Cloudflare Turnstile (captcha de la page de connexion). Vide = pas de captcha.
+      'import.meta.env.VITE_TURNSTILE_SITE_KEY': JSON.stringify(process.env.VITE_TURNSTILE_SITE_KEY || ''),
       // Set only in the offline desktop build's .env — switches auth to the local
       // account flow instead of Supabase Auth (see src/lib/authToken.ts).
       'import.meta.env.VITE_OFFLINE_MODE': JSON.stringify(process.env.VITE_OFFLINE_MODE || ''),
@@ -120,7 +122,11 @@ export default defineConfig(({mode}) => {
           // for this route, silently keeping a popup on a pre-fix version no
           // matter how many times the server and client code were fixed and
           // redeployed, since the browser never even asked the network.
-          navigateFallbackDenylist: [/^\/api\//, /^\/auth\//],
+          // /oauth/ et /.well-known/ : /oauth/mcp/authorize est une redirection
+          // serveur (vers /mcp/authorize). Si le service worker la sert depuis
+          // la précache, React Router reçoit /oauth/mcp/authorize et affiche
+          // « No routes matched location » : la liaison MCP échoue.
+          navigateFallbackDenylist: [/^\/api\//, /^\/auth\//, /^\/oauth\//, /^\/\.well-known\//],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\//,

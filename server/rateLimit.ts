@@ -64,6 +64,17 @@ export const mapTileLimiter = rateLimit({
   message: { error: 'Trop de tuiles demandées. Patientez quelques instants.' },
 });
 
+// Photo insérée par lien dans une proposition (/api/feasibility/photo-from-url) :
+// le serveur télécharge une image publique pour le compte de la personne.
+export const photoUrlLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de liens traités. Patientez quelques instants.' },
+});
+
 // Outbound mail relays a tenant's own SMTP credentials — still worth capping
 // so a compromised/misused account can't be turned into a spam cannon.
 export const sendEmailLimiter = rateLimit({
@@ -137,6 +148,17 @@ export const depotReadLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req: any) => ipKeyGenerator(req.ip || ''),
   message: { error: 'Trop de requêtes. Veuillez réessayer dans quelques minutes.' },
+});
+
+// Archive du dossier de consultation : construite en mémoire côté serveur, donc nettement plus
+// serrée qu'une lecture ordinaire (voir server/consultationDepot/dossierZip.ts).
+export const depotZipLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: limiteDepot('DEPOT_ZIP_LIMIT', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de téléchargements du dossier en peu de temps. Veuillez réessayer dans quelques minutes.' },
 });
 
 export const depotWriteLimiter = rateLimit({

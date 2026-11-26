@@ -1,3 +1,6 @@
+import { registerProposalFollowUpRoutes } from './server/routes/proposalFollowUp';
+import { registerSignatureRoutes } from './server/routes/signatures';
+import { registerZohoSignRoutes } from './server/routes/zohoSign';
 import express from "express";
 import path from "path";
 import nodemailer from "nodemailer";
@@ -25,17 +28,26 @@ import { registerCustomReferenceRoutes } from "./server/routes/customReferences"
 import { registerReferencesDossierRoutes } from "./server/routes/referencesDossier";
 import { registerPanneauxRoutes } from "./server/routes/panneaux";
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
+import { registerProjectShareRoutes } from "./server/routes/projectShares";
+import { registerProjectShareDocumentRoutes } from "./server/routes/projectShareDocuments";
+import { registerProjectShareProposalRoutes } from "./server/routes/projectShareProposals";
+import { registerProjectShareChantierRoutes } from "./server/routes/projectShareChantier";
+import { registerProjectShareActProposalRoutes } from "./server/routes/projectShareActProposals";
+import { guestAccessGuard } from "./server/guestAccessGuard";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
 import { registerProjectPhaseNotesRoutes } from "./server/routes/projectPhaseNotes";
 import { registerProjectArchiveRoutes } from "./server/routes/projectArchive";
 import { archivedProjectGuard } from "./server/archivedProjectGuard";
 import { registerChantierDecoupageRoutes } from "./server/routes/chantierDecoupage";
 import { registerProjectNoticeRoutes } from "./server/routes/projectNotices";
+import { registerDiagReportRoutes } from "./server/routes/diagReports";
 import { registerMailAiRoutes } from "./server/routes/mailAi";
 import { registerProjectStakeholdersRoutes } from "./server/routes/projectStakeholders";
 import { registerGlobalSearchRoutes } from "./server/routes/globalSearch";
 import { registerObservationRoutes } from "./server/routes/observations";
+import { registerCroquisRoutes } from "./server/routes/croquis";
 import { registerMeetingRoutes } from "./server/routes/meetings";
+import { registerMeetingNotesAiRoutes } from "./server/routes/meetingNotesAi";
 import { registerMeetingAttendeeRoutes } from "./server/routes/meetingAttendees";
 import { registerDocumentTemplateRoutes } from "./server/routes/documentTemplates";
 import { registerEmailTemplateRoutes } from "./server/routes/emailTemplates";
@@ -47,6 +59,7 @@ import { registerPushRoutes } from "./server/routes/push";
 import { registerMessagingRoutes } from "./server/routes/messaging";
 import { registerContactSyncRoutes } from "./server/routes/contactSync";
 import { registerGeoProxyRoutes } from "./server/routes/geoProxy";
+import { registerGeoTravelRoutes } from "./server/routes/geoTravel";
 import { registerMafRoutes } from "./server/routes/maf";
 import { registerTimeTrackingRoutes } from "./server/routes/timeTracking";
 import { registerLeaveRoutes } from "./server/routes/leave";
@@ -60,6 +73,7 @@ import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivity
 import { registerTenderAiRoutes } from "./server/routes/tenderAi";
 import { registerTenderRssAiRoutes } from "./server/routes/tenderRssAi";
 import { registerConsultationDepotRoutes } from "./server/routes/consultationDepots";
+import { registerOffresRecuesRoutes } from "./server/routes/offresRecues";
 import { registerConsultationDepotPublicRoutes } from "./server/routes/consultationDepotPublic";
 import { registerProposalFeasibilityRoutes } from "./server/routes/proposalFeasibility";
 import { registerProposalFeasibilityAiRoutes } from "./server/routes/proposalFeasibilityAi";
@@ -77,6 +91,7 @@ import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
 import { registerSupportRoutes } from "./server/routes/support";
 import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntreprises";
 import { registerMarcheSousTraitantsRoutes } from "./server/routes/marcheSousTraitants";
+import { registerLotIntervenantsRoutes } from "./server/routes/lotIntervenants";
 import { registerTravauxModificatifsRoutes } from "./server/routes/travauxModificatifs";
 import { registerMarchesSubsequentsRoutes } from "./server/routes/marchesSubsequents";
 import { registerAccordCadreConsultationsRoutes } from "./server/routes/accordCadreConsultations";
@@ -112,6 +127,7 @@ import { registerReceptionRoutes } from "./server/routes/receptions";
 import { registerDoeAtelierRoutes } from "./server/routes/doeAtelier";
 import { registerDoeAtelierPublicRoutes } from "./server/routes/doeAtelierPublic";
 import { startDoeReminders } from "./server/doe/relances";
+import { startProposalCallbacks } from "./server/proposalCallbacks";
 import { startReserveReminders } from "./server/reserveReminders";
 import { registerReserveRoutes } from "./server/routes/reserves";
 import { registerGpaReserveRoutes } from "./server/routes/gpaReserves";
@@ -123,6 +139,7 @@ import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
 import { registerDocumentFolderRoutes } from "./server/routes/documentFolders";
 import { registerDesktopSyncRoutes } from "./server/routes/desktopSync";
+import { registerDesktopAiRoutes } from "./server/routes/desktopAi";
 import { registerKnowledgeSharingRoutes } from "./server/routes/knowledgeSharing";
 import { registerInspirationRoutes } from "./server/routes/inspirations";
 import { registerTaskRoutes } from "./server/routes/tasks";
@@ -195,6 +212,9 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 dotenv.config();
+
+// Relais IA du poste de bureau, branché au démarrage quand OFFLINE_MODE est actif.
+let desktopAiRelay: { refreshCapabilities(): Promise<void> } | null = null;
 
 // Builds and fully configures the Express app (all middleware + all ~340
 // routes) without binding a port — the production entry point (startServer(),
@@ -333,6 +353,17 @@ export async function createApp() {
   app.use('/mcp-upload', mcpToolLimiter);
   registerMcpUploadRoute(app, () => supabaseAdmin, `http://127.0.0.1:${PORT}`);
 
+  // Envoi d'e-mail : les pièces jointes arrivent en base64 dans le JSON (25 Mo
+  // décodés au plus, soit environ 34 Mo encodés). Le plafond général de 10 Mo
+  // renvoyait un 413 dès quelques plans PDF. Plafond relevé pour cette seule
+  // route, et seulement pour une requête portant un jeton (le contrôle
+  // d'authentification complet intervient plus bas).
+  const emailBodyParser = express.json({ limit: '40mb' });
+  app.use('/api/send-email', (req, res, next) => {
+    if (!req.headers.authorization) return next();
+    return emailBodyParser(req, res, next);
+  });
+
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
@@ -373,6 +404,24 @@ export async function createApp() {
     // satisfies supabaseAdmin's own internal calls) — see server/localAuthRoutes.ts.
     const { createLocalAuthRouter } = await import('./server/localAuthRoutes');
     app.use('/api/auth', createLocalAuthRouter(supabaseAdmin));
+
+    // IA réservée aux abonnés payants : le poste ne détient aucune clé, ses appels
+    // de modèle sont relayés vers le serveur en ligne qui vérifie l'abonnement et
+    // facture le cabinet (server/desktop/aiRelayClient.ts, routes/desktopAi.ts).
+    // Le solde de crédits rendu par le serveur en ligne est recopié dans la base
+    // locale, que les contrôles de crédit existants continuent de lire.
+    const { createDesktopAiRelay } = await import('./server/desktop/aiRelayClient');
+    const { setLlmRelay } = await import('@zinkh/archioffice-agents/server/llm');
+    const aiRelay = createDesktopAiRelay({
+      onBalance: async (tenantId, balance, billingMode) => {
+        await supabaseAdmin.from('tenants').update({
+          ai_credit_balance_eur_cents: balance,
+          ...(billingMode ? { agent_billing_mode: billingMode } : {}),
+        }).eq('id', tenantId);
+      },
+    });
+    setLlmRelay(aiRelay);
+    desktopAiRelay = aiRelay;
 
     // Mounts the background sync engine (server/cloudSync.ts) and its
     // /api/sync status/trigger routes for the rest of this process's life.
@@ -519,6 +568,8 @@ export async function createApp() {
   // credit the tenant — a plain read-then-write here let exactly that
   // happen (security audit finding).
   async function maybeRefreshMonthlyCredits(tenantId: string, plan: string): Promise<void> {
+    // Poste de bureau : le solde local n'est qu'un miroir du cabinet en ligne.
+    if (process.env.OFFLINE_MODE === 'true') return;
     const included = PLAN_AI_MONTHLY_CREDIT_CENTS[plan] ?? 0;
     await supabaseAdmin.rpc('refresh_monthly_ai_credits', { p_tenant_id: tenantId, p_amount_cents: included });
   }
@@ -533,7 +584,14 @@ export async function createApp() {
   // charges the (small) difference after the fact rather than blocking it.
   const RESERVE_MAX_OUTPUT_TOKENS = 16000;
 
+  // Poste de bureau (OFFLINE_MODE) : l'IA est relayée vers le serveur en ligne,
+  // qui réserve, règle et enregistre les crédits du cabinet (routes/desktopAi.ts).
+  // Les fonctions de crédit ci-dessous n'ont donc rien à débiter localement :
+  // un second débit sur la copie locale serait un double comptage.
+  const billedByCloud = process.env.OFFLINE_MODE === 'true';
+
   async function estimateReserveCents(provider: string, model: string, inputTokens: number, audioInputTokens = 0): Promise<number> {
+    if (billedByCloud) return 0;
     const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
     return priceEurCents(provider, model, inputTokens, RESERVE_MAX_OUTPUT_TOKENS, audioInputTokens);
   }
@@ -548,6 +606,7 @@ export async function createApp() {
   // cover the reservation — the caller must 402 without ever invoking the
   // model.
   async function reserveAiCredit(tenantId: string, estimateCents: number): Promise<boolean> {
+    if (billedByCloud) return true;
     const { data } = await supabaseAdmin.rpc('reserve_ai_credit', { p_tenant_id: tenantId, p_amount_cents: estimateCents });
     return !!data;
   }
@@ -560,6 +619,7 @@ export async function createApp() {
   // gets) — using it here would leave a 1-cent phantom charge on a call
   // that never ran at all.
   async function refundAiCredit(tenantId: string, cents: number): Promise<void> {
+    if (billedByCloud) return;
     await supabaseAdmin.rpc('settle_ai_credit', { p_tenant_id: tenantId, p_delta_cents: cents });
   }
 
@@ -577,6 +637,7 @@ export async function createApp() {
     inputTokens: number; outputTokens: number;
     audioInputTokens?: number;
   }): Promise<{ newBalance: number; costCents: number }> {
+    if (billedByCloud) return { newBalance: 0, costCents: 0 };
     const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
     const audioInputTokens = params.audioInputTokens ?? 0;
     const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens, audioInputTokens);
@@ -612,6 +673,7 @@ export async function createApp() {
     // facturent à un autre tarif que le texte. Absent sur un appel texte.
     audioInputTokens?: number;
   }): Promise<{ newBalance: number; costCents: number }> {
+    if (billedByCloud) return { newBalance: 0, costCents: 0 };
     const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
     const audioInputTokens = params.audioInputTokens ?? 0;
     const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens, audioInputTokens);
@@ -679,7 +741,7 @@ export async function createApp() {
   }
 
   // Storage quota, checked in bytes rather than row count — the "documents"
-  // resource above is unlimited on the pro/enterprise tiers, but storage_mb
+  // resource above is unlimited on every active tier, but storage_mb
   // still caps total upload size on every tier.
   async function checkStorageQuota(tenantId: string, incomingBytes: number): Promise<void> {
     const { plan, is_expired } = await getTenantPlan(tenantId);
@@ -692,7 +754,8 @@ export async function createApp() {
     const usedBytes = await tenantSupabaseStorageBytes(supabaseAdmin, tenantId);
     const limitBytes = limits.storage_mb * 1024 * 1024;
     if (usedBytes + incomingBytes > limitBytes) {
-      const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo). Passez à un plan supérieur.`);
+      const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo pour votre agence). Libérez de l’espace ou augmentez votre stockage.`);
+      err.code = 'STORAGE_QUOTA_EXCEEDED';
       err.status = 402;
       throw err;
     }
@@ -791,7 +854,7 @@ export async function createApp() {
     // navigation — they can't carry our app's JWT. These recover the
     // tenant (and, for Google Calendar, the user) from a one-time state
     // nonce instead (server/oauthState.ts), not from req.user.
-    "/api/zoho/callback", "/api/zoho-books/callback", "/api/google-calendar/callback", "/api/gmail/callback", "/api/outlook/callback",
+    "/api/zoho-sign/callback", "/api/zoho/callback", "/api/zoho-books/callback", "/api/google-calendar/callback", "/api/gmail/callback", "/api/outlook/callback",
     // Called by Ragic itself (external, no JWT) — authenticated via a
     // `secret` query param checked against the tenant's own ragic_api_key
     // inside the handler, not via our session auth. Was missing here, so
@@ -973,6 +1036,9 @@ export async function createApp() {
 
   // Affaire archivée : lecture seule pour tout ce qui s'y rattache. Monté ici,
   // après l'authentification et avant toute route (server/archivedProjectGuard.ts).
+  // Collaborateur externe (confrère invité sur une affaire) : refus par défaut,
+  // seul /api/shared lui est ouvert (server/guestAccessGuard.ts). Avant toute route.
+  app.use("/api", guestAccessGuard({ supabaseAdmin, getTenantId }));
   app.use("/api", archivedProjectGuard({ supabaseAdmin, getTenantId }));
 
   app.get("/api/health", (req, res) => {
@@ -1110,16 +1176,25 @@ export async function createApp() {
   registerReferencesDossierRoutes(app, { supabaseAdmin, getTenantId });
   registerPanneauxRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
+  registerProjectShareRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectShareDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectShareProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectShareChantierRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectShareActProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseNotesRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerProjectArchiveRoutes(app, { supabaseAdmin, getTenantId, getUserName, requireRole, storeBusinessFile, checkQuota });
   registerChantierDecoupageRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectNoticeRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerDiagReportRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerMailAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerProjectStakeholdersRoutes(app, { supabaseAdmin, getTenantId });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
   registerObservationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage });
+  // Avant les routes de réunions et d'affaires : elle y accroche le ménage des fichiers de croquis à la suppression.
+  registerCroquisRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });
+  registerMeetingNotesAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerEmailTemplateRoutes(app, { supabaseAdmin, getTenantId });
@@ -1131,6 +1206,7 @@ export async function createApp() {
   registerMessagingRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
   registerContactSyncRoutes(app, { supabaseAdmin, getTenantId });
   registerGeoProxyRoutes(app);
+  registerGeoTravelRoutes(app);
   registerMafRoutes(app, { supabaseAdmin, getTenantId });
   registerTimeTrackingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin });
   registerLeaveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin, businessDaysBetween });
@@ -1146,6 +1222,7 @@ export async function createApp() {
   // Espace de dépôt des offres (ACT) : réglages et traitement côté cabinet, puis
   // portail public par jeton (préfixe /api/public, exempté de l'authentification).
   registerConsultationDepotRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan });
+  registerOffresRecuesRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan });
   registerConsultationDepotPublicRoutes(app, { supabaseAdmin, getTenantPlan });
   registerProposalFeasibilityRoutes(app, { supabaseAdmin, getTenantId, loadSiteData: loadFeasibilitySiteData });
   registerProposalFeasibilityAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents, loadSiteData: loadFeasibilitySiteData });
@@ -1162,6 +1239,7 @@ export async function createApp() {
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerMarcheSousTraitantsRoutes(app, { supabaseAdmin, getTenantId });
+  registerLotIntervenantsRoutes(app, { supabaseAdmin, getTenantId });
   registerTravauxModificatifsRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMarchesSubsequentsRoutes(app, { supabaseAdmin, getTenantId });
   registerAccordCadreConsultationsRoutes(app, { supabaseAdmin, getTenantId });
@@ -1184,6 +1262,9 @@ export async function createApp() {
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
   registerTenantMembershipRoutes(app, { supabaseAdmin, getTenantId });
+  registerProposalFollowUpRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerSignatureRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerZohoSignRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -1202,6 +1283,7 @@ export async function createApp() {
   registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, relocateBusinessFile, requireRole });
   registerDocumentFolderRoutes(app, { supabaseAdmin, getTenantId });
   // Synchronisation desktop (Explorateur Windows, Finder macOS) : /api/desktop/v1.
+  registerDesktopAiRoutes(app, { supabaseAdmin, getTenantId, maybeRefreshMonthlyCredits, reserveAiCredit, refundAiCredit, estimateReserveCents, settleAiCredit });
   registerDesktopSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, getSystemRole });
   // Client de bureau seulement (répond 404 ailleurs) : ouverture d'un fichier dans
   // l'Explorateur et migration vers l'arborescence lisible.
@@ -1432,6 +1514,10 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
     if (process.env.OFFLINE_MODE === 'true') {
       ensureStorageBuckets();
+      // Fournisseur actif et solde du cabinet en ligne, puis à intervalle régulier
+      // (une recharge faite sur le site doit se retrouver ici sans nouvel appel IA).
+      void desktopAiRelay?.refreshCapabilities();
+      setInterval(() => void desktopAiRelay?.refreshCapabilities(), 10 * 60 * 1000).unref();
     }
     // Veille RSS des appels d'offres — sondage périodique (server/tenderRssPoller.ts).
     // Démarré ici (pas plus tôt) car en mode offline, supabaseAdmin boucle sur le
@@ -1460,6 +1546,9 @@ async function startServer() {
     // (atelier DOE de l'onglet AOR, server/doe/relances.ts).
     startDoeReminders(supabaseAdmin);
     startReserveReminders(supabaseAdmin);
+    // Rappel téléphonique des propositions sans réponse après un mois : appel sortant + tâche
+    // (server/proposalCallbacks.ts).
+    startProposalCallbacks(supabaseAdmin);
     // Alertes métier des agents (situations à signaler sans qu'on les
     // demande : études sans contrat signé, facture échue, réserves non
     // levées...) et exécutions planifiées d'agents.

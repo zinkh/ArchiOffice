@@ -9,11 +9,13 @@ import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { useMailAccounts } from '../../hooks/useMailAccounts';
 import MailComposeModal from '../MailComposeModal';
 import { formaterDateHeure } from '../../lib/depotAffichage';
+import { destinatairesEntreprise } from '../../lib/actEntreprises';
 
 export interface EntrepriseAInviter {
   id: string;
   nom: string;
   email?: string;
+  emails_supplementaires?: string;
   contact_id?: string;
   lots_ids: string[];
 }
@@ -111,7 +113,7 @@ export default function InviterDepotDialog({ projectId, projectName, entreprise,
     return (
       <MailComposeModal
         accounts={accounts}
-        initial={{ to: entreprise.email || '', subject: `Remise de votre offre : ${projectName}`, body: corps }}
+        initial={{ to: destinatairesEntreprise(entreprise).join(', '), subject: `Remise de votre offre : ${projectName}`, body: corps }}
         onSent={() => setMail(false)}
         onClose={() => setMail(false)}
       />

@@ -10,6 +10,7 @@ import { requestGoogleAccessToken } from '../lib/googleAuth';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { ContactFormFields } from '../components/ContactFormFields';
 import { ensureContactCategory } from '../lib/contactCategories';
+import { legacyPhoneSlot, PHONE_SLOTS } from '../lib/contactPhones';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
@@ -267,7 +268,17 @@ export default function Contacts() {
   };
 
   const handleEdit = (contact: Contact) => {
-    setNewContact(contact);
+    // Fiche ancienne ou importée dont seule `email` est renseignée : le tableau l'affiche, le
+    // formulaire ne lit que les champs par type. On la présente comme adresse de travail ;
+    // rien n'est écrit tant qu'on n'enregistre pas, et `email` reste égal à `email_work`.
+    const legacyOnly = !!contact.email?.trim() && !contact.email_work && !contact.email_home && !contact.email_other;
+    const legacyPhoneOnly = !!contact.phone?.trim() && PHONE_SLOTS.every(slot => !contact[slot]);
+    setNewContact({
+      ...contact,
+      ...(legacyOnly ? { email_work: contact.email } : {}),
+      // Même chose pour le téléphone : mobile ou fixe selon la forme du numéro (06/07 ou non).
+      ...(legacyPhoneOnly ? { [legacyPhoneSlot(contact.phone)]: contact.phone } : {}),
+    });
     setIsEditing(true);
     setEditingId(contact.id);
     setIsModalOpen(true);
@@ -316,14 +327,31 @@ export default function Contacts() {
     }
     setSyncingCardDav(true);
     try {
-      const result = await apiFetch<{ imported: number; updated: number }>('/api/sync/carddav', {
+      const result = await apiFetch<{
+        imported: number; updated: number;
+        pushedCreated: number; pushedUpdated: number; pushConflicts: number; pushFailed: number; pushRemaining: number;
+        pushUnavailable: boolean;
+      }>('/api/sync/carddav', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: cardDavUrl, username: cardDavUser, password: cardDavPass })
       });
       fetchContacts();
       setCardDavModal(false);
-      showToast(`CardDAV : ${result.imported} importés, ${result.updated} mis à jour`);
+      // Les compteurs d'envoi n'apparaissent que si des catégories sont cochées dans
+      // Réglages › CardDAV : sans réglage le message reste celui d'avant.
+      const pushed = result.pushedCreated + result.pushedUpdated;
+      const notes = [
+        pushed > 0 ? `${pushed} envoyés vers CardDAV` : '',
+        result.pushConflicts > 0 ? `${result.pushConflicts} conflit(s) laissé(s) en l'état` : '',
+        result.pushFailed > 0 ? `${result.pushFailed} envoi(s) en échec` : '',
+        result.pushRemaining > 0 ? `${result.pushRemaining} en attente de la prochaine synchronisation` : '',
+      ].filter(Boolean);
+      const pushPart = notes.length > 0 ? `, ${notes.join(', ')}` : '';
+      showToast(`CardDAV : ${result.imported} importés, ${result.updated} mis à jour${pushPart}`);
+      if (result.pushUnavailable) {
+        showToast('Envoi CardDAV indisponible : la mise à jour de la base de données n\'est pas encore appliquée.', 'error');
+      }
     } catch (err: any) {
       showToast(err?.message || 'Erreur de synchronisation CardDAV', 'error');
     } finally {
@@ -867,6 +895,7 @@ export default function Contacts() {
       {view === 'detail' && (
         <ContactsDetailView
           contacts={filteredAndSortedContacts}
+          allContacts={contacts}
           projects={projects}
           canSelect={canMerge}
           selectedIds={selectedIds}

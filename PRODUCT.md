@@ -8,6 +8,8 @@ web
 
 (Application React servie en web, installable en PWA, et emballée dans un client de bureau Electron pour le travail hors ligne. Le client Electron reprend la même interface web : il ne change pas le langage visuel. Le sous-paquet `packages/archioffice-agents` fournit le chat des agents IA et fait partie du même produit, il n'a pas de fiche produit distincte.)
 
+Une extension native Windows x64, `native/windows-shell`, ajoute le prototype **Ce PC → ArchiOffice Drive**. Cette vue Shell est distincte du lecteur A: et du fournisseur CFAPI ; elle adapte la consultation documentaire aux contrôles Windows, sans modifier l'interface web du client Electron.
+
 ## Users
 
 Tous les rôles d'un cabinet d'architecture français, principalement de petite taille :
@@ -46,6 +48,14 @@ Réunir dans un seul outil toute la vie d'une affaire d'architecture, de la prop
 - **Offres** : Starter, Pro et Enterprise (`src/lib/billing.ts`) ; certaines fonctions IA sont réservées à Enterprise.
 - **Non décidé** : l'identité visuelle de l'application elle-même (base Tabler actuelle) n'a pas été confirmée comme contrainte durable.
 
+### Extension Windows : périmètre de l'étape 1
+
+- **Prérequis et parcours.** Le client ArchiOffice reste ouvert, A: est actif et seuls les projets déjà montés sont visibles. Une vue native à trois volets réunit l'arbre projets/phases, le tableau documentaire et les propriétés en lecture seule. L'arbre métier appartient à cette vue personnalisée ; les projets ne sont pas énumérés comme sous-dossiers dans le volet standard de Windows.
+- **Une seule pièce de travail.** « Ouvrir » utilise un identifiant opaque pour retrouver le fichier physique canonique de A:, sans seconde copie. « Ouvrir dans ArchiOffice » rejoint Documents sur le projet et met en évidence la ligne après vérification de sa présence dans les données chargées.
+- **Actualisation discrète.** Le catalogue local est relu toutes les cinq secondes ; une réponse identique laisse la vue en place. En cas de changement, les identifiants stables servent à retrouver sélection et branches repliées, et les positions de défilement sont conservées. L'enrichissement métier, sans téléchargement, se renouvelle au plus une fois par minute et seulement pour la version du manifeste monté. La mise à jour des fichiers de A: reste une commande distincte existante.
+- **Frontière de confiance.** Le composant COM ne réalise aucun appel HTTP et ne reçoit aucun jeton cloud. Le client garde les contrôles d'identité, de cabinet, de poste et de génération ; les échanges locaux portent des identifiants et des métadonnées d'affichage. Le détail technique et les procédures d'installation restent dans `native/windows-shell/README.md`.
+- **Hors périmètre.** Aucun aperçu PDF, recherche avancée, édition des propriétés, classement, résolution de conflits ni déploiement automatique de la version de test. Les limites du montage restent dix projets, cent fichiers par projet et cinquante Mio par fichier.
+
 ## Brand Commitments
 
 - Nom du produit : **ArchiOffice**.
@@ -57,7 +67,9 @@ Réunir dans un seul outil toute la vie d'une affaire d'architecture, de la prop
 - Icônes de l'application : `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`, favicons.
 - Page d'accueil existante : `src/pages/Landing.tsx`.
 - Documentation fonctionnelle : `README.md`, `ROADMAP.md`, `API.md`, `CLAUDE.md`.
-- **Absents, à ne pas inventer** : aucune capture d'écran, aucun témoignage client, aucun chiffre d'usage, aucune étude de cas, aucun logo de client ni article de presse.
+- **Prototype Windows** : le workflow exerce la vraie classe COM dans un hôte `IShellBrowser`, avec les contrôles Win32, le broker et des fichiers synthétiques. Il vérifie l'ouverture canonique, le lien applicatif, l'invalidation d'identité, les noms MSAA, Tab/Maj+Tab, une fenêtre étroite et un changement de DPI simulé. Ce résultat ne vaut pas recette de `explorer.exe` sur un poste de travail ni session manuelle Narrateur.
+- **Références visuelles Windows** : les captures du workflow (`shell-prototype.png`, `shell-prototype-narrow.png`, `shell-prototype-dpi150.png`) documentent le prototype natif. La maquette conceptuelle indique une direction à long terme, sans attester la livraison de son périmètre complet.
+- **Absents, à ne pas inventer** : aucun témoignage client, aucun chiffre d'usage, aucune étude de cas, aucun logo de client ni article de presse.
 
 ## Product Principles
 
@@ -71,3 +83,5 @@ Réunir dans un seul outil toute la vie d'une affaire d'architecture, de la prop
 
 - Usage en extérieur et d'une main sur chantier : cibles tactiles confortables, lisibilité en plein jour.
 - Préférences système déjà respectées dans l'application : réduction des animations, réduction de la transparence, contraste renforcé, tailles de texte en `rem` avec 11 px minimum (voir `CLAUDE.md`, « Mouvement, gestes et préférences d'accessibilité »).
+
+- **Extension Windows** : contrôles natifs avec noms accessibles MSAA, parcours Tab/Maj+Tab et géométrie, polices et colonnes adaptées au DPI. Sous 850 unités logiques, un bouton alterne entre documents et propriétés. La recette dans Explorer sur un poste de travail et une vérification manuelle Narrateur restent à effectuer.

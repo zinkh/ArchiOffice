@@ -1,4 +1,4 @@
-import type { Project, Task, TeamMember } from '../types';
+import type { Project, TeamMember } from '../types';
 import {
   addDays,
   asArray,
@@ -8,11 +8,15 @@ import {
   inclusiveDays,
   isoDay,
   planningXmlBuilder,
+  type PlanningXmlOptions,
+  type PlanningXmlTask,
   type ImportedPlanningTask,
   type ParsedPlanningXml,
 } from './projectPlanningXmlShared';
 
-function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Array<{ predecessor: string; successor: string }>) {
+type Edge = { predecessor: string; successor: string; lag: number };
+
+function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Edge[], parentId?: string) {
   for (const node of nodes) {
     const id = asText(node?.['@_id'] ?? node?.id).trim();
     const title = asText(node?.['@_name'] ?? node?.name).trim();
@@ -20,6 +24,7 @@ function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Array<{ 
 
     const start = isoDay(node?.['@_start'] ?? node?.start);
     const duration = Math.max(1, Number(node?.['@_duration'] ?? node?.duration ?? 1));
+    const children = asArray(node?.task);
     out.push({
       sourceId: id,
       title,
@@ -29,22 +34,25 @@ function collectTasks(nodes: any[], out: ImportedPlanningTask[], edges: Array<{ 
       progress: clampProgress(node?.['@_complete'] ?? node?.complete),
       dependencies: [],
       resourceNames: [],
-      milestone: asText(node?.['@_milestone']).toLowerCase() === 'true',
+      milestone: asText(node?.['@_milestone'] ?? node?.['@_meeting']).toLowerCase() === 'true',
+      ...(children.length ? { summary: true } : {}),
+      ...(parentId ? { parentSourceId: parentId } : {}),
     });
 
     for (const dep of asArray(node?.depend)) {
       const successor = asText((dep as any)?.['@_id'] ?? (dep as any)?.id).trim();
-      if (successor) edges.push({ predecessor: id, successor });
+      const lag = Number((dep as any)?.['@_difference']);
+      if (successor) edges.push({ predecessor: id, successor, lag: Number.isFinite(lag) && lag > 0 ? Math.round(lag) : 0 });
     }
 
-    collectTasks(asArray(node?.task), out, edges);
+    collectTasks(children, out, edges, id);
   }
 }
 
 export function parseGanttProject(root: any): ParsedPlanningXml {
   const project = root.project;
   const tasks: ImportedPlanningTask[] = [];
-  const edges: Array<{ predecessor: string; successor: string }> = [];
+  const edges: Edge[] = [];
   collectTasks(asArray(project?.tasks?.task), tasks, edges);
 
   const byId = new Map(tasks.map(task => [task.sourceId, task]));
@@ -52,6 +60,7 @@ export function parseGanttProject(root: any): ParsedPlanningXml {
     const successor = byId.get(edge.successor);
     if (successor && !successor.dependencies.includes(edge.predecessor)) {
       successor.dependencies.push(edge.predecessor);
+      if (edge.lag > 0) successor.lagDays = { ...successor.lagDays, [edge.predecessor]: edge.lag };
     }
   }
 
@@ -77,20 +86,36 @@ export function parseGanttProject(root: any): ParsedPlanningXml {
   };
 }
 
-export function exportGanttProjectXml(project: Project, tasks: Task[], team: TeamMember[] = []): string {
+export function exportGanttProjectXml(project: Project, tasks: PlanningXmlTask[], team: TeamMember[] = [], options: PlanningXmlOptions = {}): string {
   const taskId = new Map(tasks.map((task, index) => [task.id, String(index + 1)]));
   const members = assignedMembers(tasks, team);
   const resourceId = new Map(members.map((member, index) => [member.id, String(index + 1)]));
-  const successors = new Map<string, string[]>();
+  const successors = new Map<string, { id: string; lag: number }[]>();
   for (const task of tasks) {
     for (const predecessor of task.dependencies || []) {
       if (!taskId.has(predecessor)) continue;
       const list = successors.get(predecessor) || [];
-      list.push(task.id);
+      list.push({ id: task.id, lag: task.xmlLags?.[predecessor] ?? 0 });
       successors.set(predecessor, list);
     }
   }
 
+  const nodes = tasks.map(task => ({
+    '@_id': taskId.get(task.id),
+    '@_name': task.title,
+    '@_color': task.xmlColor ?? '#8b5cf6',
+    '@_start': task.start_date,
+    '@_milestone': task.xmlMilestone === true ? 'true' : 'false',
+    ...(task.xmlMilestone === true ? { '@_meeting': 'true' } : {}),
+    '@_duration': String(task.xmlMilestone ? 0 : inclusiveDays(task.start_date, task.end_date)),
+    '@_complete': String(task.progress || 0),
+    '@_expand': 'true',
+    ...(task.description ? { notes: task.description } : {}),
+    ...(successors.get(task.id)?.length ? {
+      depend: successors.get(task.id)!.map(s => ({ '@_id': taskId.get(s.id), '@_type': '2', '@_difference': String(s.lag), '@_hardness': 'Strong' })),
+    } : {}),
+        }));
+  const nested = (parent?: string): any[] => tasks.flatMap((task, i) => task.xmlParentId === parent ? [{ ...nodes[i], task: nested(task.id) }] : []);
   const xml = {
     project: {
       '@_name': project.name,
@@ -98,25 +123,14 @@ export function exportGanttProjectXml(project: Project, tasks: Task[], team: Tea
       '@_version': '3.3',
       '@_view-date': project.start_date,
       '@_date-format': 'yyyy-MM-dd',
+      ...(options.calendarDays ? { calendars: { 'day-types': {
+        'day-type': [{ '@_id': '0' }, { '@_id': '1' }],
+        'default-week': { '@_id': '1', '@_name': 'Calendrier chantier', '@_sun': '0', '@_mon': '0', '@_tue': '0', '@_wed': '0', '@_thu': '0', '@_fri': '0', '@_sat': '0' },
+        'only-show-weekends': { '@_value': 'false' }, 'overriden-day-types': {}, days: {},
+      } } } : {}),
       tasks: {
-        task: tasks.map(task => ({
-          '@_id': taskId.get(task.id),
-          '@_name': task.title,
-          '@_color': '#8b5cf6',
-          '@_start': task.start_date,
-          '@_duration': String(inclusiveDays(task.start_date, task.end_date)),
-          '@_complete': String(task.progress || 0),
-          '@_expand': 'true',
-          ...(task.description ? { notes: task.description } : {}),
-          ...(successors.get(task.id)?.length ? {
-            depend: successors.get(task.id)!.map(successorId => ({
-              '@_id': taskId.get(successorId),
-              '@_type': '2',
-              '@_difference': '0',
-              '@_hardness': 'Strong',
-            })),
-          } : {}),
-        })),
+        ...(options.calendarDays ? { '@_empty-milestones': 'true' } : {}),
+        task: nested(),
       },
       resources: {
         resource: members.map(member => ({

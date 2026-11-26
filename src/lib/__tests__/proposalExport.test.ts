@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   formatCurrency, formatPercent, buildDefaultTemplate, loadStoredTemplate,
-  mapProposalToPdfData, planifierCalendrier, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS,
+  mapProposalToPdfData, planifierCalendrier, planifierCalendrierParTranches, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS,
 } from '../proposalExport';
 import type { Proposal } from '../../types';
 
@@ -44,9 +44,9 @@ describe('modèle : réglages de mise en page', () => {
   beforeEach(() => { vi.stubGlobal('localStorage', fakeLocalStorage()); });
   afterEach(() => { vi.unstubAllGlobals(); });
 
-  it("garde les sauts de page d'origine et compacte les tableaux par défaut", () => {
+  it('enchaîne les sections sans saut de page et compacte les tableaux par défaut', () => {
     const { layout } = buildDefaultTemplate();
-    expect(layout).toEqual({ sectionBreaks: true, tableDensity: 'compact', cotraitantIdentity: true });
+    expect(layout).toEqual({ sectionBreaks: false, tableDensity: 'compact', cotraitantIdentity: true });
   });
 
   it('complète un modèle déjà enregistré qui ne connaît pas encore les réglages', () => {
@@ -60,9 +60,9 @@ describe('modèle : réglages de mise en page', () => {
 
   it('respecte les réglages enregistrés et complète seulement ceux qui manquent', () => {
     vi.stubGlobal('localStorage', fakeLocalStorage({
-      proposalTemplate: JSON.stringify({ layout: { sectionBreaks: false } }),
+      proposalTemplate: JSON.stringify({ layout: { sectionBreaks: true } }),
     }));
-    expect(loadStoredTemplate().layout).toEqual({ sectionBreaks: false, tableDensity: 'compact', cotraitantIdentity: true });
+    expect(loadStoredTemplate().layout).toEqual({ sectionBreaks: true, tableDensity: 'compact', cotraitantIdentity: true });
   });
 
   it('rend un modèle par défaut si le stockage est illisible', () => {
@@ -171,5 +171,64 @@ describe('mapProposalToPdfData : cotraitants', () => {
     const { cotraitants } = mapProposalToPdfData(proposal, {});
     expect(cotraitants[1].contactId).toBeUndefined();
     expect(cotraitants[1].contact).toBe('');
+  });
+});
+
+describe('planifierCalendrier : réglages manuels', () => {
+  const missions = [
+    { id: 'esquisse', designation: 'Esquisse' },
+    { id: 'aps', designation: 'A.P.S.' },
+    { id: 'apd', designation: 'A.P.D.' },
+  ];
+  it('une durée modifiée décale les missions suivantes', () => {
+    const items = planifierCalendrier(missions, 15, { esquisse: { duree: 30 } });
+    expect(items.map(i => [i.debutJours, i.dureeJours])).toEqual([[0, 30], [30, 15], [45, 15]]);
+  });
+  it('un début imposé détache la mission et la suite repart de sa fin', () => {
+    const items = planifierCalendrier(missions, 15, { aps: { debut: 40 } });
+    expect(items[1].debutJours).toBe(40);
+    expect(items[1].apres).toBe('');
+    expect(items[2].debutJours).toBe(55);
+    expect(items[2].apres).toBe('c_aps');
+  });
+});
+
+describe('planifierCalendrierParTranches', () => {
+  const tranches = [
+    { id: 'tf', type: 'ferme' as const },
+    { id: 'tc', type: 'conditionnelle' as const },
+  ];
+  const missions = [
+    { id: 'esquisse', designation: 'Esquisse', trancheId: 'tf' },
+    { id: 'aps', designation: 'A.P.S.', trancheId: 'tf' },
+    { id: 'det', designation: 'D.E.T.', trancheId: 'tc' },
+    { id: 'visa', designation: 'VISA', trancheId: 'tc' },
+  ];
+  const par = (items: ReturnType<typeof planifierCalendrierParTranches>, id: string) => items.find(i => i.id === 'c_' + id)!;
+
+  it('sans tranches (ou une seule), donne le planning habituel', () => {
+    expect(planifierCalendrierParTranches(missions, [])).toEqual(planifierCalendrier(missions));
+    expect(planifierCalendrierParTranches(missions, [tranches[0]])).toEqual(planifierCalendrier(missions));
+  });
+
+  it('démarre la conditionnelle à la fin de la ferme, phases parallèles comprises', () => {
+    const items = planifierCalendrierParTranches(missions, tranches);
+    expect(par(items, 'aps').debutJours + par(items, 'aps').dureeJours).toBe(30);
+    expect(par(items, 'det').debutJours).toBe(30);
+    expect(par(items, 'det').apres).toBe('c_aps');
+    expect(par(items, 'visa').debutJours).toBe(30);
+    expect(par(items, 'det').trancheId).toBe('tc');
+    expect(par(items, 'esquisse').trancheId).toBe('tf');
+  });
+
+  it('garde un jour de début réglé à la main absolu', () => {
+    const items = planifierCalendrierParTranches(missions, tranches, 15, { det: { debut: 90 } });
+    expect(par(items, 'det').debutJours).toBe(90);
+    expect(par(items, 'det').apres).toBe('');
+  });
+
+  it('rattache une mission à tranche inconnue à la tranche ferme', () => {
+    const items = planifierCalendrierParTranches([{ id: 'x', designation: 'Étude', trancheId: 'fantome' }], tranches);
+    expect(par(items, 'x').trancheId).toBe('tf');
   });
 });

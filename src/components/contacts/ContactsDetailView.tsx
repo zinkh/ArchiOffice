@@ -9,12 +9,18 @@ import { fetchJson } from '../../lib/api';
 import { contactName } from '../../lib/contactMerge';
 import { missingBuyerMentions } from '../../lib/invoiceLegalMentions';
 import CorrespondenceTab from '../CorrespondenceTab';
+import { CompanyPicker } from './CompanyPicker';
+
+/** Affaire liée à un contact, avec le ou les rôles qu'il y tient (lot, cotraitant, maître d'ouvrage...). */
+interface LinkedProject { id: string; name: string; roles: string[] }
 
 type Tab = 'overview' | 'projects' | 'billing' | 'exchanges';
 const TABS: Tab[] = ['overview', 'projects', 'billing', 'exchanges'];
 
 interface Props {
   contacts: Contact[];
+  /** Tous les contacts du cabinet, hors filtres : sert à choisir la société de rattachement. */
+  allContacts?: Contact[];
   projects: Pick<Project, 'id' | 'name' | 'client_id'>[];
   canSelect: boolean;
   selectedIds: string[];
@@ -38,13 +44,19 @@ function Row({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-export function ContactsDetailView({ contacts, projects, canSelect, selectedIds, onToggleSelected, onEdit, onChanged }: Props) {
+// Nom de la personne ; contactName() donne la priorité à la société, ce qui masquait l'interlocuteur.
+const personName = (c: Contact) => [c.first_name, c.last_name].map(s => (s || '').trim()).filter(Boolean).join(' ');
+const displayName = (c: Contact) => personName(c) || contactName(c);
+const isCompanyFiche = (c: Contact) => !!c.company_name && !personName(c);
+
+export function ContactsDetailView({ contacts, allContacts, projects, canSelect, selectedIds, onToggleSelected, onEdit, onChanged }: Props) {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mobileFiche, setMobileFiche] = useState(false);
   const [tab, setTab] = useState<Tab>('overview');
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
   const [saveError, setSaveError] = useState('');
+  const [linked, setLinked] = useState<{ contactId: string; items: LinkedProject[] | null } | null>(null);
 
   // Une fiche reste ouverte tant qu'elle figure dans la liste filtrée ; sinon la première.
   const active = useMemo(
@@ -56,6 +68,19 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
     if (tab !== 'billing' || invoices) return;
     fetchJson('/api/invoices').then(setInvoices).catch(() => setInvoices([]));
   }, [tab, invoices]);
+
+  // Affaires où la fiche (ou sa société, ou ses interlocuteurs) tient un rôle : lot, cotraitant,
+  // intervenant, maître d'ouvrage. Relu à chaque changement de fiche, de rattachement ou d'onglet.
+  const projectsContactId = active?.id;
+  const projectsCompanyId = active?.company_contact_id;
+  useEffect(() => {
+    if (tab !== 'projects' || !projectsContactId) return;
+    let cancelled = false;
+    fetchJson(`/api/contacts/${projectsContactId}/projects`)
+      .then((items: LinkedProject[]) => { if (!cancelled) setLinked({ contactId: projectsContactId, items }); })
+      .catch(() => { if (!cancelled) setLinked({ contactId: projectsContactId, items: null }); });
+    return () => { cancelled = true; };
+  }, [tab, projectsContactId, projectsCompanyId]);
 
   // Écrit seulement les champs de suivi passés ; le serveur les valide.
   const saveRelation = async (id: string, patch: Partial<Pick<Contact, 'company_contact_id' | 'relation_status' | 'relation_reminder_on' | 'relation_reminder_note'>>) => {
@@ -78,11 +103,37 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
     );
   }
 
-  const company = active.company_contact_id ? contacts.find(c => c.id === active.company_contact_id) : undefined;
-  const people = contacts.filter(c => c.company_contact_id === active.id);
-  const companyChoices = contacts.filter(c => c.id !== active.id && !c.company_contact_id && c.company_name && !c.first_name && !c.last_name);
+  const pool = allContacts && allContacts.length ? allContacts : contacts;
+  const company = active.company_contact_id ? pool.find(c => c.id === active.company_contact_id) : undefined;
+  const people = pool.filter(c => c.company_contact_id === active.id);
+  const companyChoices = pool.filter(c => c.id !== active.id && !c.company_contact_id && isCompanyFiche(c));
+  const companyPickerChoices = companyChoices
+    .map(c => ({ id: c.id, name: contactName(c), detail: [c.category, c.city].filter(Boolean).join(' · ') }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  // Crée la société (fiche « Entreprise » sans personne) puis y rattache la fiche ouverte.
+  // Quand le nom est celui déjà saisi sur la fiche, on reprend ses coordonnées.
+  const createAndLinkCompany = async (name: string) => {
+    setSaveError('');
+    const sameAsFiche = name.trim().toLowerCase() === (active.company_name || '').trim().toLowerCase();
+    try {
+      const id = crypto.randomUUID();
+      await fetchJson('/api/contacts', { method: 'POST', body: JSON.stringify({
+        id, company_name: name.trim(), first_name: '', last_name: '', category: 'Entreprise',
+        siret: sameAsFiche ? active.siret || '' : '', address: sameAsFiche ? active.address || '' : '',
+        zip: sameAsFiche ? active.zip || '' : '', city: sameAsFiche ? active.city || '' : '',
+      }) });
+      await fetchJson(`/api/contacts/${active.id}`, { method: 'PUT', body: JSON.stringify({ company_contact_id: id }) });
+      onChanged();
+    } catch (e: any) {
+      setSaveError(e?.message || t('contacts_relation_save_failed'));
+    }
+  };
   const reminderDue = !!active.relation_reminder_on && active.relation_reminder_on <= new Date().toISOString().slice(0, 10);
-  const linkedProjects = projects.filter(p => p.client_id === active.id);
+  // Liens issus du serveur (lot, cotraitant, intervenant, maître d'ouvrage) ; à défaut, le seul maître d'ouvrage connu de la page.
+  const linkedProjects: LinkedProject[] = linked?.contactId === active.id && linked.items
+    ? linked.items
+    : projects.filter(p => p.client_id === active.id).map(p => ({ id: p.id, name: p.name, roles: [] }));
+  const projectsLoading = tab === 'projects' && linked?.contactId !== active.id;
   const linkedInvoices = (invoices || []).filter(i => i.client_id === active.id);
   const missing = missingBuyerMentions(active);
   const email = active.email || active.email_work || active.email_home || '';
@@ -99,9 +150,9 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
             )}
             <button type="button" className="flex-1 min-w-0 text-left pointer-coarse:min-h-11"
               onClick={() => { setActiveId(c.id); setTab('overview'); setMobileFiche(true); }}>
-              <div className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{contactName(c)}</div>
+              <div className="text-sm font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{displayName(c)}</div>
               <div className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>
-                {c.company_name && (c.first_name || c.last_name) ? c.company_name : c.category || c.email || ''}
+                {c.company_name && personName(c) ? c.company_name : c.category || c.email || ''}
               </div>
             </button>
           </li>
@@ -115,10 +166,12 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
           </button>
           <div className="min-w-0 flex-1">
             <h3 className="text-base font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
-              {active.company_name && <IconBuilding size={16} className="inline mr-1.5" style={{ color: 'var(--tblr-muted)' }} />}
-              {contactName(active)}
+              {isCompanyFiche(active)
+                ? <IconBuilding size={16} className="inline mr-1.5" style={{ color: 'var(--tblr-muted)' }} />
+                : <IconUser size={16} className="inline mr-1.5" style={{ color: 'var(--tblr-muted)' }} />}
+              {displayName(active)}
             </h3>
-            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{[active.job_title, active.category].filter(Boolean).join(' · ')}</p>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{[personName(active) ? active.company_name : '', active.job_title, active.category].filter(Boolean).join(' · ')}</p>
           </div>
           <button type="button" onClick={() => onEdit(active)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
@@ -140,7 +193,10 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
           {tab === 'overview' && (
             <div className="space-y-5">
             <section aria-label={t('contacts_relation_title')} className="rounded-md p-3 space-y-3" style={{ border: '1px solid var(--tblr-border)' }}>
-              <h4 className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_relation_title')}</h4>
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_relation_title')}</h4>
+                {active.category && <span className="text-xs px-2 py-0.5 rounded-full" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>{active.category}</span>}
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="text-xs space-y-1 block" style={{ color: 'var(--tblr-muted)' }}>
                   {t('contacts_relation_status')}
@@ -172,7 +228,7 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
                   <ul className="space-y-1">
                     {people.map(c => (
                       <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
-                        <button type="button" className="hover:underline text-left" style={{ color: 'var(--tblr-primary)' }} onClick={() => { setActiveId(c.id); setTab('overview'); }}>{contactName(c)}{c.job_title ? ` · ${c.job_title}` : ''}</button>
+                        <button type="button" className="hover:underline text-left" style={{ color: 'var(--tblr-primary)' }} onClick={() => { setActiveId(c.id); setTab('overview'); }}>{displayName(c)}{c.job_title ? ` · ${c.job_title}` : ''}</button>
                         <button type="button" className="text-xs" style={{ color: 'var(--tblr-muted)' }} onClick={() => saveRelation(c.id, { company_contact_id: null })}>{t('contacts_company_detach')}</button>
                       </li>
                     ))}
@@ -180,14 +236,15 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
                 </>
               ) : null}
               {(active.first_name || active.last_name) && (
-                <label className="text-xs space-y-1 block" style={{ color: 'var(--tblr-muted)' }}>
-                  {t('contacts_company_link')}{company ? ` : ${contactName(company)}` : ''}
-                  <select className="w-full px-2 py-1.5 rounded-md text-sm pointer-coarse:min-h-11" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                    value={active.company_contact_id || ''} onChange={e => saveRelation(active.id, { company_contact_id: e.target.value || null })}>
-                    <option value="">{t('contacts_company_none')}</option>
-                    {companyChoices.map(c => <option key={c.id} value={c.id}>{contactName(c)}</option>)}
-                  </select>
-                </label>
+                <div className="text-xs space-y-1" style={{ color: 'var(--tblr-muted)' }}>
+                  <span className="block">{t('contacts_company_link')}</span>
+                  <CompanyPicker key={active.id}
+                    choices={companyPickerChoices}
+                    value={company ? { id: company.id, name: contactName(company) } : null}
+                    suggestedName={active.company_contact_id ? '' : active.company_name || ''}
+                    onSelect={id => saveRelation(active.id, { company_contact_id: id })}
+                    onCreate={createAndLinkCompany} />
+                </div>
               )}
             </section>
             <dl>
@@ -203,11 +260,18 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
             </div>
           )}
           {tab === 'projects' && (
-            linkedProjects.length === 0
-              ? <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_detail_no_projects')}</p>
-              : <ul className="space-y-1.5">{linkedProjects.map(p => (
-                <li key={p.id}><a className="text-sm hover:underline" style={{ color: 'var(--tblr-primary)' }} href={`/projects/${p.id}`}>{p.name}</a></li>
-              ))}</ul>
+            projectsLoading && linkedProjects.length === 0
+              ? <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>…</p>
+              : linkedProjects.length === 0
+                ? <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_detail_no_projects')}</p>
+                : <ul className="space-y-2">{linkedProjects.map(p => (
+                  <li key={p.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <a className="text-sm hover:underline" style={{ color: 'var(--tblr-primary)' }} href={`/projects/${p.id}`}>{p.name}</a>
+                    {p.roles.map(r => (
+                      <span key={r} className="text-xs px-2 py-0.5 rounded-full" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>{r}</span>
+                    ))}
+                  </li>
+                ))}</ul>
           )}
           {tab === 'billing' && (
             <div className="space-y-4">

@@ -34,6 +34,7 @@ export interface PinnedRequestInit {
   timeoutMs: number;
   /** Caller handles redirects and decides which credentials may follow. */
   redirect?: 'manual';
+  signal?: AbortSignal;
 }
 
 const MAX_REDIRECTS = 3;
@@ -66,12 +67,15 @@ export function resolveRedirect(current: URL, location: string): URL {
 
 function requestOnce(url: URL, address: string, init: PinnedRequestInit): Promise<PinnedResponse> {
   return new Promise((resolve, reject) => {
+    init.signal?.throwIfAborted();
     const family = net.isIPv6(address) ? 6 : 4;
     const headers: Record<string, string> = { ...(init.headers || {}) };
     if (init.body) headers['Content-Length'] = String(init.body.length);
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), init.timeoutMs);
+    const cancel=()=>controller.abort();const cleanup=()=>{clearTimeout(timer);init.signal?.removeEventListener('abort',cancel);};
+    init.signal?.addEventListener('abort',cancel,{once:true});if(init.signal?.aborted)cancel();
 
     const req = https.request(
       {
@@ -91,12 +95,12 @@ function requestOnce(url: URL, address: string, init: PinnedRequestInit): Promis
         },
       },
       (res) => {
-        clearTimeout(timer);
+        clearTimeout(timer);res.once('close',cleanup);res.once('error',()=>{});
         resolve({ status: res.statusCode || 0, headers: res.headers, stream: res });
       },
     );
     req.on('error', (err) => {
-      clearTimeout(timer);
+      cleanup();
       reject(err);
     });
     req.end(init.body);
@@ -111,8 +115,10 @@ function requestOnce(url: URL, address: string, init: PinnedRequestInit): Promis
 export async function pinnedRequest(rawUrl: string, init: PinnedRequestInit): Promise<PinnedResponse> {
   let current = rawUrl;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    init.signal?.throwIfAborted();
     const { url, addresses } = await resolvePublicUrl(current, { requireHttps: true });
 
+    init.signal?.throwIfAborted();
     let res: PinnedResponse | null = null;
     let lastError: unknown = null;
     for (const address of addresses) {

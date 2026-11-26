@@ -1,6 +1,7 @@
 import React, { Fragment, useState, useEffect, useMemo, ChangeEvent, useRef, useId, type Dispatch, type SetStateAction } from 'react';
 import { MISSION_PHASES, MISSION_ID_TO_PHASE } from '../lib/profitability';
 import ProjectProfitability from '../components/projectDetail/ProjectProfitability';
+import ProjectSharesPanel from '../components/ProjectSharesPanel';
 import CreatableSelect from 'react-select/creatable';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
@@ -106,6 +107,7 @@ import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import ChantierModule from '../components/ChantierModule';
 import MilestoneGantt from '../components/MilestoneGantt';
+import { changedMilestones, persistMilestones } from '../lib/milestoneSchedule';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedPhoneCalls from '../components/phoneCalls/LinkedPhoneCalls';
 import ProjectDocuments from './Documents';
@@ -122,6 +124,7 @@ import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 import { InspirationBoards } from '../components/projectDetail/InspirationBoards';
 import { StudyRequestTab } from '../components/projectDetail/StudyRequestTab';
+import { DiagTab } from '../components/projectDetail/DiagTab';
 import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
 import { attribuerNumeros, cleEntrepriseLot, entreprisesDistinctes, formatNumeroOs, numeroHeriteOs, resumeNumeros } from '../lib/numerotationEntreprise';
 import TravauxModificatifsTab from '../components/chantier/TravauxModificatifsTab';
@@ -424,6 +427,15 @@ export default function ProjectDetail() {
     return isProjectTab(tab) ? tab : DEFAULT_PROJECT_TAB;
   });
   const [showFullEditor, setShowFullEditor] = useState(false);
+  // Les deux rangées d'onglets (familles puis missions) se replient pour laisser la place au contenu ; le choix est mémorisé.
+  const [ongletsReplies, setOngletsReplies] = useState<boolean>(() => {
+    try { return window.localStorage.getItem('projet:onglets-replies') === '1'; } catch { return false; }
+  });
+  const basculerOnglets = () => setOngletsReplies(v => {
+    const next = !v;
+    try { window.localStorage.setItem('projet:onglets-replies', next ? '1' : '0'); } catch { /* stockage indisponible : le choix vaut pour cette visite */ }
+    return next;
+  });
 
   // L'avancement se déduit des jalons cochés dès que l'affaire en a.
   useEffect(() => {
@@ -2001,16 +2013,37 @@ export default function ProjectDetail() {
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div className="shrink-0 px-4 pt-3">
-        <ProjectTabBar
-          panelId={projectPanelId}
-          activeTab={activeTab}
-          onChange={setActiveTab}
-          isChantier={!!project.is_chantier}
-          chantierTabState={chantierTabState}
-          mobileTrailing={<AutosaveIndicator status={autosaveStatus} onRetry={() => { void saveNow(); }} />}
-        />
+      {/* Tab bar : repliable au bureau (sur téléphone, le sélecteur reste toujours là) */}
+      <div className="shrink-0 px-4 pt-3 flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div id="onglets-affaire" className={ongletsReplies ? 'md:hidden' : undefined}>
+            <ProjectTabBar
+              panelId={projectPanelId}
+              activeTab={activeTab}
+              onChange={setActiveTab}
+              isChantier={!!project.is_chantier}
+              chantierTabState={chantierTabState}
+              mobileTrailing={<AutosaveIndicator status={autosaveStatus} onRetry={() => { void saveNow(); }} />}
+            />
+          </div>
+          {ongletsReplies && (
+            <p className="hidden md:block text-sm font-semibold py-1.5" style={{ color: 'var(--tblr-muted)' }}>
+              {t(`project_tab_title_${activeTab.toLowerCase()}`)}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={basculerOnglets}
+          aria-expanded={!ongletsReplies}
+          aria-controls="onglets-affaire"
+          aria-label={t(ongletsReplies ? 'project_tabs_expand' : 'project_tabs_collapse')}
+          title={t(ongletsReplies ? 'project_tabs_expand' : 'project_tabs_collapse')}
+          className="hidden md:inline-flex shrink-0 w-8 h-8 items-center justify-center rounded-lg border transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+          style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
+        >
+          {ongletsReplies ? <IconChevronDown size={16} aria-hidden /> : <IconChevronUp size={16} aria-hidden />}
+        </button>
       </div>
 
       <div id={projectPanelId} role="tabpanel" aria-label={t(`project_tab_title_${activeTab.toLowerCase()}`)} tabIndex={0} className={`flex-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] ${activeTab === 'INFOS' && !showFullEditor ? 'xl:min-h-0 xl:overflow-hidden' : 'lg:min-h-0 lg:overflow-hidden'}`}>
@@ -2051,8 +2084,8 @@ export default function ProjectDetail() {
             onGoToInvoices={() => setActiveTab('HONOS')}
           />
         ) : (
-          <div className={`lg:h-full overflow-visible lg:overflow-y-auto ${(activeTab === 'PRO' || activeTab === 'INSPIRATION') ? 'p-0' : 'p-4 sm:p-6'}`}>
-            <div className={activeTab === 'PRO' || activeTab === 'INSPIRATION' || activeTab === 'DET' ? 'w-full space-y-8' : 'max-w-6xl mx-auto space-y-8 pb-20'}>
+          <div className={`lg:h-full overflow-visible ${activeTab === 'PRO' ? 'lg:overflow-hidden' : 'lg:overflow-y-auto'} ${(activeTab === 'PRO' || activeTab === 'INSPIRATION') ? 'p-0' : 'p-4 sm:p-6'}`}>
+            <div className={activeTab === 'PRO' ? 'w-full lg:h-full' : activeTab === 'INSPIRATION' || activeTab === 'DET' || activeTab === 'AOR' || activeTab === 'GPA' || activeTab === 'ACT' ? 'w-full space-y-8 pb-20' : 'max-w-6xl mx-auto space-y-8 pb-20'}>
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="flex items-center justify-between -mt-2 mb-2">
                 <button
@@ -2074,7 +2107,7 @@ export default function ProjectDetail() {
                     title={t('projectdetail_contract_title')}
                     description={t('projectdetail_contract_desc')}
                     action={
-                      <Link to="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
+                      <Link to={contratHonoraires?.id ? `/contrats?open=${encodeURIComponent(contratHonoraires.id)}` : '/contrats'} className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} />
                         {t('projectdetail_contract_manage')}
                       </Link>
@@ -2208,7 +2241,7 @@ export default function ProjectDetail() {
                           {verrouille && (
                             <p className="text-xs text-[var(--tblr-muted)]">
                               {contratHonoraires.numero ? t('projectdetail_fees_locked_num', { num: contratHonoraires.numero }) : t('projectdetail_fees_locked')}
-                              {' '}<Link to="/contrats" className="underline hover:text-[var(--tblr-primary)]">{t('projectdetail_fees_locked_link')}</Link>
+                              {' '}<Link to={contratHonoraires?.id ? `/contrats?open=${encodeURIComponent(contratHonoraires.id)}` : '/contrats'} className="underline hover:text-[var(--tblr-primary)]">{t('projectdetail_fees_locked_link')}</Link>
                             </p>
                           )}
                         </div>
@@ -3408,10 +3441,10 @@ export default function ProjectDetail() {
               </div>
             )}
             {activeTab === 'INSPIRATION' && <InspirationBoards projectId={id!} projectName={project?.name} projectCode={project?.project_code || project?.reference || undefined} />}
-            {activeTab === 'DIAG' && project && <StudyRequestTab kind="geotechnique" project={project} />}
+            {activeTab === 'DIAG' && project && <DiagTab project={project} />}
             {activeTab === 'CT' && project && <StudyRequestTab kind="controle_technique" project={project} />}
             {activeTab === 'CSPS' && project && <StudyRequestTab kind="csps" project={project} />}
-            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} contexte={project ? {
+            {activeTab === 'PRO' && <div className="pt-4 lg:h-full"><ProTab projectId={id!} projectName={project?.name} projectImageUrl={project?.image_url} contexte={project ? {
               operation: project.name,
               reference: project.project_code,
               adresse: [project.adresse_terrain || project.address, project.cp_ville_terrain].filter(Boolean).join(', ') || undefined,
@@ -3737,17 +3770,12 @@ export default function ProjectDetail() {
                               startDate={new Date(project.start_date)}
                               endDate={new Date(project.end_date)}
                               onUpdate={(updated) => {
+                                const changed = changedMilestones(milestones, updated);
                                 setMilestones(updated);
-                                const changed = updated.find(m => {
-                                  const orig = milestones.find(o => o.id === m.id);
-                                  return orig && (orig.duration_days !== m.duration_days || JSON.stringify(orig.dependencies) !== JSON.stringify(m.dependencies));
-                                });
-                                if (changed) {
-                                  fetch(`/api/milestones/${changed.id}`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(changed),
-                                  }).catch(console.error);
+                                if (changed.length > 0) {
+                                  persistMilestones(changed).then(failed => {
+                                    if (failed.length > 0) console.error('Milestones save failed:', failed.map(m => m.id));
+                                  });
                                 }
                               }}
                             />
@@ -4226,6 +4254,9 @@ export default function ProjectDetail() {
                     )}
                   </div>
                 </div>
+
+                {/* Partage avec un confrère : réservé aux administrateurs et managers (le panneau se masque sinon) */}
+                {id && <ProjectSharesPanel projectId={id} />}
 
                 {/* Permits Section */}
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
@@ -4806,6 +4837,7 @@ export default function ProjectDetail() {
                 <ACTModule
                   projectId={id!}
                   projectName={project.name}
+                  projectImageUrl={project.image_url}
                   lots={project.lots_list || []}
                   contacts={contacts}
                   isPublicClient={!!project.is_public_client}
@@ -5573,6 +5605,7 @@ export default function ProjectDetail() {
                                             'Quitus Transmis': 'bg-green-200 text-green-800',
                                             "Refusée par l'entreprise": 'bg-orange-100 text-orange-700',
                                             'Levée refusée par le MOE': 'bg-purple-100 text-purple-700',
+                                            'Pour mémoire': 'bg-zinc-200 text-zinc-700',
                                           };
                                           return (
                                             <tr key={r.id} className={cn("transition-colors", isLevee ? "opacity-60" : "hover:bg-amber-50/60 dark:hover:bg-amber-900/10")}>

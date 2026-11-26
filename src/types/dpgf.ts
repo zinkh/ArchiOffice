@@ -55,9 +55,19 @@ export interface DecoupageNoeud {
   phaseId?: string;
 }
 
-/** Ventilation contrôlable de la quantité d'un article par zone ou local. */
+/**
+ * Une ligne du métré d'un article (« Façade Est », « Déduction baie vitrée »). La quantité de l'article
+ * en est la somme. `expression` garde ce qui a été saisi (« 10 », « =4*5 ») pour que le calcul reste
+ * visible ; `quantite` en est la valeur. Une ligne d'une ventilation d'avant n'a pas d'`expression` :
+ * sa `quantite` fait foi. `batimentId`, `phaseId`, `niveau`, `local` et `note` viennent de cette
+ * ventilation (par zone ou local) et ne sont jamais effacés.
+ */
 export interface QuantiteDetail {
   id: string;
+  /** Libellé libre ; à défaut, niveau et local d'une ventilation d'avant. */
+  libelle?: string;
+  /** Valeur ou calcul saisi (« 10 », « =4*5 », « -2,4 ») ; la déduction est une valeur négative. */
+  expression?: string;
   batimentId?: string;
   phaseId?: string;
   niveau?: string;
@@ -71,6 +81,20 @@ export interface QuantiteDetail {
  * Le fichier est un document de l'affaire (catégorie « CCTP - illustrations ») :
  * l'article n'en garde que la référence, pas les octets.
  */
+export interface FicheTechnique {
+  id: string;
+  /** documents.id, pour retrouver la pièce dans l'onglet Documents. */
+  documentId?: string;
+  /** Référence de stockage, ouverte par URL signée. */
+  fileUrl: string;
+  nom: string;
+  /**
+   * Marques à ne pas citer : l'IA décrit le produit par ses performances (« ou équivalent ») au lieu de
+   * reprendre marque, fabricant ou référence commerciale de la fiche, et l'export ne donne pas son nom de fichier.
+   */
+  anonymiser?: boolean;
+}
+
 export interface ImageArticle {
   id: string;
   /** documents.id, pour retrouver la pièce dans l'onglet Documents. */
@@ -114,7 +138,20 @@ export interface MarquableNoeud {
   marqueur?: MarqueurRedaction;
 }
 
-export interface Ligne extends DecoupageNoeud, MarquableNoeud {
+/**
+ * Dernière modification du contenu d'un lot, d'un chapitre ou d'un article (texte, désignation, quantité,
+ * prix...). Posée par `estamperModifications` (src/lib/modifications.ts) : le serveur fait foi, à l'enregistrement,
+ * avec SA date et le nom de la personne connectée (« Agent IA » pour un agent). Jamais saisie ni exposée aux
+ * confrères. Absente d'un élément jamais modifié depuis la mise en place : l'indicateur n'affiche alors rien.
+ */
+export interface ModifiableNoeud {
+  /** Date ISO de la dernière modification. */
+  modifieLe?: string;
+  /** Nom de la personne (ou « Agent IA ») qui l'a faite. */
+  modifiePar?: string;
+}
+
+export interface Ligne extends DecoupageNoeud, MarquableNoeud, ModifiableNoeud {
   /** Quantités propres à chaque bâtiment ; une table vide signifie sans affectation. */
   quantitesBatiments?: Record<string, number>;
   id: string;
@@ -143,20 +180,40 @@ export interface Ligne extends DecoupageNoeud, MarquableNoeud {
   localisation?: string;
   /** Illustrations du CCTP ; imprimées sous le texte de l'article. */
   images?: ImageArticle[];
+  /** Fiches techniques du poste (documents de l'affaire) ; leurs noms sont rappelés dans l'export du CCTP. */
+  fichesTechniques?: FicheTechnique[];
   /**
    * Moteur qui a proposé l'article (« Générer le CCTP » : IA de la plateforme
    * ou Nomic). Repère de provenance comme `articleTypeId` : un texte rédigé
    * par une IA reste signalé tant que personne ne l'a relu et assumé.
    */
   genereParIa?: 'llm' | 'nomic';
-  /** Quand elle existe, la quantité de la ligne est la somme de ces postes. */
+  /** Quand elle existe, la quantité de la ligne est la somme de ces postes (le métré). */
   quantiteDetails?: QuantiteDetail[];
+  /**
+   * Quantité suivie : l'article reprend la quantité d'un autre (`sourceId`, un `Ligne.id`) multipliée par le
+   * `coefficient` (1 si absent). Sa quantité ne se saisit plus, `propagerLiens` (src/lib/quantitesLiees.ts) la
+   * recalcule à chaque enregistrement. Un seul sens : la source ne porte rien.
+   */
+  quantiteLiee?: { sourceId: string; coefficient?: number };
+  /**
+   * Formule tapée dans la case quantité (« =10+20 »), gardée pour la réafficher à la modification.
+   * Elle ne vaut que tant qu'elle donne encore `quantite` (voir `formuleCourante`, src/lib/quantites.ts).
+   */
+  quantiteFormule?: string;
   /**
    * « PM » (pour mémoire) : l'article est décrit mais son prix n'est pas
    * compté. Se saisit en tapant « PM » dans le prix ; prix unitaire et total
    * restent à 0.
    */
   pourMemoire?: boolean;
+  /**
+   * Taux de marge de l'article, en % du prix de base (`prixUnitaire`, `prixTotal`) : le prix final est
+   * `prix x (1 + taux / 100)`. Les prix enregistrés restent toujours HORS marge ; la marge n'existe que
+   * dans l'affichage et les exports, par `appliquerMarge` (src/lib/marge.ts). Absent : pas de marge.
+   * Jamais partagé avec les confrères (absent de la liste blanche de `documentView.ts`).
+   */
+  tauxMarge?: number;
   /**
    * Nature de la prestation. Absent ou 'base' : comptée au total. `pse`,
    * `option` et `variante` sont chiffrées mais comptées à part, jamais dans le
@@ -176,7 +233,7 @@ export interface Ligne extends DecoupageNoeud, MarquableNoeud {
   cctpDescription?: string;
 }
 
-export interface Chapitre extends DecoupageNoeud, MarquableNoeud {
+export interface Chapitre extends DecoupageNoeud, MarquableNoeud, ModifiableNoeud {
   id: string;
   numero: string;
   titre: string;
@@ -185,7 +242,7 @@ export interface Chapitre extends DecoupageNoeud, MarquableNoeud {
   cctpDescription?: string;
 }
 
-export interface Lot extends DecoupageNoeud, MarquableNoeud {
+export interface Lot extends DecoupageNoeud, MarquableNoeud, ModifiableNoeud {
   id: string;
   numero: string;
   titre: string;
@@ -213,6 +270,10 @@ export interface DPGF extends DecoupageDocument {
   totalHT: number;
   TVA: number;
   totalTTC: number;
+  /** L'estimation affiche (et exporte) les prix finaux, marge comprise. Absent : prix de base. */
+  estimationAvecMarge?: boolean;
+  /** Idem pour le DPGF avec prix. Choix distinct : l'estimation est interne, le DPGF peut partir chez le client. */
+  dpgfAvecMarge?: boolean;
 }
 
 // ── Helpers de découpage ─────────────────────────────────────────────────────
@@ -292,6 +353,13 @@ export interface PosteAjoute {
   prixUnitaire: number | null;
   /** Lot du document (Lot.id) auquel le poste est rattaché, déduit de son numéro. */
   lotId?: string;
+  /**
+   * Article du document (Ligne.id) que ce poste chiffre : la proposition de l'entreprise répond à ce poste du DPGF
+   * (forfait, variante...). Absent : poste réellement hors marché. Un identifiant qui ne désigne plus un article du
+   * lot est ignoré à la lecture (`articleRattache`). Le montant reste dans le total du lot, le poste ne fait que
+   * changer de place dans le comparatif.
+   */
+  articleId?: string;
 }
 
 /**
@@ -323,6 +391,13 @@ export interface OffreDocument {
   anomalies: OffreAnomalie[];
   /** Postes que l'entreprise a ajoutés au bordereau (absent : aucun). */
   postesAjoutes?: PosteAjoute[];
+  /**
+   * articleId -> quantité proposée par l'entreprise, SEULEMENT quand elle diffère de celle du document
+   * (absent : même quantité). Le document n'est jamais modifié (voir src/lib/quantitesEntreprise.ts).
+   */
+  quantites?: Record<string, number>;
+  /** Articles dont l'architecte a accepté la quantité de l'entreprise : elle compte alors dans l'offre. */
+  quantitesAcceptees?: string[];
   /** Mis en cache pour la liste des offres. */
   totalOffreHT?: number;
   statut: 'brouillon' | 'validee' | 'ecartee';

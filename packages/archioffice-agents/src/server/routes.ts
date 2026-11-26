@@ -671,7 +671,7 @@ export function registerAgentRoutes(
       // chaque appel de timedChat() plus bas.
       const webSearchActive = caps.webSearch && !!provider.supportsWebSearch;
 
-      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision, caps.knowledge, caps.learning);
+      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision, caps.knowledge, caps.learning, provider.maxImages ?? Number.POSITIVE_INFINITY, provider.maxImages !== undefined ? requestDocumentIds : null);
       // Affaire ouverte à l'écran : l'identifiant vient du client, donc relu dans
       // CE cabinet avant d'être donné à l'agent (un id d'un autre cabinet, ou
       // inconnu, est simplement ignoré). Meilleur effort : jamais bloquant.

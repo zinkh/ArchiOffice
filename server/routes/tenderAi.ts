@@ -25,6 +25,7 @@
 // un coût pessimiste est réservé avant l'appel au modèle, réglé contre le
 // coût réel ensuite, remboursé en cas d'échec — sauf "Préremplir les titres"
 // sans DCE attaché, qui n'appelle aucun modèle et ne coûte donc rien.
+import { siteAddressOf } from '../../src/lib/tenderSiteAddress';
 import type { Express } from 'express';
 import * as Sentry from '@sentry/node';
 import { aiGenerationLimiter } from '../rateLimit';
@@ -251,7 +252,7 @@ Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec envelo
       const { plan } = await getTenantPlan(tenantId);
       if (!requireEnterprisePlan(plan, res)) return;
 
-      const { data: tender } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('id, title, client, type, description').eq('id', tenderId).maybeSingle();
+      const { data: tender } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('id, title, client, type, description, adresse_terrain, ville_execution').eq('id', tenderId).maybeSingle();
       if (!tender) return res.status(404).json({ error: "Appel d'offres introuvable." });
       const { data: note } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tender_methodology_notes').select('id, title').eq('id', noteId).eq('tender_id', tenderId).maybeSingle();
       if (!note) return res.status(404).json({ error: "Section introuvable." });
@@ -290,7 +291,7 @@ Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec envelo
 
       const prompt = `Tu rédiges une note méthodologique (mémoire technique) pour la candidature d'un cabinet d'architecture français à un appel d'offres.
 Affaire : "${tender.title}" — client : ${tender.client}${tender.type ? ` — type de marché : ${tender.type}` : ''}.
-${tender.description ? `Description de l'opération : ${tender.description}\n` : ''}${specialtyLabels ? `Spécialités mobilisées, avec le nom du cotraitant retenu quand il est connu — cite-les nommément là où c'est pertinent : ${specialtyLabels}\n` : ''}
+${tender.description ? `Description de l'opération : ${tender.description}\n` : ''}${siteAddressOf(tender) ? `Lieu de l'opération (adresse du site) : ${siteAddressOf(tender)}\n` : ''}${specialtyLabels ? `Spécialités mobilisées, avec le nom du cotraitant retenu quand il est connu — cite-les nommément là où c'est pertinent : ${specialtyLabels}\n` : ''}
 ${dceText.trim() ? `Voici des extraits du dossier de consultation des entreprises (DCE) de cette affaire — appuie-toi dessus pour coller aux enjeux et exigences réels du marché :\n${dceText}\n` : ''}${agencyText.trim() ? `Voici des extraits de documents du cabinet (présentation, exemples de notes méthodologiques déjà rédigées, présentation de ses cotraitants habituels...) — reprends-en le style, le vocabulaire et les éléments factuels pertinents :\n${agencyText}\n` : ''}
 Rédige le contenu de la section "${note.title}" de cette note méthodologique : un texte professionnel en français, 2 à 4 paragraphes, sans titre ni markdown, prêt à être relu et complété par l'équipe.`;
 

@@ -17,6 +17,10 @@ export interface EmailAttachment {
 // avertit sans jamais bloquer l'envoi, le serveur restant seul juge final.
 export const MAX_EMAIL_ATTACHMENTS_BYTES = 15 * 1024 * 1024;
 
+// Plafond ferme d'un message : le même que le serveur (server/emailAttachments.ts)
+// et que Gmail. Au-delà, l'envoi est refusé et l'on passe par le lien de dépôt.
+export const MAX_EMAIL_TOTAL_BYTES = 25 * 1024 * 1024;
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -59,4 +63,12 @@ export async function fetchAttachableDocuments(query: { project_id?: string; res
   if (query.resource_type) params.set('resource_type', query.resource_type);
   if (query.resource_id) params.set('resource_id', query.resource_id);
   return apiFetch<AttachableDocument[]>(`/api/documents?${params.toString()}`);
+}
+
+/** Document de l'affaire téléchargé en fichier, pour être joint d'office à un message. */
+export async function documentToFile(doc: { name: string; file_url: string; mime_type?: string | null }): Promise<File> {
+  const resp = await fetch(await resolveSignedUrl(doc.file_url));
+  if (!resp.ok) throw new Error(`Téléchargement du document impossible (${resp.status})`);
+  const blob = await resp.blob();
+  return new File([blob], doc.name, { type: doc.mime_type || blob.type || undefined });
 }

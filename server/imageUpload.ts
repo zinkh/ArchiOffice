@@ -160,10 +160,31 @@ export function handleSingleImageUpload(fieldName: string) {
   };
 }
 
-/** Same as handleSingleImageUpload, on the larger sitePhotoUpload cap. */
+/** Photos de chantier traitées en même temps par ce processus. Jimp décode et
+ *  réencode en JavaScript pur, sur le fil principal : quelques photos de
+ *  téléphone simultanées suffisent à saturer le processeur et à faire tomber
+ *  l'application entière (503 « no_healthy_upstream » côté plateforme). */
+export const MAX_CONCURRENT_SITE_PHOTO_UPLOADS = 2;
+/** Délai conseillé au client avant de réessayer quand le serveur est occupé. */
+export const SITE_PHOTO_RETRY_AFTER_SECONDS = 5;
+
+let siteUploadsInFlight = 0;
+
+/** Same as handleSingleImageUpload, on the larger sitePhotoUpload cap. Refuse
+ *  (429 + Retry-After) au-delà de MAX_CONCURRENT_SITE_PHOTO_UPLOADS envois
+ *  simultanés, avant même de lire le fichier : le client garde sa photo et
+ *  réessaie, au lieu d'empiler du travail jusqu'à l'arrêt du serveur. */
 export function handleSingleSitePhotoUpload(fieldName: string) {
   const middleware = sitePhotoUpload.single(fieldName);
   return (req: any, res: any, next: any) => {
+    if (siteUploadsInFlight >= MAX_CONCURRENT_SITE_PHOTO_UPLOADS) {
+      res.set('Retry-After', String(SITE_PHOTO_RETRY_AFTER_SECONDS));
+      return res.status(429).json({ error: 'Serveur occupé par d\'autres photos : nouvelle tentative automatique dans quelques secondes.' });
+    }
+    siteUploadsInFlight++;
+    let released = false;
+    const release = () => { if (!released) { released = true; siteUploadsInFlight--; } };
+    res.once('close', release);
     middleware(req, res, (err: any) => {
       if (err) return res.status(400).json({ error: err.message || 'Upload invalide' });
       next();

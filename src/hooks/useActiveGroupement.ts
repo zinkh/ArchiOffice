@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadCotraitantLogos, setActiveGroupementLogos, type GroupementMember } from '../lib/pdfLetterhead';
+import {
+  fetchAgencySettings, loadGroupementHeader, loadLogoDataUrl, setActiveGroupementLogos, setActiveMandataire, type GroupementMemberMandataire,
+} from '../lib/pdfLetterhead';
 
 /**
  * Déclare le groupement (cotraitants) de l'affaire affichée : tant que l'écran
@@ -7,19 +9,27 @@ import { loadCotraitantLogos, setActiveGroupementLogos, type GroupementMember } 
  * l'en-tête du cabinet. Retiré au démontage, pour qu'un document sans rapport
  * avec l'affaire n'en hérite pas.
  */
-export function useActiveGroupement(members: GroupementMember[] | null | undefined): void {
+export function useActiveGroupement(members: GroupementMemberMandataire[] | null | undefined): void {
+  // Le mandataire fait partie de la clé : en changer redessine l'en-tête.
   const key = useMemo(
-    () => [...new Set((members ?? []).map(m => m.contact_id).filter(Boolean))].sort().join(','),
+    () => [...new Set((members ?? []).map(m => m.contact_id ? `${m.contact_id}${m.mandataire ? '*' : ''}` : '').filter(Boolean))].sort().join(','),
     [members],
   );
   useEffect(() => {
     let vivant = true;
-    setActiveGroupementLogos([]);
+    const reinitialiser = () => { setActiveGroupementLogos([]); setActiveMandataire(null); };
+    reinitialiser();
     if (key) {
-      loadCotraitantLogos(key.split(',').map(contact_id => ({ contact_id })))
-        .then(logos => { if (vivant) setActiveGroupementLogos(logos); });
+      loadGroupementHeader(key.split(',').map(k => ({ contact_id: k.replace('*', ''), mandataire: k.endsWith('*') })))
+        .then(async ({ mandataire, partnerLogos }) => {
+          // Le cabinet passe dans le bandeau quand un cotraitant est mandataire.
+          const logoCabinet = mandataire ? await loadLogoDataUrl((await fetchAgencySettings()).logoUrl) : null;
+          if (!vivant) return;
+          setActiveGroupementLogos(partnerLogos);
+          setActiveMandataire(mandataire, logoCabinet);
+        });
     }
-    return () => { vivant = false; setActiveGroupementLogos([]); };
+    return () => { vivant = false; reinitialiser(); };
   }, [key]);
 }
 
@@ -28,7 +38,7 @@ export function useActiveGroupement(members: GroupementMember[] | null | undefin
  * lit les cotraitants de son contrat MOE (le signé, à défaut le premier).
  */
 export function useProjectGroupement(projectId: string | null | undefined): void {
-  const [membres, setMembres] = useState<GroupementMember[]>([]);
+  const [membres, setMembres] = useState<GroupementMemberMandataire[]>([]);
   useEffect(() => {
     let vivant = true;
     setMembres([]);

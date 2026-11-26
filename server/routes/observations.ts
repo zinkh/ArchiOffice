@@ -65,16 +65,35 @@ async function withProjectNumberLock<T>(projectId: string, task: () => Promise<T
   try { return await run; } finally { if (numberLocks.get(projectId) === tail) numberLocks.delete(projectId); }
 }
 
+// Numéro des comptes rendus qui ont émis (`created_report_id`) et levé (`resolved_report_id`) chaque
+// observation, en UNE lecture groupée limitée au cabinet, jamais une par ligne. C'était une jointure
+// PostgREST à indice de colonne (le nom de la colonne après un point d'exclamation), qui ne fonctionne
+// que pour une clé étrangère à UNE colonne et échouerait (PGRST200) sur une clé composite (colonne, tenant_id)
+// (supabase/migrate_zz_tenant_composite_fks_3.sql). La forme de la réponse est inchangée :
+// `created_report` et `resolved_report` valent `{ report_number }`, ou null sans lien.
+async function withReportNumbers(supabaseAdmin: any, tenantId: string, rows: any[]): Promise<any[]> {
+  const ids = [...new Set(rows.flatMap((o) => [o.created_report_id, o.resolved_report_id]).filter(Boolean))] as string[];
+  const numbers = new Map<string, unknown>();
+  if (ids.length) {
+    const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_reports').select('id, report_number').in('id', ids);
+    if (error) throw error;
+    for (const r of (data || []) as any[]) numbers.set(r.id, r.report_number);
+  }
+  const ref = (id: string | null | undefined) => (id && numbers.has(id) ? { report_number: numbers.get(id) } : null);
+  return rows.map((o) => ({ ...o, created_report: ref(o.created_report_id), resolved_report: ref(o.resolved_report_id) }));
+}
+
 export function registerObservationRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage }: RouteDeps) {
   app.get("/api/projects/:projectId/observations", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations')
-        .select(`*, lot:project_lots(id,lot_number,lot_title), created_report:site_reports!created_report_id(report_number), resolved_report:site_reports!resolved_report_id(report_number), observation_reports(report_id)`)
+        .select(`*, lot:project_lots(id,lot_number,lot_title), observation_reports(report_id)`)
         .eq('project_id', projectId)
         .order('number', { ascending: true });
       if (error) throw error;
+      const rows = await withReportNumbers(supabaseAdmin, tenantId, data || []);
       // Numéro de la réserve de l'AOR qui reprend l'observation : une seule
       // lecture groupée, jamais une par ligne (absente tant que la migration
       // n'est pas jouée : `reserve_id` n'existe alors pas sur les lignes).
@@ -83,7 +102,7 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
         ? await supabaseAdmin.from('reserves').select('id, number').eq('tenant_id', tenantId).in('id', reserveIds)
         : { data: [] };
       const reserveNumberById = new Map<string, number>(((reserveRows || []) as any[]).map(r => [r.id, r.number]));
-      const mapped = (data || []).map((o: any) => ({
+      const mapped = rows.map((o: any) => ({
         ...o,
         created_report_number: o.created_report?.report_number,
         resolved_report_number: o.resolved_report?.report_number,
@@ -318,11 +337,12 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       const tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations')
-        .select(`*, lot:project_lots(id,lot_number,lot_title), created_report:site_reports!created_report_id(report_number), resolved_report:site_reports!resolved_report_id(report_number), observation_reports!inner(report_id)`)
+        .select(`*, lot:project_lots(id,lot_number,lot_title), observation_reports!inner(report_id)`)
         .eq('observation_reports.report_id', reportId)
         .order('number', { ascending: true });
       if (error) throw error;
-      const mapped = (data || []).map((o: any) => ({
+      const rows = await withReportNumbers(supabaseAdmin, tenantId, data || []);
+      const mapped = rows.map((o: any) => ({
         ...o,
         created_report_number: o.created_report?.report_number,
         resolved_report_number: o.resolved_report?.report_number,

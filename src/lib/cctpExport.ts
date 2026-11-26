@@ -8,14 +8,25 @@
 // pagination « P1|2 », nuances de gris. jsPDF et docx sont chargés à la demande.
 import type { Batiment, DPGF, ImageArticle, Ligne } from '../types/dpgf';
 import { imagesDeLigne } from './cctpImages';
+import { estPhoto } from './fichePhoto';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { docxSectionChrome } from './docxRunningHeader';
-import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
+import { drawAgencyFooters, piedDePageMandataire, ENTETE_REDUIT_BAS, loadLogoDataUrl, reglagesEntete } from './pdfLetterhead';
+import { chargerPhotoCouverture, donneesPageDeGarde, drawPageDeGardePdf, pageDeGardeDocx, type CouvertureOptions } from './pageDeGarde';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
+import { ORIENTATION_CCTP, orientationPdf, suffixeLot, type Orientation } from './exportOrientation';
 import { mettreEnLignes, paragraphesRiches, type StyleRiche } from './cctpRichText';
+import { textePdf } from './pdfTexte';
+import { installerLiberationSans, POLICE_LIBERATION } from './pdfPolice';
+
+/** Fiches rappelées sous l'article : les photos (descriptions pour l'IA) n'en sont pas. */
+const fichesRappelees = (l: Ligne): string[] => (l.fichesTechniques ?? [])
+  .filter(f => !estPhoto(f.nom))
+  .map((f, i) => (f.anonymiser ? `Fiche technique ${i + 1} (marque non citée)` : f.nom))
+  .filter(Boolean);
 
 export interface CctpBloc {
   niveau: number;          // 1 lot, 2 chapitre, 3+ article et sous-articles
@@ -25,6 +36,8 @@ export interface CctpBloc {
   localisation?: string;
   /** Illustrations de l'article, imprimées sous son texte. */
   images?: ImageArticle[];
+  /** Noms des fiches techniques du poste, rappelés sous son titre. */
+  fiches?: string[];
   /** Bâtiments concernés (opération complète seulement). */
   batiments?: string[];
 }
@@ -38,6 +51,22 @@ export interface CctpExportOptions {
   contexte?: ContexteCctp;
   /** Destination du fichier ; absente, il est téléchargé. */
   sortie?: Sortie;
+  /** Orientation de la page A4 ; absente, vertical. */
+  orientation?: Orientation;
+  /** Export d'un seul lot : il figure dans le titre et le nom du fichier. */
+  lot?: { numero: string; titre: string };
+  /** Page de garde : photo du projet, adresse, maître d'ouvrage, numéro d'affaire. */
+  couverture?: CouvertureOptions;
+}
+
+/** Données de la page de garde du CCTP exporté. */
+async function pageDeGardeCctp(doc: DPGF, opts: CctpExportOptions) {
+  const photo = await chargerPhotoCouverture(opts.couverture?.imageUrl);
+  return donneesPageDeGarde({
+    operation: opts.projectName, titreDocument: doc.titre, intitule: SOUS_TITRE,
+    precision: [opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ') || undefined,
+    version: doc.version, dateCreation: doc.dateCreation, couverture: opts.couverture, photo,
+  });
 }
 
 /** #rrggbb vers [r, g, b] ; une couleur illisible rend le repli. */
@@ -80,6 +109,8 @@ export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp
       niveau, numero: l.numero, titre: l.designation, texte: texte(l.cctpDescription, n),
       localisation: texte(l.localisation, n) || undefined,
       images: imagesDeLigne(l).length ? imagesDeLigne(l) : undefined,
+      // Une fiche anonymisée ne donne pas son nom de fichier (il porte souvent la marque).
+      fiches: fichesRappelees(l).length ? fichesRappelees(l) : undefined,
       batiments: mention && !enfants && libelles(ids).length ? libelles(ids) : undefined,
     });
     if (enfants) articles(l.children!, niveau + 1, noeud, l.batimentId ?? herite);
@@ -107,12 +138,12 @@ export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp
   return blocs;
 }
 
-export function cctpTitre(opts: Pick<CctpExportOptions, 'batiment'>): string {
-  return opts.batiment ? `CCTP · ${libelleBatiment(opts.batiment)}` : 'CCTP';
+export function cctpTitre(opts: Pick<CctpExportOptions, 'batiment' | 'lot'>): string {
+  return ['CCTP', opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ');
 }
 
-export function cctpNomFichier(opts: Pick<CctpExportOptions, 'projectName' | 'batiment'>, ext: 'pdf' | 'docx'): string {
-  const morceaux = ['CCTP', opts.projectName, opts.batiment?.code].filter(Boolean) as string[];
+export function cctpNomFichier(opts: Pick<CctpExportOptions, 'projectName' | 'batiment' | 'lot'>, ext: 'pdf' | 'docx'): string {
+  const morceaux = ['CCTP', opts.projectName, opts.batiment?.code, opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean) as string[];
   const nom = morceaux.join('_').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/_+/g, '_');
   return `${nom}.${ext}`;
 }
@@ -147,37 +178,47 @@ function dimensionsImage(img: ImageChargee, largeurMax: number, hauteurMax: numb
 
 export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise<void> {
   const [{ default: JsPDF }, logo] = await Promise.all([import('jspdf'), loadLogoDataUrl(opts.settings.logoUrl)]);
-  const pdf = new JsPDF({ unit: 'mm', format: 'a4' });
+  const pdf = new JsPDF({ orientation: orientationPdf(opts.orientation ?? ORIENTATION_CCTP), unit: 'mm', format: 'a4', compress: true });
+  // Liberation Sans (≤, ≥, ≈, ≠, →...) ; à défaut Helvetica, et textePdf remplace alors ces symboles.
+  const liberation = await installerLiberationSans(pdf);
+  const famille = liberation ? POLICE_LIBERATION : 'helvetica';
   const margin = 18;
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
   const largeur = pageW - margin * 2;
+  const garde = await pageDeGardeCctp(doc, opts);
   const letterhead = {
     title: cctpTitre(opts), subtitle: opts.projectName, reference: `v${doc.version}`, margin, logo,
+    // Page de garde : ni nom ni adresse en pied (elle porte son bloc de dates). Pages suivantes : le mandataire.
+    piedDePage: (page: number) => (page === 1 ? '' : piedDePageMandataire(opts.settings)),
   };
-  let y = drawAgencyHeader(pdf, opts.settings, letterhead) + 4;
+  // Page de garde, puis le texte à la page suivante sous l'en-tête réduit (agence | document).
+  drawPageDeGardePdf(pdf, opts.settings, logo, garde, margin);
+  pdf.addPage();
+  let y = Math.max(ENTETE_REDUIT_BAS, margin) + 2;
   const basDePage = pageH - 18;
-  const place = (h: number) => { if (y + h > basDePage) { pdf.addPage(); y = margin; } };
+  const place = (h: number) => { if (y + h > basDePage) { pdf.addPage(); y = Math.max(ENTETE_REDUIT_BAS, margin) + 2; } };
 
-  pdf.setFont('helvetica', 'bold');
+  pdf.setFont(famille,'bold');
   pdf.setFontSize(16);
   pdf.setTextColor(...GRIS_TEXTE);
   pdf.text(SOUS_TITRE, margin, y + 4);
   y += 10;
-  if (opts.batiment) {
-    pdf.setFont('helvetica', 'normal');
+  const portee = [opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ');
+  if (portee) {
+    pdf.setFont(famille,'normal');
     pdf.setFontSize(11);
     pdf.setTextColor(...GRIS_DOUX);
-    pdf.text(libelleBatiment(opts.batiment), margin, y + 2);
+    pdf.text(portee, margin, y + 2);
     y += 8;
   }
 
   const ecrire = (valeur: string, taille: number, style: 'normal' | 'bold' | 'italic', couleur: [number, number, number], retrait = 0, apres = 1.5) => {
-    pdf.setFont('helvetica', style);
+    pdf.setFont(famille,style);
     pdf.setFontSize(taille);
     pdf.setTextColor(...couleur);
     const hLigne = taille * 0.42;
-    for (const paragraphe of valeur.split(/\n/)) {
+    for (const paragraphe of textePdf(valeur, { liberation }).split(/\n/)) {
       const lignes = pdf.splitTextToSize(paragraphe || ' ', largeur - retrait) as string[];
       for (const ligne of lignes) {
         place(hLigne);
@@ -193,19 +234,19 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   const ecrireRiche = (valeur: string, taille: number, couleur: [number, number, number], retrait = 0, apres = 1.5) => {
     const police = (s: StyleRiche) => (s.b && s.i ? 'bolditalic' : s.b ? 'bold' : s.i ? 'italic' : 'normal');
     const mesurer = (t: string, s: StyleRiche) => {
-      pdf.setFont('helvetica', police(s));
+      pdf.setFont(famille,police(s));
       pdf.setFontSize(taille);
       return pdf.getTextWidth(t);
     };
     const hLigne = taille * 0.42;
-    for (const paragraphe of paragraphesRiches(valeur)) {
+    for (const paragraphe of paragraphesRiches(textePdf(valeur, { liberation }))) {
       for (const ligne of mettreEnLignes(paragraphe, largeur - retrait, mesurer)) {
         place(hLigne);
         const base = y + hLigne * 0.8;
         let x = margin + retrait;
         for (const m of ligne) {
           const rgb = hexVersRgb(m.color, couleur);
-          pdf.setFont('helvetica', police(m));
+          pdf.setFont(famille,police(m));
           pdf.setFontSize(taille);
           pdf.setTextColor(...rgb);
           pdf.text(m.text, x, base);
@@ -226,12 +267,14 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   const images = await chargerImages(blocsPdf);
   for (const b of blocsPdf) {
     const retrait = Math.max(0, b.niveau - 3) * 4;
-    if (b.niveau === 1) { place(16); y += 4; ecrire(`${b.numero}  ${b.titre}`, 13, 'bold', GRIS_TEXTE, 0, 2); }
-    else if (b.niveau === 2) { place(12); y += 2; ecrire(`${b.numero}  ${b.titre}`, 11, 'bold', GRIS_TEXTE, 0, 1.5); }
-    else { place(10); ecrire(`${b.numero}  ${b.titre}`, 10, 'bold', GRIS_TEXTE, retrait, 1); }
+    if (b.niveau === 1) { place(34); y += 4; ecrire(`${b.numero}  ${b.titre}`, 13, 'bold', GRIS_TEXTE, 0, 2); }
+    else if (b.niveau === 2) { place(26); y += 2; ecrire(`${b.numero}  ${b.titre}`, 11, 'bold', GRIS_TEXTE, 0, 1.5); }
+    else { place(18); ecrire(`${b.numero}  ${b.titre}`, 10, 'bold', GRIS_TEXTE, retrait, 1); }
     if (b.batiments) ecrire(`Bâtiments concernés : ${b.batiments.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
-    if (b.localisation) ecrire(`Localisation : ${b.localisation}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
-    if (b.texte) ecrireRiche(b.texte, 9.5, GRIS_TEXTE, retrait, 2.5);
+    if (b.fiches) ecrire(`Fiches techniques : ${b.fiches.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
+    if (b.texte) ecrireRiche(b.texte, 9.5, GRIS_TEXTE, retrait, b.localisation ? 1 : 2.5);
+    // La localisation (pièce, ouvrage) vient sous le texte de l'article.
+    if (b.localisation) ecrire(`Localisation : ${b.localisation}`, 8.5, 'italic', GRIS_DOUX, retrait, 2.5);
     for (const illustration of b.images ?? []) {
       const img = images.get(illustration.fileUrl);
       if (!img) continue;
@@ -256,46 +299,54 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   } = await import('docx');
   const { compressImage } = await import('./imageCompression');
   const { settings } = opts;
+  const cab = reglagesEntete(settings); // cabinet ou cotraitant mandataire
 
   const headerChildren: InstanceType<typeof Paragraph>[] = [];
-  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 0.92).catch(() => null) : null;
+  const logo = cab.logoUrl ? await compressImage(cab.logoUrl, 400, 400, 0.92, 'image/png').catch(() => null) : null;
   if (logo) {
     const h = 40;
     headerChildren.push(new Paragraph({
-      children: [new ImageRun({ type: 'jpg', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * h), height: h } })],
+      children: [new ImageRun({ type: 'png', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * h), height: h } })],
     }));
   }
   headerChildren.push(
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 20, color: '111827' })] }),
+    new Paragraph({ children: [new TextRun({ text: cab.agencyName || '', bold: true, size: 20, color: '111827' })] }),
     new Paragraph({
       border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'D1D5DB' } },
       spacing: { after: 120 },
-      children: [new TextRun({ text: [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
+      children: [new TextRun({ text: [cab.address, cab.phone ? `Tél : ${cab.phone}` : '', cab.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
     }),
   );
   const bandeau = await partnerLogosParagraph();
   if (bandeau) headerChildren.push(bandeau);
+  const garde = await pageDeGardeCctp(doc, opts);
+  const pagination = new Paragraph({
+    alignment: AlignmentType.RIGHT,
+    children: [
+      new TextRun({ text: 'P', bold: true, size: 15, color: '111827' }),
+      new TextRun({ children: [PageNumber.CURRENT], bold: true, size: 15, color: '111827' }),
+      new TextRun({ text: '|', bold: true, size: 15, color: '111827' }),
+      new TextRun({ children: [PageNumber.TOTAL_PAGES], bold: true, size: 15, color: '111827' }),
+    ],
+  });
+  // Pages suivantes : identité du mandataire ; la page de garde n'a que la pagination (son bloc de dates est dans le corps).
   const footerChildren = [
     new Paragraph({
       border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB' } },
-      children: [new TextRun({ text: agencyFooterLine(settings), size: 13, color: '6B7280' })],
+      children: [new TextRun({ text: piedDePageMandataire(settings), size: 13, color: '6B7280' })],
     }),
-    new Paragraph({
-      alignment: AlignmentType.RIGHT,
-      children: [
-        new TextRun({ text: 'P', bold: true, size: 15, color: '111827' }),
-        new TextRun({ children: [PageNumber.CURRENT], bold: true, size: 15, color: '111827' }),
-        new TextRun({ text: '|', bold: true, size: 15, color: '111827' }),
-        new TextRun({ children: [PageNumber.TOTAL_PAGES], bold: true, size: 15, color: '111827' }),
-      ],
-    }),
+    pagination,
+  ];
+  const firstFooterChildren = [
+    new Paragraph({ border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB' } }, children: [] }),
+    pagination,
   ];
 
   const retrait = (niveau: number) => ({ left: Math.max(0, niveau - 3) * 360 });
   const body: InstanceType<typeof Paragraph>[] = [
     new Paragraph({ heading: HeadingLevel.TITLE, spacing: { after: 120 }, children: [new TextRun({ text: SOUS_TITRE, bold: true, size: 36, color: '111827' })] }),
   ];
-  const sousTitre = [opts.projectName, opts.batiment ? libelleBatiment(opts.batiment) : ''].filter(Boolean).join(' · ');
+  const sousTitre = [opts.projectName, opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ');
   if (sousTitre) body.push(new Paragraph({ spacing: { after: 360 }, children: [new TextRun({ text: sousTitre, size: 24, color: '6B7280' })] }));
 
   const blocsWord = cctpBlocs(doc, opts.batiment?.id, opts.contexte);
@@ -304,7 +355,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     const heading = b.niveau === 1 ? HeadingLevel.HEADING_1 : b.niveau === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
     const taille = b.niveau === 1 ? 26 : b.niveau === 2 ? 22 : 20;
     body.push(new Paragraph({
-      heading, indent: retrait(b.niveau), spacing: { before: b.niveau <= 2 ? 240 : 140, after: 80 },
+      heading, keepNext: true, indent: retrait(b.niveau), spacing: { before: b.niveau <= 2 ? 240 : 140, after: 80 },
       children: [new TextRun({ text: `${b.numero}  ${b.titre}`, bold: true, size: taille, color: '111827' })],
     }));
     const mention = (texte: string) => body.push(new Paragraph({
@@ -312,7 +363,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
       children: [new TextRun({ text: texte, italics: true, size: 17, color: '6B7280' })],
     }));
     if (b.batiments) mention(`Bâtiments concernés : ${b.batiments.join(', ')}`);
-    if (b.localisation) mention(`Localisation : ${b.localisation}`);
+    if (b.fiches) mention(`Fiches techniques : ${b.fiches.join(', ')}`);
     for (const segments of paragraphesRiches(b.texte)) {
       const brut = segments.map(x => x.text).join('');
       if (!brut.trim()) continue;
@@ -328,6 +379,8 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
         })),
       }));
     }
+    // La localisation (pièce, ouvrage) vient sous le texte de l'article.
+    if (b.localisation) mention(`Localisation : ${b.localisation}`);
     for (const illustration of b.images ?? []) {
       const img = images.get(illustration.fileUrl);
       if (!img) continue;
@@ -345,9 +398,27 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     }
   }
 
+  const paysage = (opts.orientation ?? ORIENTATION_CCTP) === 'paysage';
+  const chrome = await docxSectionChrome({ agencyName: cab.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, firstFooter: firstFooterChildren, orientation: opts.orientation ?? ORIENTATION_CCTP });
   const document_ = new Document({
+    // Sans style par défaut, Word retombe sur Times New Roman : la charte est en Arial.
+    styles: {
+      default: {
+        document: { run: { font: 'Arial', size: 19, color: '111827' } },
+        heading1: { run: { font: 'Arial', bold: true, size: 26, color: '111827' } },
+        heading2: { run: { font: 'Arial', bold: true, size: 22, color: '111827' } },
+        heading3: { run: { font: 'Arial', bold: true, size: 20, color: '111827' } },
+        title: { run: { font: 'Arial', bold: true, size: 36, color: '111827' } },
+      },
+    },
+    // Section 1 : la page de garde (logo en en-tête de première page). Section 2 : le texte,
+    // sous l'en-tête réduit dès sa première page ; la pagination continue d'une section à l'autre.
     sections: [{
-      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren }),
+      ...chrome,
+      children: await pageDeGardeDocx(garde, paysage ? { largeurMax: 620, hauteurMax: 250 } : { largeurMax: 600, hauteurMax: 380 }),
+    }, {
+      ...chrome,
+      properties: { ...chrome.properties, titlePage: false as any },
       children: body,
     }],
   });

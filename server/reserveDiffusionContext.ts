@@ -4,7 +4,7 @@
 // qu'un rappel automatique n'écrive jamais à d'autres personnes que la diffusion manuelle.
 import { tenantScopedFrom } from './tenantScopedFrom';
 import { parseJsonList } from '../src/lib/jsonList';
-import { buildReserveRecipients, selectReserves } from '../src/lib/reserveDiffusion';
+import { buildReserveRecipients, estNonLevee, selectReserves } from '../src/lib/reserveDiffusion';
 
 export const RESERVE_KINDS = ['opr', 'gpa'] as const;
 export type ReserveKind = (typeof RESERVE_KINDS)[number];
@@ -24,8 +24,16 @@ export const readLots = (raw: unknown): string[] | null => {
   } catch { return null; }
 };
 
+/**
+ * Les réserves levées font-elles partie de l'export ? Oui par défaut (comportement d'avant) ; seul un refus
+ * explicite (`false`, `'false'`, `'0'`, `0`) les écarte.
+ */
+export const readIncludeLevees = (raw: unknown): boolean => !(raw === false || raw === 0 || raw === 'false' || raw === '0');
+
 /** Tout ce qu'il faut pour rejouer les destinataires d'un périmètre ; null si l'opération n'est pas au cabinet. */
-export async function loadReserveContext(supabaseAdmin: any, tenantId: string, projectId: string, kind: ReserveKind, lots: string[] | null) {
+export async function loadReserveContext(
+  supabaseAdmin: any, tenantId: string, projectId: string, kind: ReserveKind, lots: string[] | null, inclureLevees = true,
+) {
   const { data: project } = await tenantScopedFrom(supabaseAdmin, tenantId, 'projects')
     .select('id, name, project_code, address').eq('id', projectId).maybeSingle();
   if (!project) return null;
@@ -35,7 +43,7 @@ export async function loadReserveContext(supabaseAdmin: any, tenantId: string, p
     tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises').select('entreprise_nom, contact_id, type_marche, statut').eq('project_id', projectId),
     tenantScopedFrom(supabaseAdmin, tenantId, 'project_stakeholders').select('name, role, contact_id').eq('project_id', projectId),
   ]);
-  const reserves = selectReserves((reservesRes.data || []) as any[], lots);
+  const reserves = selectReserves((reservesRes.data || []) as any[], lots).filter(r => inclureLevees || estNonLevee(r));
   const lotRows = (lotsRes.data || []) as any[];
   const marches = ((marchesRes.data || []) as any[]).filter(m => m.type_marche !== 'subsequent' && m.statut !== 'resilie');
   const stakeholders = (stakeholdersRes.data || []) as any[];

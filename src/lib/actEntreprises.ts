@@ -7,12 +7,22 @@ export interface EntrepriseSuivi {
   contact_id?: string;
   nom: string;
   email?: string;
+  /** Autres adresses de destination (séparées par des virgules ou des points-virgules), en plus de l'e-mail du contact. */
+  emails_supplementaires?: string;
   lots_ids: string[];
   envoyer_dce: boolean;
   dce_transmis_le?: string;
   relance_le?: string;
   offre_recue_le?: string;
   ne_repond_pas?: boolean;
+  visite_creneau_id?: string;
+  visite_presence?: import('./actVisites').PresenceVisite;
+  /** Créneau cité dans le dernier message de convocation (ou d'envoi du DCE) et date de ce message. */
+  visite_convoquee_creneau_id?: string;
+  visite_convoquee_le?: string;
+  /** Date du message « quantités à confirmer » : la page de dépôt de l'entreprise ouvre alors la confirmation de ses quantités. */
+  quantites_demandees_le?: string;
+  observation?: string;
   /**
    * Date d'une remise faite sur l'espace de dépôt et pas encore traitée. Jamais
    * enregistrée avec la consultation : elle se déduit des remises reçues
@@ -25,6 +35,36 @@ export interface LotSuivi {
   id: string;
   lot_number: string;
   lot_title: string;
+}
+
+/** Le numéro reste celui de la fiche contact, sans copie périmée dans la consultation. */
+export function telephoneEntreprise(e: Pick<EntrepriseSuivi, 'contact_id'>, contacts: Array<{ id: string; phone_work?: string | null; phone_mobile?: string | null; phone_main?: string | null; phone?: string | null }>): string {
+  const c = contacts.find(contact => contact.id === e.contact_id);
+  return [c?.phone_work, c?.phone_mobile, c?.phone_main, c?.phone].find(value => !!value?.trim())?.trim() || '';
+}
+
+const CHAMPS_TELEPHONE = ['phone_work', 'phone_mobile', 'phone_main', 'phone'] as const;
+type ChampTelephone = typeof CHAMPS_TELEPHONE[number];
+type ChampsTelephoneContact = Partial<Record<ChampTelephone, string | null>>;
+
+/**
+ * Numéro saisi sur la ligne de consultation à reporter sur la fiche contact. Il remplace le
+ * champ qui porte le numéro affiché (`telephoneEntreprise`), à défaut il va dans `phone_work`.
+ * `phone` est aligné quand il portait l'ancien numéro, pour que la liste des contacts reste cohérente.
+ * Rend `null` quand rien ne change ; un champ vidé n'efface jamais la fiche (rien à reporter).
+ */
+export function completerTelephoneContact(
+  contact: ChampsTelephoneContact,
+  saisi: string,
+): Partial<Record<ChampTelephone, string>> | null {
+  const numero = saisi.trim();
+  if (!numero) return null;
+  const actuel = CHAMPS_TELEPHONE.find(k => !!contact[k]?.trim());
+  if (actuel && contact[actuel]!.trim() === numero) return null;
+  const champ: ChampTelephone = actuel ?? 'phone_work';
+  const patch: Partial<Record<ChampTelephone, string>> = { [champ]: numero };
+  if (champ !== 'phone' && (!actuel || contact.phone?.trim() === contact[champ]?.trim())) patch.phone = numero;
+  return patch;
 }
 
 /** En deçà, un lot n'a pas assez d'entreprises consultées pour une mise en concurrence sérieuse. */
@@ -250,4 +290,57 @@ export function listeAPlat<T extends EntrepriseSuivi>(
       if (!a.nom.trim() !== !b.nom.trim()) return a.nom.trim() ? -1 : 1;
       return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
     });
+}
+
+type ChampsEmailContact = {
+  email?: string | null;
+  email_work?: string | null;
+  email_home?: string | null;
+  email_other?: string | null;
+};
+
+/**
+ * Adresses saisies sur la ligne de consultation à reporter sur la fiche contact.
+ * - Une adresse CORRIGÉE (présente avant la saisie, absente après) remplace
+ *   l'ancienne là où elle se trouve sur la fiche ; `avant` est la liste des
+ *   adresses de la ligne avant la saisie. Une adresse simplement supprimée de la
+ *   ligne reste sur la fiche : la fiche ne perd rien sans remplaçante.
+ * - Les autres nouvelles adresses vont dans les emplacements VIDES (pro, e-mail,
+ *   perso, autre) ; une adresse déjà sur la fiche n'est jamais dupliquée (casse ignorée).
+ * Rend `null` quand il n'y a rien à changer. Au-delà de quatre adresses, le surplus
+ * reste sur la ligne de consultation (la fiche n'a que quatre champs).
+ */
+export function completerEmailsContact(
+  contact: ChampsEmailContact,
+  e: Pick<EntrepriseSuivi, 'email' | 'emails_supplementaires'>,
+  avant: string[] = [],
+): Partial<Record<keyof ChampsEmailContact, string>> | null {
+  const cle = (a?: string | null) => (a ?? '').trim().toLowerCase();
+  const champs: (keyof ChampsEmailContact)[] = ['email_work', 'email', 'email_home', 'email_other'];
+  const apres = destinatairesEntreprise(e);
+  const present = new Set(champs.map(k => cle(contact[k])).filter(Boolean));
+  const gardees = new Set(apres.map(cle));
+  const remplacables = avant.filter(a => !gardees.has(cle(a)) && present.has(cle(a)));
+  const aAjouter = apres.filter(a => !present.has(cle(a)));
+  const patch: Partial<Record<keyof ChampsEmailContact, string>> = {};
+  const restantes: string[] = [];
+  for (const adresse of aAjouter) {
+    const ancienne = remplacables.shift();
+    const champ = ancienne ? champs.find(k => cle(contact[k]) === cle(ancienne) && !(k in patch)) : undefined;
+    if (champ) patch[champ] = adresse; else restantes.push(adresse);
+  }
+  const libres = champs.filter(k => !cle(contact[k]) && !(k in patch));
+  restantes.forEach((adresse, i) => { if (libres[i]) patch[libres[i]] = adresse; });
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/**
+ * Destinataires d'un message à l'entreprise : l'e-mail du contact d'abord, puis
+ * les adresses supplémentaires saisies sur la ligne, sans doublon (casse ignorée).
+ */
+export function destinatairesEntreprise(e: Pick<EntrepriseSuivi, 'email' | 'emails_supplementaires'>): string[] {
+  const vus = new Set<string>();
+  return [e.email ?? '', ...(e.emails_supplementaires ?? '').split(/[;,\s]+/)]
+    .map(a => a.trim())
+    .filter(a => a.includes('@') && !vus.has(a.toLowerCase()) && !!vus.add(a.toLowerCase()));
 }

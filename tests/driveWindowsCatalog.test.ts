@@ -18,3 +18,15 @@ it('refuses cross-project parents, duplicate/cyclic entries and files outside pi
   await expect(buildWindowsCatalog('p',reader(),async()=>({...meta,size:51*1024*1024}))).rejects.toMatchObject({code:'WINDOWS_CATALOG_REFUSED'});
   await expect(buildWindowsCatalog('../p',reader(),async()=>meta)).rejects.toMatchObject({code:'WINDOWS_CATALOG_REFUSED'});
 });
+
+it('traverses eleven pages and preserves every document beyond former file, entry and cursor ceilings',async()=>{
+ const nodes=Array.from({length:1001},(_,i)=>({id:'doc:d'+i,kind:'file',name:'Plan '+i+'.pdf',parentId:'phase:p:PRO',version:1}));
+ const read=vi.fn(async(route:string)=>{
+  if(route==='/nodes/prj%3Ap')return {id:'prj:p',kind:'folder',name:'VIP-TC'};
+  if(route.includes('prj%3Ap/children'))return {nodes:[{id:'phase:p:PRO',kind:'folder',name:'PRO',parentId:'prj:p'}],nextCursor:null};
+  const offset=Number(new URL('https://local'+route).searchParams.get('cursor')||0);
+  return {nodes:nodes.slice(offset,offset+100),nextCursor:offset+100<nodes.length?String(offset+100):null};
+ });let active=0,peak=0;
+ const entries=await buildWindowsCatalog('p',read,async id=>{active++;peak=Math.max(peak,active);await new Promise(resolve=>setImmediate(resolve));active--;return {...meta,nodeId:id,name:id+'.pdf'};});
+ expect(entries.filter(e=>!e.folder).map(e=>e.meta?.nodeId)).toEqual(nodes.map(n=>n.id));expect(peak).toBeLessThanOrEqual(8);expect(peak).toBeGreaterThan(1);expect(read).toHaveBeenCalledTimes(13);
+});

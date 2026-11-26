@@ -6,8 +6,24 @@
 import type { Contact, Observation, ProjectLot, ProjectStakeholder } from '../types';
 import { observationTargetsLot, TCE_LABEL } from './observationLots';
 
+/** Personne rattachée à une entreprise sur un lot (onglet DET > Entreprises, table `lot_intervenants`). */
+export interface LotIntervenantInput {
+  id: string;
+  lot_id: string;
+  entreprise: string;
+  nom: string;
+  role?: string | null;
+  email?: string | null;
+}
+
+/** Préfixe de la clé d'un destinataire qui est un intervenant de lot et non une fiche contact. */
+export const INTERVENANT_KEY_PREFIX = 'intervenant:';
+
 export interface DiffusionRecipient {
-  /** Identifiant du contact : la clé d'un destinataire (une entreprise sur plusieurs lots n'en forme qu'un). */
+  /**
+   * Clé d'un destinataire : l'identifiant de la fiche contact (une entreprise sur plusieurs lots n'en forme qu'un),
+   * ou `intervenant:<id>` pour une personne saisie dans l'onglet Entreprises (une personne sur plusieurs lots n'en forme qu'un).
+   */
   contactId: string;
   /** Raison sociale, à défaut le nom de la personne. */
   name: string;
@@ -86,6 +102,8 @@ export function buildDiffusionRecipients(input: {
   observations: Observation[];
   /** Observations des comptes-rendus précédents, non levées : jointes au message seulement si fournies. */
   previousObservations?: Observation[];
+  /** Intervenants des entreprises par lot : chacun avec une adresse reçoit le compte-rendu et les observations de son lot. */
+  intervenants?: LotIntervenantInput[];
 }): DiffusionRecipient[] {
   const contactById = new Map(input.contacts.map(c => [c.id, c]));
   const entries = new Map<string, { roles: string[]; lotIds: Set<string> }>();
@@ -112,13 +130,13 @@ export function buildDiffusionRecipients(input: {
     if (role && !entry.roles.includes(role)) entry.roles.push(role);
   }
 
-  return [...entries.entries()].map(([contactId, entry]) => {
+  const alreadyListed = new Set(input.observations.map(o => o.id));
+  const contactRecipients = [...entries.entries()].map(([contactId, entry]) => {
     const contact = contactById.get(contactId)!;
     // Une observation revient à l'entreprise d'un des lots visés (un seul, plusieurs, ou tous : TCE,
     // auquel cas toutes les entreprises titulaires d'un lot la reçoivent), ou à la personne désignée.
     const concerns = (o: Observation) =>
       [...entry.lotIds].some(lotId => observationTargetsLot(o, lotId)) || o.contact_id === contactId;
-    const alreadyListed = new Set(input.observations.map(o => o.id));
     return {
       contactId,
       name: contactLabel(contact),
@@ -128,6 +146,56 @@ export function buildDiffusionRecipients(input: {
       previousObservations: (input.previousObservations ?? [])
         .filter(o => !alreadyListed.has(o.id) && concerns(o))
         .sort(byNumber),
+    };
+  });
+  return [...contactRecipients, ...intervenantRecipients(input, contactRecipients, alreadyListed)];
+}
+
+/**
+ * Intervenants saisis dans l'onglet Entreprises. Une personne qui figure sur plusieurs lots (même adresse)
+ * n'écrit qu'un message, avec les observations de tous ses lots. Une adresse déjà celle d'un destinataire
+ * issu d'une fiche contact n'est pas doublée : cette personne reçoit déjà le compte-rendu.
+ * Un lot inconnu (supprimé) est ignoré ; une personne sans adresse reste listée, non joignable.
+ */
+function intervenantRecipients(
+  input: { lots: ProjectLot[]; observations: Observation[]; previousObservations?: Observation[]; intervenants?: LotIntervenantInput[] },
+  contactRecipients: DiffusionRecipient[],
+  alreadyListed: Set<string>,
+): DiffusionRecipient[] {
+  const lotById = new Map(input.lots.map(l => [l.id, l]));
+  const taken = new Set(contactRecipients.map(r => r.email.toLowerCase()).filter(Boolean));
+  const groups = new Map<string, { people: LotIntervenantInput[]; email: string }>();
+  const lotRank = (id: string) => String(lotById.get(id)?.lot_number ?? '');
+  const ordered = [...(input.intervenants ?? [])]
+    .filter(i => i && typeof i.id === 'string' && lotById.has(i.lot_id) && (i.nom || '').trim())
+    .sort((a, b) => lotRank(a.lot_id).localeCompare(lotRank(b.lot_id), 'fr', { numeric: true }));
+  for (const i of ordered) {
+    const email = isValidEmail(i.email) ? i.email.trim() : '';
+    if (email && taken.has(email.toLowerCase())) continue;
+    const key = email ? `${INTERVENANT_KEY_PREFIX}${email.toLowerCase()}` : `${INTERVENANT_KEY_PREFIX}${i.id}`;
+    const group = groups.get(key) ?? { people: [], email };
+    group.people.push(i);
+    groups.set(key, group);
+  }
+  return [...groups.values()].map(({ people, email }) => {
+    const first = people[0];
+    const lotIds = new Set(people.map(p => p.lot_id));
+    const concerns = (o: Observation) => [...lotIds].some(lotId => observationTargetsLot(o, lotId));
+    const roles: string[] = [];
+    for (const p of people) {
+      const lot = lotById.get(p.lot_id)!;
+      for (const role of [(p.role || '').trim(), (p.entreprise || '').trim(), `Lot ${lot.lot_number} ${lot.lot_title}`.trim()]) {
+        if (role && !roles.includes(role)) roles.push(role);
+      }
+    }
+    return {
+      // Un seul identifiant par personne : celui de sa première ligne (un UUID : le serveur refuse les clés de plus de 64 caractères).
+      contactId: `${INTERVENANT_KEY_PREFIX}${first.id}`,
+      name: first.nom.trim(),
+      roles,
+      email,
+      observations: input.observations.filter(concerns).sort(byNumber),
+      previousObservations: (input.previousObservations ?? []).filter(o => !alreadyListed.has(o.id) && concerns(o)).sort(byNumber),
     };
   });
 }

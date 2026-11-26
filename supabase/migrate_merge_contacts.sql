@@ -113,6 +113,7 @@ DECLARE
     ['phone_calls','contact_id'],
     ['project_cotraitants','contact_id'],
     ['project_lots','contact_id'],
+    ['project_shares','confrere_contact_id'],
     ['project_stakeholders','contact_id'],
     ['projects','client_id'],
     ['proposal_specialties','contact_id'],

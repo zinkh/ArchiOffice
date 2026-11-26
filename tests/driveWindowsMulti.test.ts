@@ -112,3 +112,10 @@ it('activates an empty A: without catalogs, restores it, and honors explicit dis
 it('refuses empty-drive activation on vault refusal and restores only its own identity',async()=>{
  config.vault.mockRejectedValueOnce(new Error('expired'));const drive=make();expect((await drive.activate()).status).toBe('error');expect(config.spawn).not.toHaveBeenCalled();expect(await drive.activate()).toEqual({status:'opened'});drive.shutdown();await new Promise(resolve=>setImmediate(resolve));config.spawn.mockClear();config.vault.mockResolvedValue({...identity,tenantId:'other'});const next=make();next.resume();await new Promise(resolve=>setTimeout(resolve,30));expect(config.spawn).not.toHaveBeenCalled();
 });
+
+it('exposes only active mounted snapshots and refuses an identity change',async()=>{
+ const drive=make();await drive.start('p');await drive.start('q');
+ const snapshot=await drive.shellSnapshot();expect(snapshot.identity).toEqual(identity);expect(snapshot.projects.map((p:any)=>p.projectId)).toEqual(['p','q']);
+ expect(snapshot.projects[0].directory).toBe(frames.find(f=>f.type==='init').root);
+ config.vault.mockResolvedValue({...identity,tenantId:'other'});await expect(drive.shellSnapshot()).rejects.toThrow();expect(drive.status().active).toBe(false);
+});

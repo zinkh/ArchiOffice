@@ -1,4 +1,5 @@
 'use strict';
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const fs=require('fs/promises');const path=require('path');const crypto=require('crypto');
 const {createWindowsEdits}=require('./windowsDriveEdits.cjs');
 const {agentEnvironment}=require('./driveAgent.cjs');const {isSafeToOpen}=require('./fileAccess.cjs');
@@ -10,14 +11,13 @@ async function noLinks(root,file) {
   for(const name of relative.split(path.sep).filter(Boolean)){current=path.join(current,name);if((await fs.lstat(current)).isSymbolicLink())throw new Error('Link refused');}
 }
 function catalogDetails(catalog,active) {
-  if(!same(catalog?.identity,active)||!Array.isArray(catalog.entries)||catalog.entries.length>256)throw new Error('Catalog refused');
+  if(!same(catalog?.identity,active)||!Array.isArray(catalog.entries)||Buffer.byteLength(JSON.stringify(catalog.entries))>MAX_CATALOG_BYTES)throw new Error('Catalog refused');
   const files=new Map();const paths=new Set();const savedEntries=[];
   const entries=catalog.entries.map(e=> {
     if(typeof e.path!=='string'||e.path.length>300||!/^_[^<>:"/|?*\x00-\x1f]+$/.test(e.path)||e.path.split('\\').some(p=>!p||p==='.'||p==='..'||/[. ]$/.test(p))
       ||typeof e.key!=='string'||!/^[a-f0-9]{64}$/.test(e.key)||typeof e.folder!=='boolean'||!Number.isSafeInteger(e.size)||e.size<0||e.size>50*1024*1024)throw new Error('Invalid catalog');
     const folded=e.path.toLowerCase();if(paths.has(folded))throw new Error('Path collision');paths.add(folded);
     if(!e.folder) {
-          if(files.size>=100)throw new Error('Too many files');
       const m=e.meta;
       if(!m||m.size!==e.size||typeof m.nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(m.nodeId)||!Number.isSafeInteger(m.version)||m.version<1
     ||(m.sha256!==null&&!/^[a-f0-9]{64}$/.test(m.sha256))||!isSafeToOpen(e.path))throw new Error('Invalid file');
@@ -61,7 +61,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
       if(snapshot&&(!same(snapshot.identity,active)||snapshot.projectId!==projectId
         ||typeof snapshot.directory!=='string'||path.dirname(snapshot.directory)!==path.resolve(root)))throw new Error('Snapshot refused');
       const catalog=snapshot?{identity:snapshot.identity,entries:snapshot.catalog}:catalogOverride||await agent.windowsPreview('catalog',{projectId});
-      if(!same(catalog?.identity,active)||!same(await vault(),active)||!Array.isArray(catalog.entries)||catalog.entries.length>256)throw new Error('Catalog refused');
+      if(!same(catalog?.identity,active)||!same(await vault(),active)||!Array.isArray(catalog.entries)||Buffer.byteLength(JSON.stringify(catalog.entries))>MAX_CATALOG_BYTES)throw new Error('Catalog refused');
       const {files,entries,savedEntries}=catalogDetails(catalog,active);
       await fs.mkdir(root,{recursive:true,mode:0o700});await noLinks(root,root);
       if(generation!==epoch||!same(await vault(),active))throw new Error('Access refused');
@@ -81,19 +81,26 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
         const fail=()=>{clearTimeout(timeout);reject(new Error('Native preview unavailable'));if(mount===state)stop();};
         child.once('error',fail);child.once('exit',fail);
         child.stdout.on('data',chunk=> {
-          text+=chunk.toString('utf8');if(text.length>1024*1024){fail();return;}
+          text+=chunk.toString('utf8');if(Buffer.byteLength(text)>MAX_CATALOG_BYTES){fail();return;}
           let newline;
           while((newline=text.indexOf('\n'))>=0) {
             const frame=text.slice(0,newline);text=text.slice(newline+1);let msg;try{msg=JSON.parse(frame);}catch{fail();return;}
             if(msg.type==='ready'&&!ready){ready=true;clearTimeout(timeout);resolve();}
+            else if(msg.type==='availability') {
+              const request=state.verifications.get(msg.requestId);
+              if(!request||request.type!=='availability'||!Array.isArray(msg.files)||msg.files.length!==files.size){fail();return;}
+              const seen=new Set();
+              for(const item of msg.files)if(!files.has(item?.key)||seen.has(item.key)||!(item.available===null||typeof item.available==='boolean')){fail();return;}else seen.add(item.key);
+              clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.files);
+            }
             else if(msg.type==='changes') {
               const request=state.verifications.get(msg.requestId);
-              if(!request||request.type!=='changes'||!Array.isArray(msg.keys)||msg.keys.length>100||new Set(msg.keys).size!==msg.keys.length||msg.keys.some(key=>!files.has(key))){fail();return;}
+              if(!request||request.type!=='changes'||!Array.isArray(msg.keys)||msg.keys.length>files.size||new Set(msg.keys).size!==msg.keys.length||msg.keys.some(key=>!files.has(key))){fail();return;}
               clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.keys);
             }
-            else if(msg.type==='verified'||msg.type==='locked') {
+            else if(msg.type==='verified'||msg.type==='locked'||msg.type==='pinned') {
               const request=state.verifications.get(msg.requestId);
-              if(!request||request.type!==(msg.type==='locked'?'lock':'verify')||typeof msg.valid!=='boolean'){fail();return;}
+              if(!request||request.type!==(msg.type==='locked'?'lock':msg.type==='pinned'?'pin':'verify')||typeof msg.valid!=='boolean'){fail();return;}
               clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.valid);
             }
             else if(msg.type==='error'){
@@ -148,6 +155,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
     });
     if(mount!==state||state.stopped||!same(await vault(),state.identity))throw new Error('Access refused');return result;
   }
-  return {start,stop,verify:()=>request('verify'),status:()=>({enabled:available(),active:!!mount,...(mount?.edits?{edits:mount.edits.status()}:{})})};
+  async function lock(key){const state=mount,id=crypto.randomUUID();const release=()=>{if(state&&!state.stopped)state.child.stdin.write(JSON.stringify({type:'unlock',requestId:id})+'\n');};try{if(!await request('lock',{key},id,state))throw new Error('File busy');return release;}catch(error){release();throw error;}}
+  return {start,stop,lock,pin:key=>request('pin',{key}),availability:()=>request('availability'),verify:(except)=>request('verify',except?{except}:{}),status:()=>({enabled:available(),active:!!mount,...(mount?.edits?{edits:mount.edits.status()}:{})})};
 }
 module.exports={createWindowsPreview,noLinks,catalogDetails};

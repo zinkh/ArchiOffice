@@ -4,6 +4,8 @@
 // pour le raisonnement. Ce panneau les gère, identique pour les trois
 // éditeurs (CCTP, DPGF, BPU/DQE) puisque le registre est le même type partout.
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { useConfirmDialog } from '../ui/ConfirmDialog';
 import { IconX, IconPlus, IconTrash, IconChevronUp, IconChevronDown } from '@tabler/icons-react';
 import type { Batiment, DecoupageDocument, PhaseOperation } from '../../types/dpgf';
 import { purgerDecoupage, type LotLike } from './treeOps';
@@ -41,6 +43,8 @@ function permuter<T extends { id: string; ordre: number }>(items: T[], id: strin
 }
 
 export function DecoupagePanel<L extends LotLike>({ doc, onPatch, onClose }: Props<L>) {
+  const { t } = useTranslation();
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const batiments = doc.batiments ?? [];
   const phases = doc.phases ?? [];
 
@@ -52,11 +56,19 @@ export function DecoupagePanel<L extends LotLike>({ doc, onPatch, onClose }: Pro
     onPatch({ batiments: batiments.map(b => b.id === id ? { ...b, ...p } : b) });
   const deplacerBatiment = (id: string, sens: -1 | 1) =>
     onPatch({ batiments: permuter(batiments, id, sens) });
-  const supprimerBatiment = (id: string) =>
+  const supprimerBatiment = async (id: string) => {
+    const b = batiments.find(x => x.id === id);
+    const ok = await confirm({
+      title: t('pro_confirm_remove_building_title', { nom: b?.code || b?.libelle || '' }),
+      message: t('pro_confirm_remove_registry_message'),
+      confirmLabel: t('pro_delete'), cancelLabel: t('pro_undo'), tone: 'danger',
+    });
+    if (!ok) return;
     onPatch({
-      batiments: batiments.filter(b => b.id !== id),
+      batiments: batiments.filter(x => x.id !== id),
       lots: purgerDecoupage(doc.lots, 'batimentId', id),
     });
+  };
 
   const ajouterPhase = () => {
     const p: PhaseOperation = { id: newId(), code: `PH${phases.length + 1}`, libelle: '', ordre: prochainOrdre(phases) };
@@ -66,14 +78,23 @@ export function DecoupagePanel<L extends LotLike>({ doc, onPatch, onClose }: Pro
     onPatch({ phases: phases.map(x => x.id === id ? { ...x, ...p } : x) });
   const deplacerPhase = (id: string, sens: -1 | 1) =>
     onPatch({ phases: permuter(phases, id, sens) });
-  const supprimerPhase = (id: string) =>
+  const supprimerPhase = async (id: string) => {
+    const ph = phases.find(x => x.id === id);
+    const ok = await confirm({
+      title: t('pro_confirm_remove_phase_title', { nom: ph?.code || ph?.libelle || '' }),
+      message: t('pro_confirm_remove_registry_message'),
+      confirmLabel: t('pro_delete'), cancelLabel: t('pro_undo'), tone: 'danger',
+    });
+    if (!ok) return;
     onPatch({
       phases: phases.filter(p => p.id !== id),
       lots: purgerDecoupage(doc.lots, 'phaseId', id),
     });
+  };
 
   return (
     <div className="border-b border-zinc-200 dark:border-zinc-700 bg-[#f9fafb] dark:bg-zinc-800/30 px-4 py-3">
+      {confirmDialog}
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Bâtiments et phases</h3>
         <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700"><IconX size={14} /></button>

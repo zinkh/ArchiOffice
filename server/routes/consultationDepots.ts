@@ -18,14 +18,14 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { evaluerEligibilite, type DepsEligibilite } from '../consultationDepot/eligibility';
 import { genererJeton, hacherJeton, lienDepot } from '../consultationDepot/tokens';
+import { lienAccuse, signerAccuse } from '../consultationDepot/accuseAdditif';
 import { parseExternalRef } from '../externalStorage/externalRef';
 import { getConnectionById } from '../externalStorage/externalConnection';
 import { signExternalTicket } from '../externalStorage/externalTicket';
 import { createProvider } from '../externalStorage/providerFactory';
-import { lireTexteDepot } from '../consultationDepot/analyse';
+import { analyserFichier } from '../consultationDepot/analyse';
 import { aiGenerationLimiter } from '../rateLimit';
 import { MAX_FICHIER_OCTETS } from '../../src/lib/consultationDepot';
-import { extraireMontants } from '../../src/lib/depotMontants';
 import { isValidEmail } from '../../src/lib/crDiffusion';
 import { expirationLien, plisScelles, type ReglagesDepot } from '../../src/lib/consultationDepot';
 
@@ -177,14 +177,14 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_depot_invites')
-        .select('id, entreprise_id, entreprise_nom, email, lots_ids, expires_at, revoked_at, last_opened_at, created_at')
+        .select('id, entreprise_id, entreprise_nom, email, lots_ids, expires_at, revoked_at, last_opened_at, visite_confirmee_le, created_at')
         .eq('project_id', req.params.projectId).order('created_at', { ascending: false });
       // Liste blanche explicite : le haché du jeton ne sort jamais, quelle que
       // soit la requête SQL.
       res.json(((data as any[]) || []).map(l => ({
         id: l.id, entreprise_id: l.entreprise_id, entreprise_nom: l.entreprise_nom, email: l.email,
         lots_ids: l.lots_ids, expires_at: l.expires_at, revoked_at: l.revoked_at,
-        last_opened_at: l.last_opened_at, created_at: l.created_at,
+        last_opened_at: l.last_opened_at, visite_confirmee_le: l.visite_confirmee_le ?? null, created_at: l.created_at,
       })));
     } catch (err: any) {
       console.error('[GET depot/invites]', err?.message);
@@ -255,6 +255,98 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
     } catch (err: any) {
       console.error('[DELETE depot/invites]', err?.message);
       res.status(500).json({ error: "Le lien n'a pas pu être révoqué." });
+    }
+  });
+
+  // ── Additifs au DCE : liens « j'ai bien reçu » et accusés reçus ────────────
+  // Un lien signé par entreprise (sans état, voir accuseAdditif.ts) : il ne vaut que pour confirmer la
+  // réception de CET additif, et ne touche pas au lien de dépôt de l'entreprise. L'additif n'est pas
+  // vérifié dans la consultation : l'écran l'enregistre avec un léger délai (enregistrement automatique).
+  app.post('/api/projects/:projectId/depot/additifs/:revisionId/liens', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId, revisionId } = req.params;
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(revisionId)) return res.status(400).json({ error: 'Additif invalide.' });
+      if (!(await projetDuCabinet(tenantId, projectId))) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const entreprises: Array<{ id: unknown }> = Array.isArray(req.body?.entreprises) ? req.body.entreprises : [];
+      if (entreprises.length === 0 || entreprises.length > 200) return res.status(400).json({ error: 'Indiquez entre 1 et 200 entreprises.' });
+      const liens: Record<string, string> = {};
+      for (const e of entreprises) {
+        if (typeof e?.id !== 'string' || !e.id || e.id.length > 100) return res.status(400).json({ error: 'Entreprise invalide.' });
+        liens[e.id] = lienAccuse(signerAccuse({ t: tenantId, p: projectId, e: e.id, r: revisionId }));
+      }
+      res.json({ liens });
+    } catch (err: any) {
+      console.error('[POST depot/additifs/liens]', err?.message);
+      res.status(500).json({ error: 'Les liens de confirmation n\'ont pas pu être créés.' });
+    }
+  });
+
+  app.get('/api/projects/:projectId/depot/additifs/accuses', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await projetDuCabinet(tenantId, req.params.projectId))) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_additif_accuses')
+        .select('revision_id, entreprise_id, accuse_le').eq('project_id', req.params.projectId);
+      res.json(((data as any[]) || []).map(a => ({ revision_id: a.revision_id, entreprise_id: a.entreprise_id, accuse_le: a.accuse_le })));
+    } catch (err: any) {
+      console.error('[GET depot/additifs/accuses]', err?.message);
+      res.status(500).json({ error: 'Lecture des accusés impossible.' });
+    }
+  });
+
+  // ── Réponses aux quantités à confirmer ─────────────────────────────────────
+  // Lecture seule : l'écran de l'ACT les montre dans le panneau des quantités et l'architecte les applique
+  // à l'offre. Rien n'est modifié ici.
+  app.get('/api/projects/:projectId/depot/quantites/reponses', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await projetDuCabinet(tenantId, req.params.projectId))) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_quantites_reponses')
+        .select('entreprise_id, ligne_id, choix, quantite, updated_at').eq('project_id', req.params.projectId);
+      res.json(((data as any[]) || []).map(r => ({
+        entreprise_id: r.entreprise_id, ligne_id: r.ligne_id, choix: r.choix,
+        quantite: r.quantite == null ? null : Number(r.quantite), repondu_le: r.updated_at,
+      })));
+    } catch (err: any) {
+      console.error('[GET depot/quantites/reponses]', err?.message);
+      res.status(500).json({ error: 'Lecture des réponses impossible.' });
+    }
+  });
+
+  // ── Questions des entreprises ──────────────────────────────────────────────
+  // Boîte de réception : l'écran de l'ACT reprend chaque question dans consultation.questions (où la
+  // réponse est saisie) en comparant les identifiants, sans rien marquer ici. Lecture permise même
+  // après un changement de plan : des questions déjà posées ne deviennent pas illisibles.
+  app.get('/api/projects/:projectId/depot/questions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await projetDuCabinet(tenantId, req.params.projectId))) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_depot_questions')
+        .select('id, entreprise_id, entreprise_nom, lot_id, objet, question, created_at')
+        .eq('project_id', req.params.projectId).order('created_at', { ascending: true });
+      res.json(((data as any[]) || []).map(q => ({
+        id: q.id, entreprise_id: q.entreprise_id, entreprise_nom: q.entreprise_nom, lot_id: q.lot_id ?? null,
+        objet: q.objet ?? null, question: q.question, created_at: q.created_at,
+      })));
+    } catch (err: any) {
+      console.error('[GET depot/questions]', err?.message);
+      res.status(500).json({ error: 'Lecture des questions impossible.' });
+    }
+  });
+
+  // Supprimer une question dans l'ACT la retire aussi de la boîte de réception : sans cela l'écran la
+  // reprendrait au prochain chargement.
+  app.delete('/api/projects/:projectId/depot/questions/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'consultation_depot_questions')
+        .delete().eq('id', req.params.id).eq('project_id', req.params.projectId);
+      if (error) throw error;
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error('[DELETE depot/questions]', err?.message);
+      res.status(500).json({ error: "La question n'a pas pu être supprimée." });
     }
   });
 
@@ -365,14 +457,7 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
         if (total > MAX_FICHIER_OCTETS + 1024) return res.status(413).json({ error: 'Fichier trop volumineux pour être lu.' });
         morceaux.push(b);
       }
-      const texte = await Promise.race([
-        lireTexteDepot(depot.file_name || '', Buffer.concat(morceaux)),
-        new Promise<never>((_, rejeter) => setTimeout(() => rejeter(new Error("La lecture du document a dépassé le délai imparti.")), 45_000)),
-      ]);
-      if (!texte) {
-        return res.json({ texte_lu: false, candidats: [], note: 'Aucun texte exploitable : le document est peut-être scanné. Ouvrez-le pour lire le montant.' });
-      }
-      res.json({ texte_lu: true, candidats: extraireMontants(texte), note: null });
+      res.json(await analyserFichier(depot.file_name || '', Buffer.concat(morceaux)));
     } catch (err: any) {
       console.error('[POST depots/:id/analyser]', err?.message);
       res.status(500).json({ error: err?.message?.includes('délai') ? err.message : "La lecture du document a échoué." });

@@ -88,6 +88,10 @@ export interface LlmChatParams {
    *  (Mistral). Par défaut celui du chat ; une rédaction longue (CCTP) le
    *  relève. */
   timeoutMs?: number;
+  /** Plafond de jetons en sortie pour cet appel (une réponse courte ne doit pas
+   *  pouvoir s'étendre sur des milliers de jetons). Pris en compte par Mistral ;
+   *  les autres adaptateurs gardent leur plafond propre. */
+  maxTokens?: number;
   /** Début STABLE du premier message utilisateur (pièces d'une affaire, par
    *  exemple), à faire mettre en cache par le fournisseur quand plusieurs
    *  appels successifs le partagent : il est placé devant `content` du premier
@@ -173,6 +177,11 @@ export interface LlmProvider {
    *  pièces photographiées — dégradé, mais honnête, plutôt que d'envoyer une
    *  image qu'il ignorerait silencieusement ou refuserait. */
   readonly supportsVision?: boolean;
+  /** Nombre maximal d'images qu'une requête peut porter (Mistral : 8).
+   *  Absent : aucune limite connue. buildAgentContext() (context.ts) s'en sert
+   *  pour ne pas dépasser ce budget : les pièces en trop retombent sur le
+   *  texte OCR plutôt que de faire refuser toute la requête. */
+  readonly maxImages?: number;
   /** Le fournisseur sait-il exécuter lui-même une recherche web (voir
    *  LlmChatParams.webSearch) ? Absent/false : routes.ts n'envoie jamais ce
    *  paramètre à ce fournisseur, et web_search_enabled reste sans effet tant

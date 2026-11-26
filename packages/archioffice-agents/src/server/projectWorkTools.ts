@@ -34,7 +34,7 @@ const confirmation = (aRetirer: unknown, extra: Json = {}): Result => ({
 });
 
 export const PROJECT_WORK_TOOL_NAMES = [
-  'manage_project_lots', 'manage_dpgf', 'manage_project_cotraitants', 'manage_project_members', 'manage_project_journal', 'manage_observations',
+  'manage_project_lots', 'manage_dpgf', 'manage_cctp', 'manage_project_cotraitants', 'manage_project_members', 'manage_project_journal', 'manage_observations',
 ] as const;
 export const MEETING_WORK_TOOL_NAMES = ['manage_meeting_attendees'] as const;
 
@@ -93,6 +93,39 @@ export const PROJECT_WORK_TOOLS: FunctionDeclarationLike[] = [
         numero: { type: 'string', description: 'update_ligne / delete_ligne : numéro de la ligne' },
         designation: { type: 'string' }, unite: { type: 'string' }, quantite: { type: 'number' }, prix_unitaire: { type: 'number' },
         confirm: confirmProp,
+      },
+      required: ['project_id', 'action'],
+    },
+  },
+  {
+    name: 'manage_cctp',
+    description:
+      "ÉCRIT dans le CCTP d'une opération : rédige ou complète le TEXTE technique d'un lot, d'un chapitre ou d'un article, ou ajoute des articles. " +
+      "À utiliser dès que l'utilisateur demande de RÉDIGER, COMPLÉTER, REPRENDRE ou CORRIGER le CCTP (« rédige le texte du poste 05.1.3 », « ajoute les prescriptions générales du lot 02 »). Jamais d'UPDATE SQL sur dpgfs. " +
+      "Le CCTP et le DPGF sont UN document : relis-le d'abord avec read_cctp pour ne pas dupliquer ni écraser. Pour les QUANTITÉS et les PRIX, utilise manage_dpgf : cet outil n'en écrit jamais. " +
+      "set_texte : cible = lot | chapitre | article, avec lot (numéro) ; chapitre (numéro ou titre) pour un chapitre ; id ou numero pour un article ; texte = texte brut (paragraphes séparés par une ligne vide, tirets « - » pour les listes, [b]…[/b] pour le gras). " +
+      "Si l'élément porte déjà un texte, l'outil demande confirmation (needs_confirmation, avec l'ancien et le nouveau texte) : présente-la, puis rappelle avec confirm: true seulement après l'accord de l'utilisateur. " +
+      "append_texte : ajoute le texte À LA SUITE de l'existant, sans rien perdre (même paramètres, sans confirmation). " +
+      "add_articles : lot, chapitre (numéro ou titre), articles = [{designation, texte?, unite?, cctp_only?, numero?}] ; jusqu'à 100 articles ; sans quantité ni prix ; un article d'un chapitre réservé au CCTP (prescriptions générales ou techniques) ou avec cctp_only: true n'apparaît pas dans le DPGF et n'a ni unité ni quantité. " +
+      "Un élément « en cours d'édition » par une PERSONNE (marqueur) n'est pas modifié : l'outil répond 409 ; dis-le à l'utilisateur, ne contourne pas (forcer: true seulement sur sa demande explicite). " +
+      "N'invente ni marque, ni dimension, ni quantité, ni référence normative incertaine : écris « [à préciser] » pour ce qui manque.",
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        project_id: projectIdProp,
+        action: { type: 'string', enum: ['set_texte', 'append_texte', 'add_articles'] },
+        cible: { type: 'string', enum: ['lot', 'chapitre', 'article'], description: 'set_texte / append_texte : type d\'élément' },
+        lot: { type: 'string', description: 'Numéro du lot (ex. « 05 »)' },
+        chapitre: { type: 'string', description: 'Numéro ou titre du chapitre' },
+        id: { type: 'string', description: 'Article : identifiant (read_cctp)' },
+        numero: { type: 'string', description: 'Article : numéro (avec lot si le numéro n\'est pas unique)' },
+        texte: { type: 'string', description: 'Texte technique, 20 000 caractères au plus' },
+        articles: {
+          type: 'array', description: 'add_articles : 100 articles au plus',
+          items: { type: 'object', properties: { designation: { type: 'string' }, texte: { type: 'string' }, unite: { type: 'string' }, cctp_only: { type: 'boolean' }, numero: { type: 'string' } }, required: ['designation'] },
+        },
+        forcer: { type: 'boolean', description: "Seulement sur demande explicite de l'utilisateur : passe outre un marqueur « en cours d'édition » posé par une personne" },
+        confirm: { type: 'boolean', description: "set_texte sur un texte existant : laisser vide au premier appel ; true seulement après l'accord explicite de l'utilisateur." },
       },
       required: ['project_id', 'action'],
     },
@@ -615,6 +648,52 @@ async function manageDpgf(request: ToolRequest, projectId: string, args: Json): 
   };
 }
 
+// ── manage_cctp ──────────────────────────────────────────────────────────────
+
+const MAX_CCTP_ARTICLES = 100;
+
+async function manageCctp(request: ToolRequest, projectId: string, args: Json): Promise<Result> {
+  const action = text(args.action);
+  if (!['set_texte', 'append_texte', 'add_articles'].includes(action)) return failure('action doit valoir set_texte, append_texte ou add_articles.');
+  const path = `/api/projects/${encodeURIComponent(projectId)}/cctp/textes`;
+  const recordUrl = buildRecordUrl('projects', { id: projectId });
+
+  let body: Json;
+  if (action === 'add_articles') {
+    const articles = Array.isArray(args.articles) ? args.articles.filter((x: unknown) => x && typeof x === 'object') : [];
+    if (!articles.length) return failure('articles est requis pour add_articles.');
+    if (articles.length > MAX_CCTP_ARTICLES) return failure(`${articles.length} articles en un appel : le maximum est ${MAX_CCTP_ARTICLES}.`);
+    body = { action, lot: text(args.lot), chapitre: text(args.chapitre), articles, forcer: args.forcer === true || undefined };
+  } else {
+    body = {
+      action, cible: text(args.cible), lot: text(args.lot) || undefined, chapitre: text(args.chapitre) || undefined,
+      id: text(args.id) || undefined, numero: text(args.numero) || undefined,
+      texte: typeof args.texte === 'string' ? args.texte : '', forcer: args.forcer === true || undefined,
+    };
+  }
+
+  // Remplacer un texte déjà rédigé : aperçu d'abord, écriture seulement après l'accord de la personne.
+  if (action === 'set_texte') {
+    if (args.confirm !== true) {
+      const { res, json } = await request(path, 'POST', { ...body, remplacer: true, dry_run: true });
+      if (!res.ok) return failure(json?.error || `HTTP ${res.status}`);
+      if (String(json.avant ?? '').trim() && String(json.avant).trim() !== String(json.apres ?? '').trim()) {
+        return confirmation({ element: json.cible, texte_actuel: json.avant, nouveau_texte: json.apres });
+      }
+    }
+    body.remplacer = true;
+  }
+
+  const { res, json } = await request(path, 'POST', body);
+  if (!res.ok) return failure(json?.error || `HTTP ${res.status}`);
+  const { success: _ok, avant: _avant, apres: _apres, ...rapport } = json;
+  const n = Array.isArray(rapport.articles_ajoutes) ? rapport.articles_ajoutes.length : 0;
+  return {
+    response: { success: true, ...rapport, record_url: recordUrl },
+    summary: action === 'add_articles' ? `${plural(n, 'article')} ajouté${n > 1 ? 's' : ''} au CCTP` : action === 'append_texte' ? 'Texte ajouté au CCTP' : 'Texte du CCTP écrit',
+  };
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 export async function executeProjectWorkTool(baseUrl: string, auth: InternalAuth, name: string, args: Json): Promise<Result> {
@@ -629,6 +708,7 @@ export async function executeProjectWorkTool(baseUrl: string, auth: InternalAuth
     switch (name) {
       case 'manage_project_lots': return await manageLots(request, projectId, args);
       case 'manage_dpgf': return await manageDpgf(request, projectId, args);
+      case 'manage_cctp': return await manageCctp(request, projectId, args);
       case 'manage_project_cotraitants': return await manageCotraitants(request, projectId, args);
       case 'manage_project_members': return await manageMembers(request, projectId, args);
       case 'manage_project_journal': return await manageJournal(request, projectId, args);

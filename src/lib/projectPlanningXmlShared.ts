@@ -13,6 +13,12 @@ export interface ImportedPlanningTask {
   dependencies: string[];
   resourceNames: string[];
   milestone?: boolean;
+  /** Tâche récapitulative (groupe) : elle regroupe d'autres tâches et n'est pas une intervention. */
+  summary?: boolean;
+  /** Identifiant source du groupe qui contient la tâche (absent : niveau racine). */
+  parentSourceId?: string;
+  /** Décalage de chaque lien, en jours, par identifiant source de prédécesseur (absent : 0). */
+  lagDays?: Record<string, number>;
 }
 
 export interface ParsedPlanningXml {
@@ -35,6 +41,7 @@ export const planningXmlBuilder = new XMLBuilder({
   attributeNamePrefix: '@_',
   format: true,
   suppressEmptyNode: true,
+  suppressBooleanAttributes: false,
 });
 
 export function asArray<T>(value: T | T[] | undefined | null): T[] {
@@ -113,3 +120,16 @@ export function importedTasksToCreatePayloads(
     };
   });
 }
+
+
+/** Métadonnées facultatives : les exports des tâches internes gardent leur comportement. */
+/** `xmlLags` : décalage de chaque lien, en jours, par identifiant de prédécesseur (absent : 0). */
+export type PlanningXmlTask = Task & { xmlParentId?: string; xmlMilestone?: boolean; xmlColor?: string; xmlLags?: Record<string, number> };
+export function xmlOutline(tasks: PlanningXmlTask[], task: PlanningXmlTask): string {
+  const siblings = tasks.filter(t => t.xmlParentId === task.xmlParentId);
+  const rank = String(siblings.findIndex(t => t.id === task.id) + 1);
+  const parent = tasks.find(t => t.id === task.xmlParentId);
+  return parent ? `${xmlOutline(tasks, parent)}.${rank}` : rank;
+}
+
+export interface PlanningXmlOptions { calendarDays?: boolean }

@@ -1,3 +1,4 @@
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const crypto = require('crypto');
 
 // The worker gets platform/network variables only, never application secrets.
@@ -23,7 +24,7 @@ function sendToChild(child, value) { if(child?.connected) { try { child.send(val
 function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus=()=>{},environment=process.env}) {
   let child=null;let stopped=false;let restart=null;let failures=0;let outstanding=0;
   const jobs=new Map();
-  function rejectJobs() {for(const p of jobs.values()){clearTimeout(p.timer);p.reject(new Error('Agent unavailable'));}jobs.clear();}
+  function rejectJobs() {for(const p of jobs.values()){clearTimeout(p.timer);p.cleanup?.();p.reject(new Error('Agent unavailable'));}jobs.clear();}
   function start() {
     if(stopped||child)return;
     const processChild=spawn(executable,[entry],{env:agentEnvironment(environment),stdio:['ignore','ignore','ignore','ipc'],windowsHide:true});
@@ -38,10 +39,10 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       }
       if(msg?.type==='drive:status' && ['running','paused','stopped'].includes(msg.state))onStatus({state:msg.state,...Object.fromEntries(['pending','blocked','conflicts'].map(k=>[k,Number.isSafeInteger(msg[k])&&msg[k]>=0?msg[k]:0]))});
       if(msg?.type==='drive:working-result'||msg?.type==='drive:document-statuses-result') {
-        const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);jobs.delete(msg.requestId);
-        if(msg.error)p.reject(Object.assign(new Error('Drive working copy failed'),{code:msg.error.code}));else p.resolve(msg.result);
+        const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);p.cleanup?.();jobs.delete(msg.requestId);
+        if(msg.error)p.reject(Object.assign(new Error('Drive working copy failed'),{code:msg.error.code,...([401,402,403,404].includes(msg.error.status)?{status:msg.error.status}:{})}));else p.resolve(msg.result);
       }
-      if(msg?.type==='drive:enqueued'||msg?.type==='drive:retried') {const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);jobs.delete(msg.requestId);
+      if(msg?.type==='drive:enqueued'||msg?.type==='drive:retried') {const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);p.cleanup?.();jobs.delete(msg.requestId);
         if(msg.error)p.reject(new Error('Drive enqueue failed'));else p.resolve(msg.type==='drive:retried'?{retried:Number.isSafeInteger(msg.result?.retried)?msg.result.retried:0}:{queued:true,jobId:msg.result?.jobId});}
     });
     const exited=()=> {
@@ -68,16 +69,23 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:`drive:${action}-working`,requestId,nodeId});
     });},
     documentStatuses(nodeIds) {return new Promise((resolve,reject)=> {
-      if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)return reject(new Error('Invalid documents'));
+      if(!Array.isArray(nodeIds)||Buffer.byteLength(JSON.stringify(nodeIds))>MAX_CATALOG_BYTES||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)return reject(new Error('Invalid documents'));
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));
       const requestId=crypto.randomUUID();
       const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive status timeout'));},30000);
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:document-statuses',requestId,nodeIds});
     });},
-    windowsPreview(action,input) {return new Promise((resolve,reject)=> {
-      if(!['catalog','hydrate','upload'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
-      const requestId=crypto.randomUUID();const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Preview timeout'));},action==='catalog'?300000:60000);
-      jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:windows-preview',requestId,action,input});
+    windowsPreview(action,input,signal) {return new Promise((resolve,reject)=> {
+      if(!['catalog','hydrate','upload','shellMetadata','shellVersions','shell-metadata','shellActions','shellClassify','conflictProof','conflictReconcile','shellPreserve','shellRetry'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
+      if(signal&&!['shellVersions','shellActions'].includes(action))return reject(new Error('Unsupported preview cancellation'));
+      if(signal?.aborted)return reject(Object.assign(new Error('Preview cancelled'),{code:'ABORT_ERR'}));
+      const requestId=crypto.randomUUID();
+      const cleanup=()=>signal?.removeEventListener('abort',cancel);
+      const finish=error=>{if(!jobs.has(requestId))return;clearTimeout(timer);cleanup();jobs.delete(requestId);if(['shellVersions','shellActions'].includes(action))sendToChild(child,{type:'drive:cancel-windows-preview',requestId});reject(error);};
+      const cancel=()=>finish(Object.assign(new Error('Preview cancelled'),{code:'ABORT_ERR'}));
+      const timer=setTimeout(()=>finish(new Error('Preview timeout')),['catalog','shellMetadata','shellVersions','shell-metadata','shellActions','shellClassify','conflictProof','conflictReconcile','shellPreserve','shellRetry'].includes(action)?300000:60000);
+      jobs.set(requestId,{resolve,reject,timer,cleanup});signal?.addEventListener('abort',cancel,{once:true});
+      if(signal?.aborted)cancel();else sendToChild(child,{type:'drive:windows-preview',requestId,action,input});
     });},
     retryBlocked() {return new Promise((resolve,reject)=> {
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));

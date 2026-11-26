@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IconDownload, IconSend, IconBellRinging, IconChevronDown, IconChevronRight, IconAlertTriangle } from '@tabler/icons-react';
 import { ModalShell } from '../ui/ModalShell';
 import { apiFetch, baseFetchJson } from '../../lib/api';
+import { estAnnulation, verifierAnnulation } from '../../lib/annulation';
 import { getAccessToken } from '../../lib/authToken';
 import { applyTenantHeader } from '../../lib/activeTenant';
 import type { Plan } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import { reservesPdfFilename, DEFAULT_RESERVES_CONTENT, type ReservesExportContent, type ReservesExportProject } from '../../lib/reservesExport';
 import {
-  LIBELLE_STATUT, SANS_LOT, lotLabel, orderedLotTitles, selectReserves,
+  LIBELLE_STATUT, SANS_LOT, estNonLevee, groupReservesByLot, lotLabel, orderedLotTitles, selectReserves,
   type ExportSend, type ExportStatus, type LotRef,
 } from '../../lib/reserveDiffusion';
+import { livrer, type FichierExporte } from '../../lib/exportSortie';
 import { parseJsonList } from '../../lib/jsonList';
 import { cn } from '../../lib/utils';
 import type { ReserveLike } from './reserveShared';
@@ -21,6 +23,8 @@ interface Props {
   title: string;
   projectId: string;
   reserves: ReserveLike[];
+  /** Couleurs de l'écran (calculées sur toutes les réserves) : le PDF reprend les mêmes, même filtré par lot. */
+  couleurs?: Map<string, string>;
   plans: Plan[];
   project: ReservesExportProject;
   settings: AgencySettings;
@@ -53,7 +57,7 @@ const fmtDateHeure = (iso: string) => {
 const SECTION = 'text-xs font-bold uppercase tracking-wider text-[var(--tblr-muted)]';
 const BOUTON = 'inline-flex items-center justify-center gap-2 px-4 py-2 pointer-coarse:min-h-11 rounded-lg text-sm font-bold disabled:opacity-50';
 
-export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans, project, settings, lots, onClose }: Props) {
+export function ReserveDiffusionDialog({ kind, title, projectId, reserves, couleurs, plans, project, settings, lots, onClose }: Props) {
   const [scope, setScope] = useState<'all' | 'lots'>('all');
   const [chosenLots, setChosenLots] = useState<Set<string>>(new Set());
   const [recipients, setRecipients] = useState<RecipientsResponse | null>(null);
@@ -63,12 +67,29 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
   const [open, setOpen] = useState<string | null>(null);
   const [reminder, setReminder] = useState<ReminderSetting | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Annulation de l'export PDF en cours (jamais de l'envoi par e-mail).
+  const annulation = useRef<AbortController | null>(null);
   // Contenu du PDF (téléchargement et diffusion) : tout par défaut, comme avant.
   const [content, setContent] = useState<ReservesExportContent>({ ...DEFAULT_RESERVES_CONTENT });
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
+  // Réserves levées : incluses par défaut (comme avant), au PDF comme à la diffusion par e-mail.
+  const [inclureLevees, setInclureLevees] = useState(true);
+  // Export : un PDF indépendant par lot, réunis dans une archive ZIP.
+  const [parLot, setParLot] = useState(false);
+
   const lotsArg = useMemo(() => (scope === 'lots' ? [...chosenLots] : null), [scope, chosenLots]);
-  const scopeReserves = useMemo(() => selectReserves(reserves, lotsArg), [reserves, lotsArg]);
+  const perimetreReserves = useMemo(() => selectReserves(reserves, lotsArg), [reserves, lotsArg]);
+  const nbLevees = useMemo(() => perimetreReserves.filter(r => !estNonLevee(r)).length, [perimetreReserves]);
+  const scopeReserves = useMemo(
+    () => (inclureLevees ? perimetreReserves : perimetreReserves.filter(estNonLevee)),
+    [perimetreReserves, inclureLevees],
+  );
+  // Un groupe par lot, dans l'ordre des numéros de lot : une réserve de plusieurs lots n'est rangée que sous le premier.
+  const groupesParLot = useMemo(
+    () => groupReservesByLot(scopeReserves, lots, lotsArg ? new Set(lotsArg) : null),
+    [scopeReserves, lots, lotsArg],
+  );
 
   // Lots proposés : ceux de l'opération dans l'ordre des numéros, avec leur nombre de réserves ; « Sans lot » si besoin.
   const lotChoices = useMemo(() => {
@@ -100,7 +121,8 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
     if (scope === 'lots' && chosenLots.size === 0) { setRecipients(null); return; }
     let vivant = true;
     const lotsParam = lotsArg ? `&lots=${encodeURIComponent(JSON.stringify(lotsArg))}` : '';
-    apiFetch<{ reserve_count: number; intervenants: any[]; entreprises: any[] }>(`/api/projects/${projectId}/reserve-exports/recipients?kind=${kind}${lotsParam}`)
+    const leveesParam = inclureLevees ? '' : '&include_levees=0';
+    apiFetch<{ reserve_count: number; intervenants: any[]; entreprises: any[] }>(`/api/projects/${projectId}/reserve-exports/recipients?kind=${kind}${lotsParam}${leveesParam}`)
       .then(r => {
         if (!vivant) return;
         // Les réserves de chaque entreprise se déduisent de la liste (le serveur ne renvoie que leur nombre).
@@ -119,10 +141,10 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
     return () => { vivant = false; };
     // scopeReserves découle de reserves et lotsArg : seul le périmètre relance la lecture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, kind, scope, chosenLots]);
+  }, [projectId, kind, scope, chosenLots, inclureLevees]);
 
   const exportOptions = (extra: Record<string, unknown> = {}) => ({
-    title, lots, allowedLots: lotsArg, scopeLabel, content, ...extra,
+    title, lots, allowedLots: lotsArg, scopeLabel, content, couleurs, ...extra,
   });
   const nothingToPrint = !content.liste && !content.details && !content.plans;
   const toggleContent = (key: keyof ReservesExportContent) => setContent(prev => ({ ...prev, [key]: !prev[key] }));
@@ -130,18 +152,47 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
   const telecharger = async () => {
     setMessage(null);
     setBusy('Préparation…');
+    const controleur = new AbortController();
+    annulation.current = controleur;
+    const signal = controleur.signal;
     try {
       const { exportReservesToPDF } = await import('../../lib/reservesExport');
-      await exportReservesToPDF(scopeReserves, plans, project, settings, { ...exportOptions(), onProgress: setBusy });
+      let fichiers = 1;
+      if (parLot) {
+        // Un PDF par lot, chacun complet et indépendant (page de garde, fiches, plans de SES réserves), puis une
+        // archive ZIP : plusieurs téléchargements à la suite seraient bloqués par le navigateur.
+        const pdfs: FichierExporte[] = [];
+        for (let i = 0; i < groupesParLot.length; i++) {
+          const g = groupesParLot[i];
+          const etape = `Lot ${i + 1} / ${groupesParLot.length} : ${g.label}`;
+          setBusy(`${etape}…`);
+          const blob = await exportReservesToPDF(g.rows, plans, project, settings, {
+            ...exportOptions({ output: 'blob', allowedLots: [g.key], scopeLabel: `Lot : ${g.label}`, signal }),
+            onProgress: (m: string) => setBusy(`${etape} · ${m}`),
+          } as any);
+          pdfs.push({ nom: reservesPdfFilename(title, project, g.label), blob });
+        }
+        verifierAnnulation(signal);
+        await livrer(pdfs, reservesPdfFilename(title, project, 'par lot').replace(/\.pdf$/i, '.zip'));
+        fichiers = pdfs.length;
+      } else {
+        await exportReservesToPDF(scopeReserves, plans, project, settings, { ...exportOptions({ signal }), onProgress: setBusy });
+      }
       await apiFetch(`/api/projects/${projectId}/reserve-exports`, {
-        method: 'POST', body: JSON.stringify({ kind, channel: 'telechargement', lots: lotsArg }),
+        method: 'POST', body: JSON.stringify({ kind, channel: 'telechargement', lots: lotsArg, include_levees: inclureLevees }),
       }).catch(() => { /* le journal est un suivi : un échec ne doit pas faire perdre l'export */ });
       await loadJournal();
-      setMessage({ text: `PDF de ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''} téléchargé.` });
+      setMessage({
+        text: parLot
+          ? `${fichiers} PDF (un par lot, ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''}) ${fichiers > 1 ? 'téléchargés dans une archive ZIP' : 'téléchargé'}.`
+          : `PDF de ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''} téléchargé.`,
+      });
     } catch (err: any) {
+      if (estAnnulation(err)) { setMessage({ text: "Export annulé : aucun fichier n'a été produit." }); return; }
       console.error('[ReserveDiffusionDialog] export', err);
       setMessage({ text: "L'export a échoué.", error: true });
     } finally {
+      annulation.current = null;
       setBusy(null);
     }
   };
@@ -160,7 +211,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
     try {
       const { exportReservesToPDF } = await import('../../lib/reservesExport');
       const entree = await apiFetch<JournalRow>(`/api/projects/${projectId}/reserve-exports`, {
-        method: 'POST', body: JSON.stringify({ kind, channel: 'mail', lots: lotsArg, note: note.trim() || null }),
+        method: 'POST', body: JSON.stringify({ kind, channel: 'mail', lots: lotsArg, note: note.trim() || null, include_levees: inclureLevees }),
       });
       for (let i = 0; i < choisis.length; i++) {
         const dest = choisis[i];
@@ -174,6 +225,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
           const body = new FormData();
           body.append('file', blob, reservesPdfFilename(title, project, dest.role === 'entreprise' ? dest.name : undefined));
           body.append('key', dest.key);
+          body.append('include_levees', inclureLevees ? '1' : '0');
           // Pas d'apiFetch : il imposerait un Content-Type JSON, or un envoi multipart laisse le navigateur poser sa limite.
           const headers = new Headers();
           const token = await getAccessToken();
@@ -249,7 +301,14 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
             {message.text}
           </div>
         )}
-        {busy && <div role="status" className="text-sm text-[var(--tblr-muted)]">{busy}</div>}
+        {busy && (
+          <div role="status" className="flex flex-wrap items-center gap-3 text-sm text-[var(--tblr-muted)]">
+            <span>{busy}</span>
+            {annulation.current && (
+              <button type="button" onClick={() => annulation.current?.abort()} className={cn(BOUTON, 'border border-[var(--tblr-border)] text-[var(--tblr-text)]')}>Annuler l'export</button>
+            )}
+          </div>
+        )}
 
         {/* 1. Périmètre */}
         <section className="space-y-2">
@@ -274,6 +333,13 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
               ))}
             </div>
           )}
+          <label className="flex items-start gap-3 py-1.5 min-h-11 cursor-pointer">
+            <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--tblr-primary)]" checked={inclureLevees} disabled={!!busy} onChange={e => setInclureLevees(e.target.checked)} />
+            <span className="text-sm">
+              <span className="font-medium text-[var(--tblr-text)]">Inclure les réserves levées ({nbLevees})</span>
+              <span className="block text-xs text-[var(--tblr-muted)]">S'applique au PDF et à la diffusion par e-mail. Décoché, seules les réserves non levées sont reprises.</span>
+            </span>
+          </label>
           <p className="text-xs text-[var(--tblr-muted)]">Le PDF est classé par lot, dans l'ordre des numéros de lot.</p>
         </section>
 
@@ -297,8 +363,18 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
             ))}
           </fieldset>
           {nothingToPrint && <p className="text-sm text-red-600">Cochez au moins un contenu.</p>}
+          <label className="flex items-start gap-3 py-1.5 min-h-11 cursor-pointer">
+            <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--tblr-primary)]" checked={parLot} disabled={!!busy} onChange={e => setParLot(e.target.checked)} />
+            <span className="text-sm">
+              <span className="font-medium text-[var(--tblr-text)]">Un fichier PDF indépendant par lot</span>
+              <span className="block text-xs text-[var(--tblr-muted)]">Chaque lot a son propre PDF (page de garde, fiches et plans de ses réserves). Les fichiers sont réunis dans une archive ZIP.</span>
+            </span>
+          </label>
           <button type="button" onClick={telecharger} disabled={!!busy || scopeVide || nothingToPrint || scopeReserves.length === 0} className={cn(BOUTON, 'border border-[var(--tblr-border)] text-[var(--tblr-text)]')}>
-            <IconDownload size={16} /> Télécharger le PDF ({scopeReserves.length})
+            <IconDownload size={16} />
+            {parLot
+              ? ` Télécharger un PDF par lot (${groupesParLot.length} fichier${groupesParLot.length > 1 ? 's' : ''}, ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''})`
+              : ` Télécharger le PDF (${scopeReserves.length})`}
           </button>
         </section>
 

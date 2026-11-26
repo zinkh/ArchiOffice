@@ -5,6 +5,7 @@
 // invoices/auth/billing per the Phase 7 plan).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { firstForeignRelation } from '../assertTenantEntity';
 import { computeInvoiceDueDate } from '../invoiceDueDate';
 import { ensureCanWriteInvoices, getCallerRole, visibleProjectIds } from '../invoiceAccess';
 
@@ -56,6 +57,14 @@ export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, get
       if (visible && (!body.project_id || !visible.has(body.project_id))) {
         return res.status(403).json({ error: 'Cette affaire ne fait pas partie de vos affaires.' });
       }
+      // L'affaire et le contrat sont fournis par le navigateur : ils doivent
+      // appartenir au cabinet, y compris pour les rôles que la visibilité
+      // ci-dessus ne restreint pas (issue #245).
+      const foreign = await firstForeignRelation(supabaseAdmin, tenantId, [
+        { table: 'projects', id: body.project_id, label: 'Projet' },
+        { table: 'contrats_moe', id: body.contrat_id, label: 'Contrat MOE' },
+      ]);
+      if (foreign) return res.status(400).json({ error: foreign });
       const id = body.id || crypto.randomUUID();
       const { id: _id, tenant_id: _tid, created_at: _ca, updated_at: _ua, ...insertData } = body;
       // Auto-generate numero if not provided
@@ -79,6 +88,11 @@ export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, get
         return res.status(404).json({ error: 'Note honoraires introuvable' });
       }
       const { id: _id, tenant_id: _tid, created_at: _ca, ...updateData } = req.body;
+      const foreign = await firstForeignRelation(supabaseAdmin, tenantId, [
+        { table: 'projects', id: updateData.project_id, label: 'Projet' },
+        { table: 'contrats_moe', id: updateData.contrat_id, label: 'Contrat MOE' },
+      ]);
+      if (foreign) return res.status(400).json({ error: foreign });
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'notes_honoraires').update({ ...updateData, updated_at: new Date().toISOString() }).eq('id', id);
       if (error) throw error;
       const { data: updated } = await tenantScopedFrom(supabaseAdmin, tenantId, 'notes_honoraires').select('*').eq('id', id).single();

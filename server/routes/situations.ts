@@ -54,7 +54,7 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
   const MODES_SAISIE = ['simple', 'detaille'];
   const SITUATION_ETATS = ['Brouillon', 'Validée', 'Payée'];
   const AMOUNT_FIELDS = new Set(['montant_presente_ht', 'montant_admis_ht', 'revision_coeff', 'penalites_ht', 'avance_remboursement']);
-  const DATE_FIELDS = new Set(['date_reception_situation', 'date_certificat']);
+  const DATE_FIELDS = new Set(['date_reception_situation', 'date_certificat', 'date_paiement']);
 
   /** Garde les champs connus, vide en null, montants en nombres. Rend une erreur lisible sinon. */
   function pickSituation(body: any): { row: Record<string, any>; error?: string } {
@@ -86,6 +86,9 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
       row[key] = value;
     }
     if (row.mode_saisie === null) delete row.mode_saisie;
+    // Payée : la date de règlement est celle du jour si le client n'en donne pas ; tout autre état l'efface.
+    if (row.etat === 'Payée' && !row.date_paiement) row.date_paiement = new Date().toISOString().slice(0, 10);
+    else if (row.etat && row.etat !== 'Payée') row.date_paiement = null;
     // Mode détaillé : l'avancement ligne par ligne du DPGF, figé dans la situation.
     if (body && 'avancement_lignes' in body) {
       const { lignes, error } = validerAvancementLignes(body.avancement_lignes);

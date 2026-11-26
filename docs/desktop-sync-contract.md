@@ -970,7 +970,7 @@ composant est présent et le mode disponible. Le renderer ne transmet qu’un
 identifiant de projet. Le worker charge un catalogue borné depuis les API
 existantes, nettoie les noms, ignore tout chemin fourni par le serveur et lie
 chaque fichier à sa version, taille et empreinte disponible. Les limites du
-prototype sont 100 fichiers, 50 Mio par fichier et 256 entrées.
+prototype sont 50 Mio par fichier ; le nombre de documents n’est plus plafonné.
 
 Le courtier Electron crée une racine fraîche sous les données applicatives et
 lance le composant avec un environnement filtré. Les échanges JSON privés ne

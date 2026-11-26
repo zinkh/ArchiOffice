@@ -632,3 +632,47 @@ button, [role="button"], [role="tab"], .btn {
 @media (prefers-reduced-motion: reduce) {
   [data-search-flash], [data-search-flash] > td { animation: none; background-color: var(--tblr-primary-lt); }
 }
+
+/* Éditeur de texte riche (src/components/RichTextEditor.tsx) : le préflight de
+   Tailwind supprime titres, listes et citations, on les rétablit ici. */
+.rt-content { outline: none; font-size: 0.9375rem; line-height: 1.6; color: var(--tblr-body-color); }
+.rt-content > * + * { margin-top: 0.65em; }
+.rt-content h2 { font-size: 1.25rem; font-weight: 700; line-height: 1.3; margin-top: 1.2em; }
+.rt-content h3 { font-size: 1.05rem; font-weight: 700; line-height: 1.35; margin-top: 1em; }
+.rt-content ul { list-style: disc; padding-left: 1.4em; }
+.rt-content ol { list-style: decimal; padding-left: 1.4em; }
+.rt-content li > p { margin: 0; }
+.rt-content blockquote { border-left: 3px solid var(--tblr-border-color); padding-left: 0.9em; color: var(--tblr-muted); }
+.rt-content hr { border: 0; border-top: 1px solid var(--tblr-border-color); margin: 1.2em 0; }
+.rt-content strong { font-weight: 700; }
+.rt-content em { font-style: italic; }
+.rt-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder); float: left; height: 0; pointer-events: none; color: var(--tblr-muted);
+}
+
+
+/* Le planning garde le défilement tactile ; les dates précises restent dans la fiche. */
+@media (pointer: coarse), (max-width: 639px) {
+  .planning-resize-handle { display: none; }
+  .planning-link-handle { width: 44px; height: 44px; top: -7px; right: -48px; }
+}
+
+
+/* Repères calendaires du chantier : fonds légers, les barres restent au premier plan. */
+.planning-calendar-ferie {
+  background: color-mix(in srgb, var(--tblr-primary) 12%, transparent);
+  border-inline: 1px solid color-mix(in srgb, var(--tblr-primary) 25%, transparent);
+}
+.planning-calendar-conge {
+  background: repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, var(--tblr-muted) 16%, transparent) 4px 6px);
+}
+.planning-resize-handle { opacity: 0; }
+.planning-link-handle { opacity: .6; }
+[data-planning-task-id]:hover .planning-resize-handle,
+[data-planning-task-id]:focus-within .planning-resize-handle,
+[data-planning-task-id]:hover .planning-link-handle,
+[data-planning-task-id]:focus-within .planning-link-handle { opacity: 1; }
+.planning-resize-handle:disabled { opacity: 0; }
+@media (pointer: coarse), (max-width: 639px) {
+  .planning-link-handle { opacity: 1; }
+}

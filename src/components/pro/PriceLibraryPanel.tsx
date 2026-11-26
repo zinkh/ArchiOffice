@@ -12,6 +12,8 @@ import { apiFetch, fetchJson } from '../../lib/api';
 import { formatCurrency } from '../../lib/utils';
 import type { ArticleBibliotheque, Referentiels } from '../../types/library';
 import { estClause, type DossierBibliotheque } from '../../lib/bibliothequeClauses';
+import { idsAssocies } from '../../lib/postesAssocies';
+import { useConfirmDialog } from '../ui/ConfirmDialog';
 
 /** Conservé pour les appelants existants ; c'est la ligne d'articles_type. */
 export type ArticleType = ArticleBibliotheque;
@@ -94,12 +96,41 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
     return out;
   }, [referentiels]);
 
-  const inserer = () => {
+  const { choose, dialog: dialogAssocies } = useConfirmDialog();
+
+  // Postes associés (fenêtre et volet roulant) : proposés avec ceux qu'on insère, jamais ajoutés d'office.
+  const associesAProposer = async (choisis: ArticleBibliotheque[]): Promise<ArticleBibliotheque[]> => {
+    const ids = idsAssocies(choisis);
+    if (!ids.length) return [];
+    try {
+      const fiches = await apiFetch<ArticleBibliotheque[]>(`/api/price-library?ids=${ids.join(',')}&limit=200`);
+      // Ordre des associés conservé ; une fiche disparue ou une clause est écartée.
+      return ids.map(id => fiches.find(f => f.id === id)).filter((f): f is ArticleBibliotheque => !!f && !estClause(f));
+    } catch {
+      return []; // la suggestion est un confort : sans elle, l'insertion se fait comme avant
+    }
+  };
+
+  const inserer = async () => {
     if (!canInsert || !selection.length) return;
-    if (onInsert(selection) === false) return;
+    let aInserer = selection;
+    const associes = clauses ? [] : await associesAProposer(selection);
+    if (associes.length) {
+      const choix = await choose({
+        title: associes.length === 1 ? 'Insérer aussi 1 poste associé ?' : `Insérer aussi ${associes.length} postes associés ?`,
+        message: <p>{associes.map(a => a.designation).join(', ')}.</p>,
+        confirmLabel: 'Insérer avec les associés',
+        alternatives: [{ id: 'seuls', label: 'Insérer seulement la sélection' }],
+        cancelLabel: 'Annuler',
+        tone: 'primary',
+      });
+      if (choix === 'confirm') aInserer = [...selection, ...associes];
+      else if (choix !== 'seuls') return;
+    }
+    if (onInsert(aInserer) === false) return;
     // Le compteur d'usage est ce qui fait remonter les articles réellement
     // employés : envoyé sans attendre la réponse.
-    for (const a of selection) {
+    for (const a of aInserer) {
       void apiFetch(`/api/price-library/${a.id}/used`, { method: 'POST' }).catch(() => {});
     }
     setCoches(new Set());
@@ -220,6 +251,7 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
           Insérer {selection.length > 0 && `(${selection.length})`}
         </button>
       </div>
+      {dialogAssocies}
     </div>
   );
 };

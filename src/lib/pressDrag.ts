@@ -36,18 +36,19 @@ const INTERACTIVE = 'input, select, textarea, button, a, [data-no-drag]';
 export function startPressDrag(
   e: PointerEvent | { nativeEvent: PointerEvent; currentTarget: EventTarget | null; target: EventTarget | null; button: number },
   handlers: PressDragHandlers,
-): void {
+): () => void {
   const native = 'nativeEvent' in e ? e.nativeEvent : e;
-  if (e.button !== 0) return;
+  if (e.button !== 0) return () => {};
   const host = e.currentTarget as HTMLElement | null;
   const hit = (e.target as HTMLElement | null)?.closest?.(INTERACTIVE);
-  if (hit && hit !== host) return;
+  if (hit && hit !== host) return () => {};
 
   const pointerId = native.pointerId;
   const touch = native.pointerType !== 'mouse';
   const start = { x: native.clientX, y: native.clientY };
   let current = { ...start };
   let lifted = false;
+  let finished = false;
   let timer = 0;
   const hist: { t: number; x: number; y: number }[] = [];
   const prevUserSelect = document.body.style.userSelect;
@@ -59,7 +60,7 @@ export function startPressDrag(
   };
 
   const lift = () => {
-    if (lifted) return;
+    if (lifted || finished) return;
     lifted = true;
     document.body.style.userSelect = 'none';
     try { navigator.vibrate?.(8); } catch { /* retour haptique facultatif */ }
@@ -82,6 +83,7 @@ export function startPressDrag(
   };
 
   const finish = (cancelled: boolean) => {
+    if (finished) return;
     const wasLifted = lifted;
     cleanup();
     if (!wasLifted) return;
@@ -99,12 +101,13 @@ export function startPressDrag(
 
   const onUp = (ev: PointerEvent) => { if (ev.pointerId === pointerId) finish(false); };
   const onCancel = (ev: PointerEvent) => { if (ev.pointerId === pointerId) finish(true); };
-  const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape' && lifted) finish(true); };
+  const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') finish(true); };
   // Une fois soulevé, le doigt déplace l'élément au lieu de faire défiler.
   const onTouchMove = (ev: TouchEvent) => { if (lifted) ev.preventDefault(); };
   const onContextMenu = (ev: Event) => ev.preventDefault();
 
   function cleanup() {
+    finished = true;
     clearTimeout(timer);
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
@@ -112,9 +115,12 @@ export function startPressDrag(
     window.removeEventListener('keydown', onKey);
     document.removeEventListener('touchmove', onTouchMove);
     window.removeEventListener('contextmenu', onContextMenu);
+    window.removeEventListener('blur', onBlur);
     document.body.style.userSelect = prevUserSelect;
   }
 
+  const onBlur = () => finish(true);
+  window.addEventListener('blur', onBlur);
   window.addEventListener('pointermove', onMove, { passive: false });
   window.addEventListener('pointerup', onUp);
   window.addEventListener('pointercancel', onCancel);
@@ -124,4 +130,5 @@ export function startPressDrag(
     window.addEventListener('contextmenu', onContextMenu);
     timer = window.setTimeout(lift, LONG_PRESS_MS);
   }
+  return () => finish(true);
 }

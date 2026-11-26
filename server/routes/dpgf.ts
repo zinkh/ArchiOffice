@@ -23,7 +23,10 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { remonterPrixOffre } from '../articlePrices';
 import { appliquerOperation, DpgfLignesError, type Operation } from '../dpgfLignes';
+import { appliquerOperationCctp, type OperationCctp } from '../cctpTextes';
 import { PAR_AGENT } from '../../src/lib/marqueurRedaction';
+import { LABEL_INSTANTANE_AUTO, estInstantaneAuto, instantaneTropRecent, instantanesAElaguer, MAX_INSTANTANES_AUTO } from '../../src/lib/instantanes';
+import { estamperModifications } from '../../src/lib/modifications';
 
 /**
  * Un seul écrivain à la fois par DPGF DANS CE PROCESSUS. Combiné à la relecture juste
@@ -78,7 +81,10 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
       const { data: dpgf, error } = await supabaseAdmin.from('dpgfs').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).single();
       if (error && error.code !== 'PGRST116') throw error;
       if (dpgf) {
-        res.json(await withProjectLotTitles(supabaseAdmin, tenantId, projectId, typeof (dpgf as any).data === 'string' ? JSON.parse((dpgf as any).data) : (dpgf as any).data));
+        const document = await withProjectLotTitles(supabaseAdmin, tenantId, projectId, typeof (dpgf as any).data === 'string' ? JSON.parse((dpgf as any).data) : (dpgf as any).data);
+        // `_rev` : la révision lue, à renvoyer avec la sauvegarde (POST ?baseRev=) pour que l'éditeur
+        // sache qu'un autre écrivain a changé le document. Jamais écrite dans le document.
+        res.json({ ...document, _rev: Number((dpgf as any).revision ?? 0) });
       } else {
         res.status(404).json({ error: "DPGF not found" });
       }
@@ -92,12 +98,40 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const data = req.body;
+      const { _rev: _ignoree, ...data } = req.body ?? {};
       const id = data.id === 'new' ? crypto.randomUUID() : (data.id || crypto.randomUUID());
       data.id = id;
-      const { data: existing } = await supabaseAdmin.from('dpgfs').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).single();
+      // Sauvegarde de l'éditeur PRO : `baseRev` est la révision qu'il a lue. Si le document stocké a
+      // changé depuis (approbation d'une proposition, agent IA, autre onglet), on n'écrase rien : 409.
+      // Sans `baseRev` (autres appelants), l'écriture reste celle d'avant.
+      const baseRevRaw = req.query?.baseRev;
+      const baseRev = baseRevRaw === undefined ? undefined : Number(baseRevRaw);
+      if (baseRev !== undefined && (!Number.isInteger(baseRev) || baseRev < 0)) {
+        return res.status(400).json({ error: 'Révision du document illisible.' });
+      }
+      const { data: existing } = await supabaseAdmin.from('dpgfs').select('id,data').eq('project_id', projectId).eq('tenant_id', tenantId).single();
       if (existing) {
-        await supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(data) }).eq('project_id', projectId).eq('tenant_id', tenantId);
+        // Dernière modification de chaque lot, chapitre et article : le serveur fait foi (sa date, le nom de la
+        // personne authentifiée). Un élément inchangé garde l'estampille enregistrée, quoi que le client envoie.
+        let aEcrire = data;
+        if (Array.isArray(data.lots)) {
+          try {
+            const avant = typeof existing.data === 'string' ? JSON.parse(existing.data) : existing.data;
+            const auteur = await getUserName(tenantId, req.user.id, req.user.email);
+            aEcrire = estamperModifications(avant, data, auteur || 'Équipe', new Date().toISOString());
+          } catch (e) { console.error('[POST /api/projects/:projectId/dpgf] estampille des modifications', e); }
+        }
+        let update = supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(aEcrire) }).eq('project_id', projectId).eq('tenant_id', tenantId);
+        if (baseRev !== undefined) update = update.eq('revision', baseRev);
+        const { data: written, error: writeError } = await update.select('revision');
+        if (writeError) throw writeError;
+        if (!written?.length) {
+          return res.status(409).json({
+            error: 'Le document a été modifié ailleurs depuis sa lecture : rien n\'a été enregistré.',
+            code: 'DOC_STALE',
+          });
+        }
+        return res.json({ ...aEcrire, _rev: Number(written[0].revision ?? 0) });
       } else {
         await supabaseAdmin.from('dpgfs').insert({ id, tenant_id: tenantId, project_id: projectId, data: JSON.stringify(data) });
         const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
@@ -105,7 +139,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
         const userName = await getUserName(tenantId, req.user.id, req.user.email);
         logActivity(tenantId, req.user.id, userName, `Création du DPGF du projet "${projectName}"`, projectName, id, 'dpgf', 'Situations/DPGF');
       }
-      res.json(data);
+      res.json({ ...data, _rev: 0 });
     } catch (error) {
       console.error("[POST /api/projects/:projectId/dpgf]", error);
       res.status(500).json({ error: "Failed to save DPGF" });
@@ -128,14 +162,17 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
           const row = await loadRow(supabaseAdmin, tenantId, projectId);
           if (!row) throw new DpgfLignesError("Ce projet n'a pas de DPGF.", 404);
           const lu = brut(row);
-          const { doc, rapport } = appliquerOperation(typeof row.data === 'string' ? JSON.parse(row.data) : row.data, operation as Operation);
+          const avant = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+          const { doc, rapport } = appliquerOperation(avant, operation as Operation);
           if (aBlanc === true) return { ...rapport, dry_run: true };
           // Relecture juste avant d'écrire : si l'application web a enregistré entre-temps,
           // on rejoue l'opération sur le document à jour au lieu de l'écraser.
           const frais = await loadRow(supabaseAdmin, tenantId, projectId);
           if (!frais || brut(frais) !== lu) continue;
+          // Les lignes que l'outil a touchées sont datées « Agent IA », comme leurs marqueurs.
+          const estampille = estamperModifications(avant, doc as any, PAR_AGENT, new Date().toISOString());
           const { error } = await supabaseAdmin.from('dpgfs')
-            .update({ data: JSON.stringify(doc) }).eq('id', row.id).eq('tenant_id', tenantId);
+            .update({ data: JSON.stringify(estampille) }).eq('id', row.id).eq('tenant_id', tenantId);
           if (error) throw error;
           const userName = await getUserName(tenantId, req.user.id, req.user.email);
           logActivity(tenantId, req.user.id, userName, `DPGF : ${operation?.action} (outil agent)`, '', row.id, 'dpgf', 'Situations/DPGF');
@@ -148,6 +185,43 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
       if (e instanceof DpgfLignesError) return res.status(e.status).json({ error: e.message });
       console.error('[POST /api/projects/:projectId/dpgf/lignes]', e);
       res.status(500).json({ error: "Échec de l'écriture dans le DPGF." });
+    }
+  });
+
+  // Écriture ciblée des TEXTES du CCTP (outil manage_cctp, agents et MCP) : texte d'un lot, d'un
+  // chapitre ou d'un article, ou ajout d'articles réservés au CCTP. Appliquée par
+  // server/cctpTextes.ts sous le même verrou et la même relecture que .../dpgf/lignes.
+  app.post('/api/projects/:projectId/cctp/textes', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      const { dry_run: aBlanc, par: _ignore, ...corps } = req.body ?? {};
+      const operation = { ...corps, par: PAR_AGENT };
+      const rapport = await sousVerrou(`${tenantId}:${projectId}`, async () => {
+        for (let essai = 0; essai < 3; essai++) {
+          const row = await loadRow(supabaseAdmin, tenantId, projectId);
+          if (!row) throw new DpgfLignesError("Ce projet n'a pas de DPGF/CCTP.", 404);
+          const lu = brut(row);
+          const avant = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+          const { doc, rapport } = appliquerOperationCctp(avant, operation as OperationCctp);
+          if (aBlanc === true) return { ...rapport, dry_run: true };
+          const frais = await loadRow(supabaseAdmin, tenantId, projectId);
+          if (!frais || brut(frais) !== lu) continue;
+          const estampille = estamperModifications(avant, doc as any, PAR_AGENT, new Date().toISOString());
+          const { error } = await supabaseAdmin.from('dpgfs')
+            .update({ data: JSON.stringify(estampille) }).eq('id', row.id).eq('tenant_id', tenantId);
+          if (error) throw error;
+          const userName = await getUserName(tenantId, req.user.id, req.user.email);
+          logActivity(tenantId, req.user.id, userName, `CCTP : ${operation?.action} (outil agent)`, '', row.id, 'dpgf', 'Situations/DPGF');
+          return rapport;
+        }
+        throw new DpgfLignesError("Le CCTP a été modifié pendant l'opération : relance la demande.", 409);
+      });
+      res.json({ success: true, ...rapport });
+    } catch (e: any) {
+      if (e instanceof DpgfLignesError) return res.status(e.status).json({ error: e.message });
+      console.error('[POST /api/projects/:projectId/cctp/textes]', e);
+      res.status(500).json({ error: "Échec de l'écriture dans le CCTP." });
     }
   });
 
@@ -171,9 +245,36 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
       const tenantId = await getTenantId(req.user.id);
       const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
       if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
-      const document = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-      const label = String(req.body?.label || '').trim();
+      let document = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      // Instantané automatique de l'éditeur (toutes les 10 minutes) : le libellé est posé ICI, jamais lu
+      // dans la requête, pour que le client ne puisse ni se faire passer pour un instantané automatique
+      // (et être élagué) ni nommer le sien autrement.
+      const auto = req.body?.auto === true;
+      const label = auto ? LABEL_INSTANTANE_AUTO : String(req.body?.label || '').trim();
       if (!label) return res.status(400).json({ error: 'Le libellé est obligatoire' });
+      if (!auto && estInstantaneAuto(label)) return res.status(400).json({ error: 'Ce libellé est réservé aux instantanés automatiques.' });
+      // L'éditeur peut figer SA version (modifications non enregistrées d'un conflit) au lieu du
+      // document stocké : elle reste restaurable depuis l'historique, rien n'est perdu.
+      if (req.body?.document !== undefined) {
+        const local = req.body.document;
+        if (!local || typeof local !== 'object' || Array.isArray(local) || !Array.isArray(local.lots)) {
+          return res.status(400).json({ error: 'Le document à figer est invalide.' });
+        }
+        const { _rev: _ignoree, ...propre } = local;
+        document = propre;
+      }
+      if (auto) {
+        // Au plus un instantané automatique toutes les 9 minutes par affaire (plusieurs onglets, client
+        // qui s'emballe) et jamais deux fois le même document de suite.
+        const { data: derniers, error: dernierError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions')
+          .select('id,created_at,document').eq('project_id', req.params.projectId).eq('label', LABEL_INSTANTANE_AUTO)
+          .order('created_at', { ascending: false }).limit(1);
+        if (dernierError) throw dernierError;
+        const dernier = derniers?.[0];
+        if (dernier && instantaneTropRecent(dernier.created_at, Date.now())) return res.status(200).json({ skipped: true, reason: 'too_recent' });
+        const precedent = typeof dernier?.document === 'string' ? dernier.document : JSON.stringify(dernier?.document ?? null);
+        if (dernier && precedent === JSON.stringify(document)) return res.status(200).json({ skipped: true, reason: 'unchanged' });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions').insert({
         id: crypto.randomUUID(),
         project_id: req.params.projectId, dpgf_id: row.id, label,
@@ -181,6 +282,20 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
         document, created_by: req.user.id, created_at: new Date().toISOString(),
       }).select().single();
       if (error) throw error;
+      if (auto) {
+        // Élagage en meilleur effort : l'instantané est déjà écrit, un échec ici ne doit pas le faire perdre.
+        // Seuls les instantanés AUTOMATIQUES sont comptés : une version nommée n'est jamais supprimée.
+        try {
+          const { data: autos } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions')
+            .select('id').eq('project_id', req.params.projectId).eq('label', LABEL_INSTANTANE_AUTO)
+            .order('created_at', { ascending: false }).limit(MAX_INSTANTANES_AUTO + 50);
+          const aSupprimer = instantanesAElaguer(autos ?? []);
+          if (aSupprimer.length) {
+            await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions').delete()
+              .eq('project_id', req.params.projectId).eq('label', LABEL_INSTANTANE_AUTO).in('id', aSupprimer);
+          }
+        } catch (e) { console.error('[POST dpgf/versions] élagage des instantanés automatiques', e); }
+      }
       res.status(201).json(data);
     } catch (e: any) {
       console.error('[POST dpgf/versions]', e);

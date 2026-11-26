@@ -86,10 +86,12 @@ describe('tenant isolation — filtered update + previously-unfiltered read-back
     const tenantA = makeTenant();
     const { token } = makeUser(tenantA);
 
-    const res = await request(app).put(`/api/proposals/${proposalId}`).set(authHeader(token)).send({});
+    const res = await request(app).put(`/api/proposals/${proposalId}`).set(authHeader(token)).send({ title: 'Attempted update' });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     expect(JSON.stringify(res.body)).not.toContain('SECRET-PROPOSAL-B');
+    const proposal = fakeSupabaseAdmin.getTable('proposals').find(row => row.id === proposalId);
+    expect(proposal?.title).toBe('SECRET-PROPOSAL-B');
   });
 
   it('PUT /api/reports/:reportId never returns another tenant\'s report fields', async () => {

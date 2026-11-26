@@ -1,20 +1,26 @@
+import { SendProposalSignature } from './proposal/SendProposalSignature';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  IconX, IconDownload, IconSend, IconSettings, IconLayout, IconLayoutRows, IconPalette, IconLetterCase, IconLayoutSidebar,
+  IconX, IconDownload, IconSend, IconEdit, IconSettings, IconLayout, IconLayoutRows, IconPalette, IconLetterCase, IconLayoutSidebar,
+  IconZoomIn, IconZoomOut,
 } from '@tabler/icons-react';
 import type { Proposal, MafCostResult } from '../types';
 import { useSettings } from '../hooks/useSettings';
 import { useMafCost } from '../hooks/useMafCost';
 import { MafCostBadge } from './MafCostBadge';
 import { SendProposalMail } from './proposal/SendProposalMail';
+import { libelleRatios } from '../lib/ratiosIndicatifs';
 import { loadCotraitantIdentities } from '../lib/pdfLetterhead';
 import { paginateFlow, PAGE_HEIGHT_MM, CONTENT_TOP_MM, CONTENT_BOTTOM_MM } from '../lib/pdfPagination';
+import { resolveSignedUrl } from '../lib/signedStorageUrl';
+import { compressImage } from '../lib/imageCompression';
+import { orderIllustrations, parseProposalIllustrations } from '../lib/proposalIllustrations';
 import {
-  ProposalPdfData, ProposalTemplate, ProposalSectionId, CotraitantIdentityPdf, DensityTokens, TableDensity,
+  ProposalPdfData, ProposalTemplate, ProposalSectionId, CotraitantIdentityPdf, DensityTokens, TableDensity, IllustrationPdf,
   PROPOSAL_SECTION_DEFS, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS, mapProposalToPdfData, getPdfStyles,
   loadStoredTemplate, saveStoredTemplate, applyPreset,
-  exportProposalPdf, compressProposalLogo, formatCurrency, formatPercent,
+  exportProposalPdf, compressProposalLogo, formatCurrency, formatPercent, proposalStatusLabel,
 } from '../lib/proposalExport';
 
 // ─── PDF primitives ─────────────────────────────────────────────────────────
@@ -181,7 +187,8 @@ function GanttChart({ data }: { data: ProposalPdfData }) {
     let color = '#3b82f6';
     if (missionData?.categorie === 'execution') color = '#22c55e';
     if (missionData?.categorie === 'complementaire') color = '#f59e0b';
-    return { name: m.mission, x: toX(m.debutJours), width: Math.max(toX(m.dureeJours) - labelWidth, 3), color };
+    const conditionnelle = data.tranches.find(tr => tr.id === m.trancheId)?.type === 'conditionnelle';
+    return { name: conditionnelle ? `${m.mission} (cond.)` : m.mission, x: toX(m.debutJours), width: Math.max(toX(m.dureeJours) - labelWidth, 3), color };
   });
 
   return (
@@ -198,7 +205,7 @@ function GanttChart({ data }: { data: ProposalPdfData }) {
       {timeline.map((bar, i) => (
         <div key={i} style={{ position: 'relative', height: '6.5mm' }}>
           {/* Pas de `overflow: hidden` : jsPDF imprime le texte un peu plus bas que sa boîte et la rognerait. */}
-          <div style={{ position: 'absolute', top: '0.6mm', left: 0, whiteSpace: 'nowrap', fontSize: '6.5pt', lineHeight: 1.2, color: '#333' }}>{bar.name.substring(0, 25)}</div>
+          <div style={{ position: 'absolute', top: '0.6mm', left: 0, whiteSpace: 'nowrap', fontSize: '6.5pt', lineHeight: 1.2, color: '#333' }}>{bar.name.substring(0, 32)}</div>
           <div style={{ position: 'absolute', top: '1.2mm', left: percent(bar.x), width: percent(bar.width), height: '4mm', background: bar.color, borderRadius: '0.6mm' }} />
         </div>
       ))}
@@ -274,7 +281,11 @@ const BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
 // sur les pages. `newPage` dit si son titre doit s'ouvrir sur une page neuve
 // (réglage « saut de page entre les sections », et toujours la première section).
 
-interface SectionCtx { mafCost: MafCostResult | null }
+interface SectionCtx {
+  mafCost: MafCostResult | null;
+  /** Numéro du chapitre dans le document (« 01 »...) : recalculé selon les sections réellement imprimées. */
+  num?: string;
+}
 type SectionRenderer = (d: ProposalPdfData, t: ProposalTemplate, ctx: SectionCtx, newPage: boolean) => React.ReactNode;
 
 const renderGarde = (d: ProposalPdfData, t: ProposalTemplate): React.ReactNode => {
@@ -320,18 +331,18 @@ const renderGarde = (d: ProposalPdfData, t: ProposalTemplate): React.ReactNode =
         <div style={{ marginTop: '3mm', fontSize: '10pt', fontWeight: 500 }}>Architecte: {d.architecteNom}{d.oaNumber ? `, Ordre des Architectes n° ${d.oaNumber}` : ''}</div>
       </div>
       <div style={{ width: '100%', textAlign: 'center', marginTop: '10mm' }}>
-        <div style={{ display: 'inline-block', padding: '1mm 3mm', borderRadius: '1mm', fontSize: '8pt', fontWeight: 'bold', textTransform: 'uppercase', background: badgeColor.bg, color: badgeColor.fg }}>{d.status.toUpperCase()}</div>
+        <div style={{ display: 'inline-block', padding: '1mm 3mm', borderRadius: '1mm', fontSize: '8pt', fontWeight: 'bold', textTransform: 'uppercase', background: badgeColor.bg, color: badgeColor.fg }}>{proposalStatusLabel(d.status).toUpperCase()}</div>
         <div style={{ marginTop: '3mm', fontSize: '9pt', color: '#94a3b8' }}>Émis le {d.dateEmission}</div>
       </div>
     </Cover>
   );
 };
 
-const renderObjet: SectionRenderer = (d, t, _ctx, newPage) => {
+const renderObjet: SectionRenderer = (d, t, ctx, newPage) => {
   const missionsList = t.clauses.missionsText.split('\n').filter(Boolean);
   return (
     <Section key="objet">
-      <H2 template={t} newPage={newPage}>01. Objet de la Mission</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Objet de la Mission</H2>
       <H3>Désignation du Maître d'Ouvrage</H3>
       <Table>
         <tbody>
@@ -387,9 +398,15 @@ const renderObjet: SectionRenderer = (d, t, _ctx, newPage) => {
   );
 };
 
-const renderSurfaces: SectionRenderer = (d, t, _ctx, newPage) => (
+/** Ratio appliqué (€/m²) et commentaire, sous le montant des travaux. Espaces ordinaires : jsPDF imprime l'espace fine « / ». */
+const ratioTexte = (d: ProposalPdfData): string => libelleRatios(
+  { nature: d.nature, ratioRehab: d.ratioRehab, ratioExtension: d.ratioExtension, commentaire: d.ratioCommentaire },
+  n => n.toLocaleString('fr-FR').replace(/[  ]/g, ' '),
+);
+
+const renderSurfaces: SectionRenderer = (d, t, ctx, newPage) => (
   <Section key="surfaces">
-    <H2 template={t} newPage={newPage}>02. Surfaces & Programme</H2>
+    <H2 template={t} newPage={newPage}>{ctx.num}. Surfaces & Programme</H2>
     <H3>Tableau des Surfaces</H3>
     <Table>
       <thead><tr><Th template={t}>Désignation</Th><Th template={t}>Surface (m²)</Th></tr></thead>
@@ -417,24 +434,62 @@ const renderSurfaces: SectionRenderer = (d, t, _ctx, newPage) => (
       <div style={{ fontSize: '18pt', fontWeight: 'bold' }}>{formatCurrency(d.montantTravaux)} HT</div>
       <div style={{ fontSize: '8pt', color: '#666', marginTop: '1mm' }}>
         Taux de complexité {d.tauxComplexite}
-        {(d.ratioRehab > 0 || d.ratioExtension > 0) && `, réhabilitation ${d.ratioRehab} % / extension ${d.ratioExtension} %`}
       </div>
+      {ratioTexte(d) && <div style={{ fontSize: '8pt', color: '#666', marginTop: '1mm' }}>{ratioTexte(d)}</div>}
     </div>
   </Section>
 );
 
+// Une mission répartie sur plusieurs tranches porte une ligne par tranche : la liste des
+// phases confiées n'en garde qu'une par désignation.
+function phasesUniques(missions: ProposalPdfData['missions']): ProposalPdfData['missions'] {
+  const vues = new Map<string, ProposalPdfData['missions'][number]>();
+  for (const m of missions) {
+    const cle = m.designation.trim().toLowerCase();
+    const deja = vues.get(cle);
+    vues.set(cle, deja ? { ...deja, montantHT: deja.montantHT + m.montantHT } : m);
+  }
+  return Array.from(vues.values());
+}
+
 const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
   const density = DENSITY_TOKENS[t.layout.tableDensity];
+  const renderCategories = (missionsPool: ProposalPdfData['missions'], keyPrefix: string) => (
+    <>
+              {(['base', 'execution', 'complementaire'] as const).map(cat => {
+                const catMissions = missionsPool.filter(m => m.categorie === cat);
+                if (catMissions.length === 0) return null;
+                const subtotal = catMissions.reduce((acc, m) => acc + m.montantHT, 0);
+                const catLabel = cat === 'base' ? 'Missions de Base' : cat === 'execution' ? "Missions d'Exécution" : 'Missions Complémentaires';
+                return (
+                  <React.Fragment key={`${keyPrefix}-${cat}`}>
+                    <tr data-pdf-keep-next="true" style={{ background: '#f1f5f9' }}><Td colSpan={3} style={{ fontWeight: 'bold' }}>{catLabel}</Td></tr>
+                    {catMissions.map(m => (
+                      <tr key={m.id} style={m.montantHT === 0 ? { color: '#999', fontStyle: 'italic' } : undefined}>
+                        <Td>{m.designation}</Td>
+                        <Td style={NOWRAP}>{formatPercent(m.relPct)}</Td>
+                        <Td style={NOWRAP}>{formatCurrency(m.montantHT)}</Td>
+                      </tr>
+                    ))}
+                    <tr style={{ fontWeight: 'bold' }}>
+                      <Td colSpan={2} style={{ textAlign: 'right' }}>Sous-total {catLabel.toLowerCase()}</Td>
+                      <Td style={NOWRAP}>{formatCurrency(subtotal)}</Td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
+    </>
+  );
   return (
     <Section key="honoraires">
-      <H2 template={t} newPage={newPage}>03. Étendue de la Mission & Honoraires</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Étendue de la Mission & Honoraires</H2>
 
       {t.detailLevel === 'detaille' && (
         <>
           <div data-pdf-keep="true" style={{ marginBottom: density.tableMarginBottom }}>
             <P template={t}>Le Maître d'Ouvrage confie à l'Architecte une mission portant sur les phases suivantes :</P>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2mm', marginTop: '2mm' }}>
-              {d.missions.map(m => (
+              {phasesUniques(d.missions).map(m => (
                 <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '2mm', fontSize: '8pt', ...(m.montantHT === 0 ? { color: '#ccc', fontStyle: 'italic' } : {}) }}>
                   {/* Carré dessiné : ☑ et ☐ n'existent pas dans la police du PDF (ils sortent en « & »). */}
                   <span
@@ -464,34 +519,67 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
               </tr>
             </thead>
             <tbody>
-              {(['base', 'execution', 'complementaire'] as const).map(cat => {
-                const catMissions = d.missions.filter(m => m.categorie === cat);
-                if (catMissions.length === 0) return null;
-                const subtotal = catMissions.reduce((acc, m) => acc + m.montantHT, 0);
-                const catLabel = cat === 'base' ? 'Missions de Base' : cat === 'execution' ? "Missions d'Exécution" : 'Missions Complémentaires';
-                return (
-                  <React.Fragment key={cat}>
-                    <tr data-pdf-keep-next="true" style={{ background: '#f1f5f9' }}><Td colSpan={3} style={{ fontWeight: 'bold' }}>{catLabel}</Td></tr>
-                    {catMissions.map(m => (
-                      <tr key={m.id} style={m.montantHT === 0 ? { color: '#999', fontStyle: 'italic' } : undefined}>
-                        <Td>{m.designation}</Td>
-                        <Td style={NOWRAP}>{formatPercent(m.relPct)}</Td>
-                        <Td style={NOWRAP}>{formatCurrency(m.montantHT)}</Td>
+              {d.tranches.length > 0 ? (
+                <>
+                  {d.tranches.map(tr => {
+                    const lignes = d.missions.filter(m => (m.trancheId ?? d.tranches[0].id) === tr.id);
+                    const totalTr = lignes.reduce((acc, m) => acc + m.montantHT, 0);
+                    return (
+                      <React.Fragment key={tr.id}>
+                        <tr data-pdf-keep-next="true" style={{ background: '#e2e8f0' }}>
+                          <Td colSpan={3} style={{ fontWeight: 'bold', textTransform: 'uppercase' }}>
+                            {tr.label}{tr.type === 'conditionnelle' ? ' (tranche conditionnelle)' : ' (tranche ferme)'}
+                          </Td>
+                        </tr>
+                        {tr.type === 'conditionnelle' && tr.condition && (
+                          <tr data-pdf-keep-next="true"><Td colSpan={3} style={{ fontStyle: 'italic' }}>Condition d'affermissement : {tr.condition}</Td></tr>
+                        )}
+                        {renderCategories(lignes, tr.id)}
+                        <tr style={{ fontWeight: 'bold' }}>
+                          <Td colSpan={2} style={{ textAlign: 'right' }}>Total {tr.label}</Td>
+                          <Td style={NOWRAP}>{formatCurrency(totalTr)}</Td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                  {d.totauxTranches && (
+                    <>
+                      <tr style={{ fontWeight: 'bold', background: '#f1f5f9' }}>
+                        <Td colSpan={2} style={{ textAlign: 'right' }}>Total tranches fermes HT</Td>
+                        <Td style={NOWRAP}>{formatCurrency(d.totauxTranches.ferme)}</Td>
                       </tr>
-                    ))}
-                    <tr style={{ fontWeight: 'bold' }}>
-                      <Td colSpan={2} style={{ textAlign: 'right' }}>Sous-total {catLabel.toLowerCase()}</Td>
-                      <Td style={NOWRAP}>{formatCurrency(subtotal)}</Td>
-                    </tr>
-                  </React.Fragment>
-                );
-              })}
+                      {d.tranches.some(x => x.type === 'conditionnelle') && (
+                        <tr style={{ fontWeight: 'bold', background: '#f1f5f9' }}>
+                          <Td colSpan={2} style={{ textAlign: 'right' }}>Total tranches conditionnelles HT</Td>
+                          <Td style={NOWRAP}>{formatCurrency(d.totauxTranches.conditionnel)}</Td>
+                        </tr>
+                      )}
+                    </>
+                  )}
+                </>
+              ) : renderCategories(d.missions, 'all')}
             </tbody>
           </Table>
         </>
       )}
 
       <div data-pdf-keep="true" style={{ marginTop: density.blockGap, marginLeft: 'auto', width: '60mm' }}>
+        {d.remiseHonoraires > 0 && (<>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>Honoraires HT{d.partPcSeul !== null ? ` (PC seul, ${d.partPcSeul} %)` : ''}</span><span>{formatCurrency(d.montantHonorairesBrut)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>Remise</span><span>- {formatCurrency(d.remiseHonoraires)}</span>
+          </div>
+        </>)}
+        {d.totauxTranches && d.tranches.some(x => x.type === 'conditionnelle') && (<>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>dont tranches fermes</span><span>{formatCurrency(d.totauxTranches.ferme)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>dont tranches conditionnelles</span><span>{formatCurrency(d.totauxTranches.conditionnel)}</span>
+          </div>
+        </>)}
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
           <span>Total Honoraires HT</span>
           <span style={{ fontWeight: 'bold' }}>{formatCurrency(d.montantHonorairesHT)}</span>
@@ -515,14 +603,22 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
   );
 };
 
-const renderRepartition: SectionRenderer = (d, t, _ctx, newPage) => {
+const renderRepartition: SectionRenderer = (d, t, ctx, newPage) => {
   const allIntervenants = Array.from(new Set(d.missions.flatMap(m => m.intervenants.map(i => i.nom))));
 
   if (t.detailLevel === 'court') {
     return (
       <Section key="repartition">
-        <H2 template={t} newPage={newPage}>04. Répartition des Honoraires</H2>
+        <H2 template={t} newPage={newPage}>{ctx.num}. Répartition des Honoraires</H2>
         <div data-pdf-keep="true" style={{ marginTop: '6mm', width: '80mm' }}>
+          {d.remiseHonoraires > 0 && (<>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+              <span>Honoraires HT{d.partPcSeul !== null ? ` (PC seul, ${d.partPcSeul} %)` : ''}</span><span>{formatCurrency(d.montantHonorairesBrut)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+              <span>Remise</span><span>- {formatCurrency(d.remiseHonoraires)}</span>
+            </div>
+          </>)}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
             <span>Total Honoraires HT</span><span style={{ fontWeight: 'bold' }}>{formatCurrency(d.montantHonorairesHT)}</span>
           </div>
@@ -549,7 +645,7 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, newPage) => {
   const designationWidth = { ...head, width: '22%' };
   return (
     <Section key="repartition">
-      <H2 template={t} newPage={newPage}>04. Répartition des Honoraires</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Répartition des Honoraires</H2>
       {/* Mise en page automatique : des colonnes de largeur égale coupaient la désignation
           en pleine lettre et les montants en deux. Les montants ne se coupent plus. */}
       <Table style={{ fontSize, tableLayout: 'auto' }}>
@@ -567,7 +663,12 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, newPage) => {
         <tbody>
           {d.missions.map(m => (
             <tr key={m.id}>
-              <Td style={{ fontWeight: 'bold', ...tight }}>{m.designation}</Td>
+              <Td style={{ fontWeight: 'bold', ...tight }}>
+                {m.designation}
+                {d.tranches.length > 1 && (
+                  <span style={{ fontWeight: 'normal', fontSize: '0.85em' }}> ({d.tranches.find(tr => tr.id === m.trancheId)?.label ?? d.tranches[0].label})</span>
+                )}
+              </Td>
               <Td style={money}>{formatCurrency(m.montantHT)}</Td>
               <Td style={money}>{formatPercent(m.relPct)}</Td>
               {allIntervenants.map(name => {
@@ -639,9 +740,9 @@ function CotraitantsIdentityTable({ d, t }: { d: ProposalPdfData; t: ProposalTem
   );
 }
 
-const renderCotraitants: SectionRenderer = (d, t, _ctx, newPage) => (
+const renderCotraitants: SectionRenderer = (d, t, ctx, newPage) => (
   <Section key="cotraitants">
-    <H2 template={t} newPage={newPage}>05. Cotraitants & Spécialités</H2>
+    <H2 template={t} newPage={newPage}>{ctx.num}. Cotraitants & Spécialités</H2>
     <P template={t}>Pour la réalisation de cette mission, l'Architecte s'entoure des compétences suivantes :</P>
     {t.layout.cotraitantIdentity ? (
       <CotraitantsIdentityTable d={d} t={t} />
@@ -664,9 +765,9 @@ const renderCotraitants: SectionRenderer = (d, t, _ctx, newPage) => (
   </Section>
 );
 
-const renderCalendrier: SectionRenderer = (d, t, _ctx, newPage) => (
+const renderCalendrier: SectionRenderer = (d, t, ctx, newPage) => (
   <Section key="calendrier">
-    <H2 template={t} newPage={newPage}>06. Calendrier Prévisionnel</H2>
+    <H2 template={t} newPage={newPage}>{ctx.num}. Calendrier Prévisionnel</H2>
     <div data-pdf-keep="true" style={{ width: '100%', marginTop: '10mm' }}><GanttChart data={d} /></div>
     <H3 style={{ marginTop: '10mm' }}>Récapitulatif des Durées</H3>
     <Table>
@@ -692,17 +793,17 @@ const renderCalendrier: SectionRenderer = (d, t, _ctx, newPage) => (
 
 const renderMafCost: SectionRenderer = (_d, t, ctx, newPage) => (
   <Section key="mafCost">
-    <H2 template={t} newPage={newPage}>Coût Assurance MAF</H2>
+    <H2 template={t} newPage={newPage}>{ctx.num}. Coût Assurance MAF</H2>
     <div data-pdf-keep="true">{ctx.mafCost && <MafCostBadge result={ctx.mafCost} showDetails />}</div>
   </Section>
 );
 
-const renderSignatures: SectionRenderer = (d, t, _ctx, newPage) => {
+const renderSignatures: SectionRenderer = (d, t, ctx, newPage) => {
   // Une note annexe est un paragraphe de plus : la pagination peut couper entre deux.
   const appendixBlocks = t.clauses.appendixNotes.split(/\n{2,}/).filter(block => block.trim());
   return (
     <Section key="signatures">
-      <H2 template={t} newPage={newPage}>07. Conditions Générales & Signatures</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Conditions Générales & Signatures</H2>
       <div data-pdf-keep="true" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10mm' }}>
         <div><H3>Modalités de Règlement</H3><P template={t} style={{ fontSize: '8pt' }}>{t.clauses.reglement}</P></div>
         <div><H3>Révision des Honoraires</H3><P template={t} style={{ fontSize: '8pt' }}>{t.clauses.revision}</P></div>
@@ -741,6 +842,44 @@ const renderSignatures: SectionRenderer = (d, t, _ctx, newPage) => {
   );
 };
 
+/** Une image (extrait de plan ou photo) avec sa légende : jamais coupée entre deux pages. */
+function IllustrationFigure({ image, maxHeightMm }: { image: IllustrationPdf; maxHeightMm: number }) {
+  return (
+    <figure data-pdf-keep="true" style={{ margin: 0, marginBottom: '5mm', textAlign: 'center' }}>
+      <img
+        src={image.dataUrl}
+        alt={image.caption}
+        style={{ display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: `${maxHeightMm}mm`, objectFit: 'contain', border: '0.5px solid #cbd5e1' }}
+      />
+      {image.caption && (
+        <figcaption style={{ fontSize: '8pt', fontStyle: 'italic', color: '#475569', marginTop: '1.5mm' }}>{image.caption}</figcaption>
+      )}
+    </figure>
+  );
+}
+
+/** Extraits de plan puis photos : les plans pleine largeur, les photos deux par ligne. */
+const renderIllustrations: SectionRenderer = (d, t, ctx, newPage) => {
+  const images = d.illustrations ?? [];
+  const plans = images.filter(i => !i.isPhoto);
+  const photos = images.filter(i => i.isPhoto);
+  const rows: IllustrationPdf[][] = [];
+  for (let i = 0; i < photos.length; i += 2) rows.push(photos.slice(i, i + 2));
+  return (
+    <Section key="illustrations">
+      <H2 template={t} newPage={newPage}>{ctx.num}. Plan et photos</H2>
+      {plans.length > 0 && photos.length > 0 && <H3>Plan</H3>}
+      {plans.map((image, i) => <IllustrationFigure key={`plan-${i}`} image={image} maxHeightMm={120} />)}
+      {photos.length > 0 && plans.length > 0 && <H3>Photos</H3>}
+      {rows.map((row, i) => (
+        <div key={`photos-${i}`} data-pdf-keep="true" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6mm', alignItems: 'start' }}>
+          {row.map((image, j) => <IllustrationFigure key={j} image={image} maxHeightMm={70} />)}
+        </div>
+      ))}
+    </Section>
+  );
+};
+
 /** Sections du corps du document (la page de garde est à part). */
 type BodySectionId = Exclude<ProposalSectionId, 'garde'>;
 
@@ -752,6 +891,7 @@ const SECTION_RENDERERS: Record<BodySectionId, SectionRenderer> = {
   cotraitants: renderCotraitants,
   calendrier: renderCalendrier,
   mafCost: renderMafCost,
+  illustrations: renderIllustrations,
   signatures: renderSignatures,
 };
 
@@ -764,14 +904,15 @@ const SECTION_AVAILABLE: Record<BodySectionId, (d: ProposalPdfData, ctx: Section
   cotraitants: d => d.cotraitants.length > 0,
   calendrier: d => d.calendrier.length > 0,
   mafCost: (_d, ctx) => !!ctx.mafCost,
+  illustrations: d => (d.illustrations?.length ?? 0) > 0,
   signatures: () => true,
 };
 
 // ─── Sidebar: section toggles + preset + visual + clauses ──────────────────
 
 function TemplateEditorPanel({
-  template, onChange, mafAvailable, open, onCloseMobile,
-}: { template: ProposalTemplate; onChange: (t: ProposalTemplate) => void; mafAvailable: boolean; open: boolean; onCloseMobile: () => void }) {
+  template, onChange, mafAvailable, illustrationsCount, open, onCloseMobile,
+}: { template: ProposalTemplate; onChange: (t: ProposalTemplate) => void; mafAvailable: boolean; illustrationsCount: number; open: boolean; onCloseMobile: () => void }) {
   const visibleSections = PROPOSAL_SECTION_DEFS.filter(s => s.id !== 'mafCost' || mafAvailable);
 
   return (
@@ -823,7 +964,14 @@ function TemplateEditorPanel({
           <div className="space-y-2">
             {visibleSections.map(({ id, label }) => (
               <label key={id} className="flex items-center justify-between p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                <span className="text-xs text-zinc-600 dark:text-zinc-400">{label}</span>
+                <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                  {label}
+                  {id === 'illustrations' && (
+                    <span className="block text-[0.625rem] text-zinc-400">
+                      {illustrationsCount > 0 ? `${illustrationsCount} image${illustrationsCount > 1 ? 's' : ''}` : 'Aucune image : à ajouter dans la proposition'}
+                    </span>
+                  )}
+                </span>
                 <input
                   type="checkbox"
                   checked={template.pages[id]}
@@ -948,6 +1096,11 @@ function TemplateEditorPanel({
 
 /** Les logos de cotraitants s'impriment à 13 mm de haut au plus : inutile de les garder plus grands. */
 const PARTNER_LOGO_MAX_W = 600;
+/** Bornes du zoom de l'aperçu (1 = taille réelle de la page A4 à l'écran). */
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 3;
+const ZOOM_STEP = 1.25;
+const clampZoom = (value: number): number => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
 const PARTNER_LOGO_MAX_H = 300;
 
 interface ProposalExportModalProps {
@@ -957,11 +1110,13 @@ interface ProposalExportModalProps {
   clientEmail?: string;
   /** Appelé quand le message a bien été envoyé au client. */
   onSent?: () => void;
+  /** Ferme l'export et rouvre la proposition en édition (bouton « Modifier la proposition »). */
+  onEdit?: () => void;
   /** `send` : ouverte depuis « Envoyer au client », l'envoi est l'action principale. */
-  intent?: 'export' | 'send';
+  intent?: 'export' | 'send' | 'sign';
 }
 
-export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSent, intent = 'export' }: ProposalExportModalProps) {
+export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSent, onEdit, intent = 'export' }: ProposalExportModalProps) {
   const { t } = useTranslation();
   const { settings } = useSettings();
   const [template, setTemplate] = useState<ProposalTemplate>(() => loadStoredTemplate());
@@ -972,6 +1127,17 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
   const previewRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<HTMLDivElement>(null);
   const [pageCount, setPageCount] = useState(1);
+
+  // Zoom de l'aperçu. `null` = la page s'ajuste à la largeur de l'écran (jamais agrandie
+  // au-delà de sa taille réelle) ; un nombre = zoom choisi (boutons ou pincement).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scalerRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState<number | null>(null);
+  const [fitScale, setFitScale] = useState(1);
+  const [flowSize, setFlowSize] = useState({ width: 0, height: 0 });
+  const scale = zoom ?? fitScale;
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
 
   useEffect(() => {
     saveStoredTemplate(template);
@@ -1017,6 +1183,25 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     return () => { alive = false; };
   }, [proposal.specialties_list]);
 
+  // Plan et photos : chargés (URL signée) et réduits seulement si la section est cochée.
+  // Une image illisible est ignorée, jamais bloquante pour l'export.
+  const [illustrations, setIllustrations] = useState<IllustrationPdf[]>([]);
+  const illustrationsOn = template.pages.illustrations;
+  useEffect(() => {
+    let alive = true;
+    if (!illustrationsOn) { setIllustrations([]); return () => { alive = false; }; }
+    const list = orderIllustrations(parseProposalIllustrations(proposal.illustrations));
+    Promise.all(list.map(async (ill): Promise<IllustrationPdf | null> => {
+      try {
+        const img = await compressImage(await resolveSignedUrl(ill.file_url), 1600, 1100, 0.85);
+        return img ? { dataUrl: img.dataUrl, caption: ill.caption, isPhoto: ill.layer === 'photo', width: img.w, height: img.h } : null;
+      } catch {
+        return null;
+      }
+    })).then(images => { if (alive) setIllustrations(images.filter((i): i is IllustrationPdf => !!i)); });
+    return () => { alive = false; };
+  }, [proposal.illustrations, illustrationsOn]);
+
   const data = useMemo<ProposalPdfData>(() => {
     // Logos de la page de garde : ceux des cotraitants, dans l'ordre du groupement, sans doublon.
     const cotraitantLogos = [...new Set(
@@ -1029,14 +1214,27 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
       ...(compressedLogo ? { agenceLogo: compressedLogo } : {}),
       cotraitantIdentites: identities,
       cotraitantLogos,
+      illustrations,
     };
-  }, [rawData, compressedLogo, identities]);
+  }, [rawData, compressedLogo, identities, illustrations]);
+
+  // Le PDF est toujours capturé à l'échelle 1 : le zoom de l'aperçu n'y entre jamais.
+  const withFullScale = async <T,>(task: () => Promise<T>): Promise<T> => {
+    const scaler = scalerRef.current;
+    const previous = scaler?.style.transform ?? '';
+    if (scaler) scaler.style.transform = 'none';
+    try {
+      return await task();
+    } finally {
+      if (scaler) scaler.style.transform = previous;
+    }
+  };
 
   const handleExport = async () => {
     if (!previewRef.current) return;
     setIsGenerating(true);
     try {
-      await exportProposalPdf(previewRef.current, data);
+      await withFullScale(() => exportProposalPdf(previewRef.current!, data));
     } catch (err) {
       console.error('PDF Generation Error:', err);
       alert(t('proposal_export_modal_pdf_error'));
@@ -1051,7 +1249,7 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     if (!previewRef.current) return;
     setIsPreparingMail(true);
     try {
-      const { blob, filename } = await exportProposalPdf(previewRef.current, data, { download: false });
+      const { blob, filename } = await withFullScale(() => exportProposalPdf(previewRef.current!, data, { download: false }));
       setMailFile(new File([blob], filename, { type: 'application/pdf' }));
     } catch (err) {
       console.error('PDF Generation Error:', err);
@@ -1067,6 +1265,9 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     if (!flowRef.current) return;
     const pages = paginateFlow(flowRef.current);
     setPageCount(current => (current === pages ? current : pages));
+    // Taille réelle de la page (hors zoom) : elle fixe l'encombrement de l'aperçu zoomé.
+    const { offsetWidth: width, offsetHeight: height } = flowRef.current;
+    setFlowSize(current => (current.width === width && current.height === height ? current : { width, height }));
   };
   useLayoutEffect(repaginate);
   // Les polices peuvent arriver après le premier rendu et décaler les lignes.
@@ -1076,6 +1277,78 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     return () => { alive = false; };
   }, []);
 
+  // Ajustement à la largeur : suit la taille du conteneur (rotation, clavier, volet).
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || !flowSize.width) return;
+    const update = () => {
+      const style = getComputedStyle(container);
+      const available = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (available > 0) setFitScale(Math.min(1, available / flowSize.width));
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [flowSize.width]);
+
+  // Zoom en gardant fixe le point visé (centre du pincement, ou centre de l'écran).
+  const zoomAround = (nextZoom: number, clientX?: number, clientY?: number) => {
+    const container = scrollRef.current;
+    const next = clampZoom(nextZoom);
+    if (!container) { setZoom(next); return; }
+    const rect = container.getBoundingClientRect();
+    const px = (clientX ?? rect.left + rect.width / 2) - rect.left;
+    const py = (clientY ?? rect.top + rect.height / 2) - rect.top;
+    const ratio = next / scaleRef.current;
+    const left = (container.scrollLeft + px) * ratio - px;
+    const top = (container.scrollTop + py) * ratio - py;
+    setZoom(next);
+    // Le contenu change de taille au prochain rendu : on replace le défilement juste après.
+    requestAnimationFrame(() => { container.scrollLeft = left; container.scrollTop = top; });
+  };
+  const zoomAroundRef = useRef(zoomAround);
+  zoomAroundRef.current = zoomAround;
+
+  // Pincement à deux doigts et Ctrl + molette : le zoom natif du navigateur n'agrandit
+  // pas un document placé dans un panneau à défilement interne.
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    let startDistance = 0;
+    let startScale = 1;
+    const distance = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) { startDistance = distance(e.touches); startScale = scaleRef.current; }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !startDistance) return;
+      e.preventDefault();
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      zoomAroundRef.current(startScale * (distance(e.touches) / startDistance), cx, cy);
+    };
+    const onTouchEnd = (e: TouchEvent) => { if (e.touches.length < 2) startDistance = 0; };
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      zoomAroundRef.current(scaleRef.current * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+    };
+    container.addEventListener('touchstart', onTouchStart, { passive: true });
+    container.addEventListener('touchmove', onTouchMove, { passive: false });
+    container.addEventListener('touchend', onTouchEnd, { passive: true });
+    container.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      container.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('touchmove', onTouchMove);
+      container.removeEventListener('touchend', onTouchEnd);
+      container.removeEventListener('touchcancel', onTouchEnd);
+      container.removeEventListener('wheel', onWheel);
+    };
+  }, []);
+
   const hasCover = template.pages.garde;
   const sectionCtx: SectionCtx = { mafCost: template.pages.mafCost ? mafCost : null };
   const bodySections = PROPOSAL_SECTION_DEFS
@@ -1083,13 +1356,16 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     .filter(({ id }) => template.pages[id] && SECTION_AVAILABLE[id](data, sectionCtx))
     // La première section s'ouvre toujours en haut d'une page (derrière la garde) ;
     // les suivantes seulement si le réglage « saut de page entre sections » est actif.
-    .map(({ id }, index) => SECTION_RENDERERS[id](data, template, sectionCtx, index === 0 || template.layout.sectionBreaks));
+    // Les chapitres se renumérotent d'après les seules sections imprimées (01, 02, 03...).
+    .map(({ id }, index) => SECTION_RENDERERS[id](
+      data, template, { ...sectionCtx, num: String(index + 1).padStart(2, '0') }, index === 0 || template.layout.sectionBreaks,
+    ));
 
   return (
     <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm">
       <div className="bg-white dark:bg-zinc-900 w-full h-full flex flex-col">
-        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="p-2 sm:p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
               onClick={() => setSidebarOpen(o => !o)}
@@ -1098,31 +1374,44 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
             >
               <IconLayoutSidebar size={20} />
             </button>
-            <div>
-              <h2 className="text-sm font-bold text-zinc-900 dark:text-white">Export PDF de la Proposition</h2>
-              <p className="text-[0.6875rem] text-zinc-500 uppercase tracking-wider">{data.reference} | {data.indice} | {pageCount} page{pageCount > 1 ? 's' : ''}</p>
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold text-zinc-900 dark:text-white truncate">Export PDF de la Proposition</h2>
+              <p className="text-[0.6875rem] text-zinc-500 uppercase tracking-wider truncate">{data.reference} | {data.indice} | {pageCount} page{pageCount > 1 ? 's' : ''}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {onEdit && (
+              <button
+                onClick={onEdit}
+                aria-label={t('proposals_edit_from_export')}
+                disabled={isGenerating || isPreparingMail}
+                className="flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-60 rounded-lg text-sm font-bold transition"
+              >
+                <IconEdit size={16} />
+                <span className="hidden sm:inline">{t('proposals_edit_from_export')}</span>
+              </button>
+            )}
             <button
               onClick={handleSend}
+              aria-label={t(intent === 'sign' ? 'proposal_sign_send' : 'proposals_send_to_client')}
               disabled={isPreparingMail || isGenerating}
               className={intent === 'send'
-                ? 'flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'
-                : 'flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'}
+                ? 'flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'
+                : 'flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'}
             >
               <IconSend size={16} />
-              {isPreparingMail ? t('proposals_send_preparing') : t('proposals_send_to_client')}
+              <span className="hidden sm:inline">{isPreparingMail ? t('proposals_send_preparing') : t(intent === 'sign' ? 'proposal_sign_send' : 'proposals_send_to_client')}</span>
             </button>
             <button
               onClick={handleExport}
+              aria-label={t('proposals_export_pdf')}
               disabled={isGenerating || isPreparingMail}
               className={intent === 'send'
-                ? 'flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'
-                : 'flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'}
+                ? 'flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'
+                : 'flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'}
             >
               <IconDownload size={16} />
-              {isGenerating ? t('proposals_export_generating') : t('proposals_export_pdf')}
+              <span className="hidden sm:inline">{isGenerating ? t('proposals_export_generating') : t('proposals_export_pdf')}</span>
             </button>
             <button onClick={onClose} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 rounded-lg transition-colors">
               <IconX size={20} />
@@ -1138,14 +1427,26 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
             template={template}
             onChange={setTemplate}
             mafAvailable={!!settings?.maf_enabled}
+            illustrationsCount={parseProposalIllustrations(proposal.illustrations).length}
             open={sidebarOpen}
             onCloseMobile={() => setSidebarOpen(false)}
           />
 
-          <div className="flex-1 overflow-auto p-8 bg-zinc-100 dark:bg-zinc-950">
+          <div className="flex-1 relative min-w-0 bg-zinc-100 dark:bg-zinc-950">
+          <div ref={scrollRef} className="absolute inset-0 overflow-auto p-2 md:p-8" style={{ touchAction: 'pan-x pan-y' }}>
             <style dangerouslySetInnerHTML={{ __html: getPdfStyles() }} />
             <div ref={previewRef} className="flex flex-col items-center gap-6">
               <DensityContext.Provider value={DENSITY_TOKENS[template.layout.tableDensity]}>
+                {/* Enveloppe de zoom : elle prend la taille de la page zoomée (le défilement suit),
+                    la page à l'intérieur est réduite ou agrandie par `transform` (mise en page intacte). */}
+                <div
+                  style={{
+                    width: flowSize.width ? flowSize.width * scale : undefined,
+                    height: flowSize.height ? flowSize.height * scale : undefined,
+                    flexShrink: 0,
+                  }}
+                >
+                <div ref={scalerRef} style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: 'max-content' }}>
                 {/* L'ombre est sur l'enveloppe : jsPDF ne sait pas la dessiner. */}
                 <div style={{ boxShadow: '0 1px 8px rgba(0,0,0,0.25)' }}>
                   <div
@@ -1168,12 +1469,48 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
                     <PageChrome d={data} pageCount={pageCount} hasCover={hasCover} />
                   </div>
                 </div>
+                </div>
+                </div>
               </DensityContext.Provider>
             </div>
           </div>
+          <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-full bg-white/95 dark:bg-zinc-800/95 shadow-lg border border-zinc-200 dark:border-zinc-700 p-1">
+            <button
+              type="button"
+              onClick={() => zoomAround(scale / ZOOM_STEP)}
+              disabled={scale <= ZOOM_MIN}
+              className="p-2 rounded-full text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40"
+              aria-label="Dézoomer"
+            >
+              <IconZoomOut size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setZoom(null); scrollRef.current?.scrollTo({ left: 0 }); }}
+              className="min-w-[3.25rem] px-1 py-1 rounded-full text-xs font-bold tabular-nums text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              aria-label="Ajuster la page à la largeur"
+              title="Ajuster à la largeur"
+            >
+              {Math.round(scale * 100)} %
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomAround(scale * ZOOM_STEP)}
+              disabled={scale >= ZOOM_MAX}
+              className="p-2 rounded-full text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40"
+              aria-label="Zoomer"
+            >
+              <IconZoomIn size={18} />
+            </button>
+          </div>
+          </div>
         </div>
       </div>
-      {mailFile && (
+      {mailFile && intent === 'sign' && <SendProposalSignature
+        file={mailFile} proposalId={proposal.id} email={clientEmail} name={proposal.client_name || proposal.representant || ''}
+        onSent={() => { setMailFile(null); onSent?.(); }} onClose={() => setMailFile(null)}
+      />}
+      {mailFile && intent !== 'sign' && (
         <SendProposalMail
           file={mailFile}
           to={clientEmail}

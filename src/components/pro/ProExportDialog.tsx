@@ -1,4 +1,4 @@
-import React, { useId, useMemo, useState } from 'react';
+import React, { useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconFileZip } from '@tabler/icons-react';
 import type { DPGF } from '../../types/dpgf';
@@ -12,6 +12,8 @@ import {
   DOCUMENTS_DOSSIER, compterFichiers, produireDossier, type DocumentDossier, type FormatChoisi,
 } from '../../lib/exportDossier';
 import { livrer, nomSur } from '../../lib/exportSortie';
+import { estAnnulation, verifierAnnulation } from '../../lib/annulation';
+import { ORIENTATION_CCTP, ORIENTATION_DPGF, type Orientation } from '../../lib/exportOrientation';
 import { DialogShell, boutonPrincipal, boutonSecondaire } from '../projectDetail/situations/DialogShell';
 
 interface Props {
@@ -22,6 +24,8 @@ interface Props {
   /** Document ouvert à l'écran : il est coché d'office. */
   ongletActif: string;
   projectName?: string;
+  /** Photo du projet, imprimée sur la page de garde du CCTP et du DPGF. */
+  projectImageUrl?: string;
   contexte?: ContexteCctp;
   settings: AgencySettings;
   /** Attribue les références du bordereau et les enregistre, avant tout export. */
@@ -37,6 +41,9 @@ const toggle = (set: Set<string>, id: string): Set<string> => {
   if (next.has(id)) next.delete(id); else next.add(id);
   return next;
 };
+
+/** Mémorise le choix « estimation poste par poste » (préférence de l'utilisateur, jamais enregistrée en base). */
+const CLE_ESTIMATION_DETAILLEE = 'pro:export:estimation-detaillee';
 
 const DEPART: Record<string, DocumentDossier> = {
   CCTP: 'cctp', DPGF: 'dpgf', DQE: 'dqe', BPU: 'bpu', ESTIMATION: 'estimation',
@@ -62,7 +69,7 @@ function reunir<T>(sources: T[][], cle: (x: T) => string, label: (x: T) => strin
  * ne la monte qu'à l'ouverture : l'état repart de zéro à chaque fois.
  */
 export const ProExportDialog: React.FC<Props> = ({
-  dpgf, bpu, bpuLoading, ongletActif, projectName, contexte, settings, prepareBpu, notify, onClose,
+  dpgf, bpu, bpuLoading, ongletActif, projectName, projectImageUrl, contexte, settings, prepareBpu, notify, onClose,
 }) => {
   const { t } = useTranslation();
   const groupId = useId();
@@ -72,7 +79,22 @@ export const ProExportDialog: React.FC<Props> = ({
   const [avecPrix, setAvecPrix] = useState(false);
   const [avecTva, setAvecTva] = useState(false);
   const [cctpParBatiment, setCctpParBatiment] = useState(false);
+  // Annexe des fiches techniques : jamais jointe d'office, seulement sur coche explicite.
+  const [annexeFiches, setAnnexeFiches] = useState(false);
+  const [parLot, setParLot] = useState(false);
+  // Poste par poste ou récapitulatif par lot : le dernier choix est gardé d'une ouverture à l'autre.
+  const [estimationDetaillee, setEstimationDetaillee] = useState(() => {
+    try { return localStorage.getItem(CLE_ESTIMATION_DETAILLEE) === '1'; } catch { return false; }
+  });
+  const choisirEstimationDetaillee = (valeur: boolean) => {
+    setEstimationDetaillee(valeur);
+    try { localStorage.setItem(CLE_ESTIMATION_DETAILLEE, valeur ? '1' : '0'); } catch { /* stockage indisponible : le choix vaut pour cette ouverture */ }
+  };
+  const [orientations, setOrientations] = useState<Record<'cctp' | 'dpgf', Orientation>>({
+    cctp: ORIENTATION_CCTP, dpgf: ORIENTATION_DPGF,
+  });
   const [busy, setBusy] = useState(false);
+  const annulation = useRef<AbortController | null>(null);
   const [erreur, setErreur] = useState('');
 
   const bpuVide = !bpu || bpu.lots.length === 0;
@@ -119,7 +141,7 @@ export const ProExportDialog: React.FC<Props> = ({
     };
   }, [mode, lotIds, batIds, phaseIds, marcheIds, lots, batiments, phases, marches]);
 
-  const nbFichiers = compterFichiers({ documents, selection, cctpParBatiment, dpgf });
+  const nbFichiers = compterFichiers({ documents, selection, cctpParBatiment, dpgf, parLot });
   const nbDocuments = Object.keys(documents).length;
 
   const perimetre = (): string => {
@@ -136,26 +158,37 @@ export const ProExportDialog: React.FC<Props> = ({
   const lancer = async () => {
     setBusy(true);
     setErreur('');
+    const controleur = new AbortController();
+    annulation.current = controleur;
     try {
       const bpuPret = documents.bpu || documents.dqe ? prepareBpu() : null;
       const res = await produireDossier({
-        dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment,
-        projectName, perimetre: perimetre(), settings, contexte,
+        dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment, parLot, orientations, estimationDetaillee,
+        annexeFiches: annexeFiches && !!documents.cctp,
+        projectName, perimetre: perimetre(), settings, contexte, signal: controleur.signal,
+        couverture: { imageUrl: projectImageUrl, adresse: contexte?.adresse, maitreOuvrage: contexte?.maitreOuvrage, reference: contexte?.reference },
       });
       for (const a of res.avertissements) {
-        notify?.(
-          a.code === 'vide'
-            ? t('pro_export_dialog_warn_empty', { doc: t(`pro_export_doc_${a.document}`) })
-            : t('pro_cctp_export_unassigned', { count: a.count }),
-          { type: 'error' },
-        );
+        const message = a.code === 'vide'
+          ? t('pro_export_dialog_warn_empty', { doc: t(`pro_export_doc_${a.document}`) })
+          : a.code === 'sans_batiment'
+            ? t('pro_cctp_export_unassigned', { count: a.count })
+            : a.code === 'annexe_vide'
+              ? t('pro_export_dialog_annex_empty', { defaultValue: "Annexe demandée : aucun poste du CCTP exporté ne porte de fiche technique." })
+              : a.code === 'annexe_marques'
+                ? t('pro_export_dialog_annex_brands', { count: a.count, defaultValue: '{{count}} fiche(s) marquée(s) « anonyme » sont jointes telles quelles : leur fichier contient les marques.' })
+                : t('pro_export_dialog_annex_missing', { names: a.noms.join(', '), defaultValue: 'Fiche(s) non jointe(s), fichier illisible : {{names}}' });
+        notify?.(message, { type: 'error' });
       }
       if (res.fichiers.length === 0) { setErreur(t('pro_export_dialog_nothing')); return; }
+      verifierAnnulation(controleur.signal);
       await livrer(res.fichiers, `Dossier_PRO_${nomSur(projectName ?? dpgf.titre)}.zip`);
       onClose();
     } catch (e) {
+      if (estAnnulation(e)) { notify?.(t('pro_export_dialog_cancelled', { defaultValue: 'Export annulé : aucun fichier n\'a été produit.' })); return; }
       setErreur(t('pro_export_dialog_error', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
+      annulation.current = null;
       setBusy(false);
     }
   };
@@ -180,6 +213,17 @@ export const ProExportDialog: React.FC<Props> = ({
             </span>
           </span>
         </label>
+        {(doc === 'cctp' || doc === 'dpgf') && (
+          <select
+            aria-label={t('pro_export_dialog_orientation_of', { doc: t(`pro_export_doc_${doc}`) })}
+            className="tblr-input w-auto text-sm" disabled={!choix}
+            value={orientations[doc]}
+            onChange={e => setOrientations(prev => ({ ...prev, [doc]: e.target.value as Orientation }))}
+          >
+            <option value="portrait">{t('pro_export_dialog_portrait')}</option>
+            <option value="paysage">{t('pro_export_dialog_landscape')}</option>
+          </select>
+        )}
         <select
           aria-label={t('pro_export_dialog_format_of', { doc: t(`pro_export_doc_${doc}`) })}
           className="tblr-input w-auto text-sm" disabled={!choix}
@@ -234,7 +278,9 @@ export const ProExportDialog: React.FC<Props> = ({
             {nbFichiers > 1 && <IconFileZip size={14} aria-hidden />}
             {nbFichiers === 0 ? t('pro_export_dialog_none') : nbFichiers === 1 ? t('pro_export_dialog_one_file') : t('pro_export_dialog_zip', { count: nbFichiers })}
           </span>
-          <button type="button" className={boutonSecondaire} onClick={onClose} disabled={busy}>{t('pro_versions_close')}</button>
+          {busy
+            ? <button type="button" className={boutonSecondaire} onClick={() => annulation.current?.abort()}>{t('pro_export_dialog_cancel', { defaultValue: 'Annuler l\'export' })}</button>
+            : <button type="button" className={boutonSecondaire} onClick={onClose}>{t('pro_versions_close')}</button>}
           <button type="button" className={boutonPrincipal} disabled={nbFichiers === 0 || busy} onClick={() => { void lancer(); }}>
             {busy ? t('pro_export_dialog_running') : t('pro_export')}
           </button>
@@ -303,6 +349,35 @@ export const ProExportDialog: React.FC<Props> = ({
               <span>
                 <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_vat')}</span>
                 <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_vat_hint')}</span>
+              </span>
+            </label>
+          )}
+          {(documents.cctp || documents.dpgf) && (
+            <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[2.75rem] sm:min-h-0">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--tblr-primary)]" checked={parLot} onChange={e => setParLot(e.target.checked)} />
+              <span>
+                <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_per_lot')}</span>
+                <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_per_lot_hint')}</span>
+              </span>
+            </label>
+          )}
+          {documents.estimation && documents.estimation !== 'autre' && (
+            <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[2.75rem] sm:min-h-0">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--tblr-primary)]" checked={estimationDetaillee} onChange={e => choisirEstimationDetaillee(e.target.checked)} />
+              <span>
+                <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_estimation_detail')}</span>
+                <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_estimation_detail_hint')}</span>
+              </span>
+            </label>
+          )}
+          {documents.cctp && (
+            <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[2.75rem] sm:min-h-0">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--tblr-primary)]" checked={annexeFiches} onChange={e => setAnnexeFiches(e.target.checked)} />
+              <span>
+                <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_annex', { defaultValue: "Joindre l'annexe des fiches techniques" })}</span>
+                <span className="block text-xs text-[var(--tblr-muted)]">
+                  {t('pro_export_dialog_annex_hint', { defaultValue: "Dossier « Annexe - Fiches techniques » dans l'archive : fichiers d'origine nommés par poste et index PDF. Les fiches marquées « anonyme » sont jointes telles quelles (elles contiennent les marques)." })}
+                </span>
               </span>
             </label>
           )}

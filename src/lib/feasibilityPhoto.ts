@@ -8,6 +8,34 @@ export const PHOTO_MAX_INPUT_BYTES = 25 * 1024 * 1024;
 /** Limite d'illustrations par rubrique, alignée sur sanitizeIllustrations. */
 export const MAX_ILLUSTRATIONS_PER_SECTION = 20;
 
+/** Vrai pour une adresse http(s) bien formée ; seul filtre côté écran, le serveur revalide tout. */
+export function isHttpUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw.trim());
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/** Récupère une image publique par son lien (relayée par le serveur) sous forme de fichier. */
+export async function fetchPhotoFromUrl(rawUrl: string, token: string | null | undefined): Promise<File> {
+  const res = await fetch(`/api/feasibility/photo-from-url?url=${encodeURIComponent(rawUrl.trim())}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || 'fetch');
+  }
+  const blob = await res.blob();
+  const type = blob.type || 'image/jpeg';
+  const header = res.headers.get('X-Photo-Name');
+  let name = 'photo';
+  try { if (header) name = decodeURIComponent(header); } catch { /* nom brut */ }
+  if (!/\.[a-z0-9]{2,5}$/i.test(name)) name += `.${type.split('/')[1]?.replace('jpeg', 'jpg').replace(/\+.*/, '') || 'jpg'}`;
+  return new File([blob], name, { type });
+}
+
 /** Dimensions réduites pour tenir dans un carré de `maxSide`, sans jamais agrandir. */
 export function fitWithin(w: number, h: number, maxSide: number): { w: number; h: number } {
   const ratio = Math.min(1, maxSide / Math.max(w, h));

@@ -1,3 +1,4 @@
+import { FirmaSignatureAdmin } from '../components/proposal/SignatureProviderSettings';
 import { useState, useEffect, useCallback, type ChangeEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -1019,6 +1020,7 @@ export default function AdminDashboard() {
 
       {showPlatformAdmins && <PlatformAdminsPanel onClose={() => setShowPlatformAdmins(false)} />}
 
+      <FirmaSignatureAdmin />
       {showAiProvider && <AiProviderPanel onClose={() => setShowAiProvider(false)} />}
 
       {showDocumentParser && <DocumentParserPanel onClose={() => setShowDocumentParser(false)} />}

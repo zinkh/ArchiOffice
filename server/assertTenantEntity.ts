@@ -22,3 +22,36 @@ export async function assertTenantEntity(
   const { data } = await supabaseAdmin.from(table).select('id').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
   return !!data;
 }
+
+/** One relational id of a payload: the table it points at, its value, and the
+ *  French noun used in the refusal message ("Projet introuvable pour ce cabinet."). */
+export interface TenantRelation {
+  table: string;
+  id: unknown;
+  label: string;
+}
+
+/**
+ * Validates SEVERAL relational ids of one payload in a single call and returns
+ * the refusal message of the first one the tenant does not own, or null when
+ * all of them are fine (the caller answers 400 with it).
+ *
+ * - An absent, null or empty id is skipped: clearing a relation is allowed.
+ * - A present id that is not a string (an object or array smuggled through the
+ *   JSON body) is refused outright rather than handed to the query builder.
+ * - A foreign id and a non-existent id get the SAME message: the response never
+ *   reveals that an id exists in another cabinet.
+ */
+export async function firstForeignRelation(
+  supabaseAdmin: any,
+  tenantId: string,
+  relations: TenantRelation[],
+): Promise<string | null> {
+  for (const { table, id, label } of relations) {
+    if (id === undefined || id === null || id === '') continue;
+    if (typeof id !== 'string' || !(await assertTenantEntity(supabaseAdmin, table, id, tenantId))) {
+      return `${label} introuvable pour ce cabinet.`;
+    }
+  }
+  return null;
+}

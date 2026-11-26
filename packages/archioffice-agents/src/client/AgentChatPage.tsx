@@ -9,6 +9,8 @@
 // l'application le fait déjà pour l'écran plein (voir ProjectDetail.tsx et
 // isFullBleedRoute dans App.tsx, dont cette page reprend le même principe de
 // mise en page en colonnes avec défilement propre à chacune).
+import { isYesNoQuestion } from './confirmationQuestion.js';
+import { QuickReplyButtons } from './QuickReplyButtons.js';
 import { ChatRequestStatus, ConsultedAgentLinks, type AgentConsultation } from './ChatRequestStatus.js';
 import { useConversationReset } from './useConversationReset.js';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -220,19 +222,21 @@ export default function AgentChatPage() {
   useEffect(() => { if (agentId) loadConversation(agentId); }, [agentId, loadConversation]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || !agentId || loading || loadingHistory || resetBusy || requestController.current) return;
+  const sendMessage = async (quickReply?: string) => {
+    const fromQuickReply = typeof quickReply === 'string';
+    const text = fromQuickReply ? quickReply : input;
+    if (!text.trim() || !agentId || loading || loadingHistory || resetBusy || requestController.current) return;
     const sequence = ++requestSequence.current;
     if (dictation.status !== 'idle') dictation.stop();
     speech.stop();
-    const rawInput = input.trim();
+    const rawInput = text.trim();
     const userMsg: AgentMessage = {
       id: crypto.randomUUID(), conversation_id: '', tenant_id: '', role: 'user',
       content: rawInput + (attachedDocs.length > 0 ? `\n\n📎 Documents joints : ${attachedDocs.map(d => d.name).join(', ')}` : ''),
       created_at: new Date().toISOString(),
     };
     setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    if (!fromQuickReply) setInput('');
     const docsToSend = [...attachedDocs];
     setAttachedDocs([]);
     setLoading(true);
@@ -258,15 +262,17 @@ export default function AgentChatPage() {
       if (res.remaining_balance !== undefined) setTokenBalance(res.remaining_balance);
       saveDraft(agentId, '');
     } catch (e: any) {
-      if (sequence !== requestSequence.current) { saveDraft(agentId, rawInput); return; }
+      if (sequence !== requestSequence.current) { if (!fromQuickReply) saveDraft(agentId, rawInput); return; }
       const errText: string = e?.message ?? t('agent_chat_error');
       if (e?.name === 'AbortError') setErrorMsg(t(abortReason.current === 'user' ? 'agent_chat_cancelled' : 'agent_chat_timeout'));
       else if (errText.includes('token') || errText.includes('NO_TOKENS')) setErrorMsg('tokens');
       else setErrorMsg(errText);
       setMessages(prev => prev.filter(m => m.id !== userMsg.id));
-      setInput(rawInput);
+      if (!fromQuickReply) {
+        setInput(rawInput);
+        saveDraft(agentId, rawInput);
+      }
       setAttachedDocs(docsToSend);
-      saveDraft(agentId, rawInput);
     } finally {
       clearTimeout(hardTimeout);
       if (sequence === requestSequence.current) {
@@ -397,6 +403,9 @@ export default function AgentChatPage() {
                 <ConsultedAgentLinks agents={msg.consulted} onOpen={switchAgent} disabled={loading || resetBusy} />
               </React.Fragment>
             ))}
+            {!loading && !loadingHistory && !resetBusy && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && isYesNoQuestion(messages[messages.length - 1].content) && (
+              <QuickReplyButtons onReply={sendMessage} />
+            )}
             {loading && <ChatRequestStatus onStop={() => { abortReason.current = 'user'; requestController.current?.abort(); }} />}
             {errorMsg === 'tokens' ? (
               <div className="mx-2 p-3 rounded-lg border text-[12px]" style={{ background: '#fff4e6', borderColor: '#ffd8a8', color: '#f76707' }}>
@@ -464,7 +473,7 @@ export default function AgentChatPage() {
                 disabled={loading || resetBusy}
               />
               <button
-                onClick={sendMessage}
+                onClick={() => sendMessage()}
                 aria-label={t('agent_chat_send')}
                 disabled={!input.trim() || loading || loadingHistory || resetBusy}
                 className="w-11 h-11 shrink-0 rounded-lg transition-colors flex items-center justify-center"

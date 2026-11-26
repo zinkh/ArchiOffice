@@ -1,4 +1,4 @@
-import type { Project, Task, TeamMember } from '../types';
+import type { Project, TeamMember } from '../types';
 import {
   asArray,
   asText,
@@ -7,6 +7,9 @@ import {
   inclusiveDays,
   isoDay,
   planningXmlBuilder,
+  xmlOutline,
+  type PlanningXmlOptions,
+  type PlanningXmlTask,
   type ImportedPlanningTask,
   type ParsedPlanningXml,
 } from './projectPlanningXmlShared';
@@ -32,7 +35,16 @@ export function parseMsProject(root: any): ParsedPlanningXml {
     resourcesByTask.set(taskUid, list);
   }
 
-  const tasks = asArray(project?.Tasks?.Task)
+  const rawTasks = asArray(project?.Tasks?.Task);
+  // Hiérarchie : le groupe parent se retrouve par le plan (« 1.2.3 » a pour parent « 1.2 »).
+  const uidParPlan = new Map<string, string>();
+  for (const task of rawTasks) {
+    const plan = asText(task?.OutlineNumber).trim();
+    const uid = asText(task?.UID ?? task?.ID).trim();
+    if (plan && uid) uidParPlan.set(plan, uid);
+  }
+
+  const tasks = rawTasks
     .map((task: any): ImportedPlanningTask | null => {
       const id = asText(task?.UID ?? task?.ID).trim();
       const title = asText(task?.Name).trim();
@@ -41,6 +53,14 @@ export function parseMsProject(root: any): ParsedPlanningXml {
 
       const start = isoDay(task?.Start);
       const finish = isoDay(task?.Finish, start);
+      const links = asArray(task?.PredecessorLink).map((link: any) => ({
+        id: asText(link?.PredecessorUID).trim(),
+        // LinkLag est en dixièmes de minute, sur une journée de 8 h.
+        jours: Math.round(Number(link?.LinkLag) / (8 * 60 * 10)),
+      })).filter(link => link.id);
+      const plan = asText(task?.OutlineNumber).trim();
+      const parent = plan.includes('.') ? uidParPlan.get(plan.slice(0, plan.lastIndexOf('.'))) : undefined;
+      const lagDays = Object.fromEntries(links.filter(link => Number.isFinite(link.jours) && link.jours > 0).map(link => [link.id, link.jours]));
       return {
         sourceId: id,
         title,
@@ -48,11 +68,12 @@ export function parseMsProject(root: any): ParsedPlanningXml {
         start_date: start,
         end_date: finish,
         progress: clampProgress(task?.PercentComplete),
-        dependencies: asArray(task?.PredecessorLink)
-          .map((link: any) => asText(link?.PredecessorUID).trim())
-          .filter(Boolean),
+        dependencies: links.map(link => link.id),
         resourceNames: resourcesByTask.get(id) || [],
         milestone: asText(task?.Milestone) === '1',
+        ...(asText(task?.Summary) === '1' ? { summary: true } : {}),
+        ...(parent && parent !== id ? { parentSourceId: parent } : {}),
+        ...(Object.keys(lagDays).length ? { lagDays } : {}),
       };
     })
     .filter((task: ImportedPlanningTask | null): task is ImportedPlanningTask => !!task);
@@ -68,7 +89,7 @@ function dateTime(date: string, time = '08:00:00') {
   return `${date}T${time}`;
 }
 
-export function exportMsProjectXml(project: Project, tasks: Task[], team: TeamMember[] = []): string {
+export function exportMsProjectXml(project: Project, tasks: PlanningXmlTask[], team: TeamMember[] = [], options: PlanningXmlOptions = {}): string {
   const taskUid = new Map(tasks.map((task, index) => [task.id, String(index + 1)]));
   const members = assignedMembers(tasks, team);
   const resourceUid = new Map(members.map((member, index) => [member.id, String(index + 1)]));
@@ -84,22 +105,37 @@ export function exportMsProjectXml(project: Project, tasks: Task[], team: TeamMe
       StartDate: dateTime(project.start_date),
       FinishDate: dateTime(project.end_date, '17:00:00'),
       MinutesPerDay: '480',
-      MinutesPerWeek: '2400',
+      MinutesPerWeek: options.calendarDays ? '3360' : '2400',
       DaysPerMonth: '20',
       CalendarUID: '1',
+      ...(options.calendarDays ? {
+        Calendars: { Calendar: {
+          UID: '1', Name: 'Calendrier chantier (7 jours)', IsBaseCalendar: '1', BaseCalendarUID: '-1',
+          WeekDays: { WeekDay: Array.from({ length: 7 }, (_, i) => ({
+            DayType: String(i + 1), DayWorking: '1',
+            WorkingTimes: { WorkingTime: [
+              { FromTime: '08:00:00', ToTime: '12:00:00' },
+              { FromTime: '13:00:00', ToTime: '17:00:00' },
+            ] },
+          })) },
+        } },
+      } : {}),
       Tasks: {
         Task: tasks.map((task, index) => {
           const durationDays = inclusiveDays(task.start_date, task.end_date);
-          const duration = `PT${durationDays * 8}H0M0S`;
+          const milestone = task.xmlMilestone ?? durationDays === 1;
+          const summary = tasks.some(t => t.xmlParentId === task.id);
+          const outline = xmlOutline(tasks, task);
+          const duration = `PT${milestone ? 0 : durationDays * 8}H0M0S`;
           return {
             UID: String(index + 1),
             ID: String(index + 1),
             Name: task.title,
             Type: '0',
             IsNull: '0',
-            WBS: String(index + 1),
-            OutlineNumber: String(index + 1),
-            OutlineLevel: '1',
+            WBS: outline,
+            OutlineNumber: outline,
+            OutlineLevel: String(outline.split('.').length),
             Priority: task.priority === 'urgent'
               ? '1000'
               : task.priority === 'high'
@@ -108,16 +144,16 @@ export function exportMsProjectXml(project: Project, tasks: Task[], team: TeamMe
                   ? '250'
                   : '500',
             Start: dateTime(task.start_date),
-            Finish: dateTime(task.end_date, '17:00:00'),
+            Finish: dateTime(task.end_date, milestone ? '08:00:00' : '17:00:00'),
             Duration: duration,
             DurationFormat: '7',
             Work: duration,
-            Milestone: durationDays === 1 ? '1' : '0',
-            Summary: '0',
+            Milestone: milestone ? '1' : '0',
+            Summary: summary ? '1' : '0',
             PercentComplete: String(task.progress || 0),
             PercentWorkComplete: String(task.progress || 0),
             Active: '1',
-            Manual: '0',
+            Manual: task.xmlMilestone !== undefined ? '1' : '0',
             ...(task.description ? { Notes: task.description } : {}),
             ...(task.dependencies?.length ? {
               PredecessorLink: task.dependencies
@@ -126,7 +162,8 @@ export function exportMsProjectXml(project: Project, tasks: Task[], team: TeamMe
                   PredecessorUID: taskUid.get(dep),
                   Type: '1',
                   CrossProject: '0',
-                  LinkLag: '0',
+                  // Dixièmes de minute, journée de 8 h comme les durées exportées plus haut.
+                  LinkLag: String(Math.round((task.xmlLags?.[dep] ?? 0) * 8 * 60 * 10)),
                   LagFormat: '7',
                 })),
             } : {}),

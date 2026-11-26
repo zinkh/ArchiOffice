@@ -1,14 +1,24 @@
 // Fenêtre de saisie d'une tâche du planning de chantier.
+import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { ModalShell } from '../ui/ModalShell';
-import { dureeJours, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
+import { ecartJalonMission, type JalonMission } from '../../lib/planningJalonsMission';
+import { placerApresPredecesseurs, cycleDependances, incoherencesDependances, dureeJours, dureeOuvree, MAX_DELAI, TOUS_LES_JOURS, type EstOuvre, type LotPlanifiable, type TachePlanning } from '../../lib/planningChantier';
 
 interface Props {
   /** Tâche existante, ou brouillon d'une nouvelle (identifiant déjà tiré). */
   tache: TachePlanning;
   nouvelle: boolean;
   lots: LotPlanifiable[];
+  taches: TachePlanning[];
+  /** Jours travaillés du chantier ; tous les jours tant que le calcul en jours ouvrés n'est pas demandé. */
+  ouvre?: EstOuvre;
+  joursOuvres?: boolean;
+  /** Jalons de mission de l'affaire, auxquels un jalon du planning peut renvoyer. */
+  jalonsMission?: JalonMission[];
+  /** Écrit la date donnée sur le jalon de mission (geste explicite) ; rend vrai si la mission a été mise à jour. */
+  onAlignerMission?: (id: string, date: string) => Promise<boolean>;
   onSave: (tache: TachePlanning) => void;
   onDelete: () => void;
   onClose: () => void;
@@ -17,13 +27,28 @@ interface Props {
 const champ = 'w-full rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] px-3 py-2 text-sm pointer-coarse:min-h-11';
 const etiquette = 'block text-xs font-semibold text-[var(--tblr-muted)] mb-1';
 
-export function PlanningTacheDialog({ tache, nouvelle, lots, onSave, onDelete, onClose }: Props) {
+export function PlanningTacheDialog({ tache, nouvelle, lots, taches, ouvre = TOUS_LES_JOURS, joursOuvres = false, jalonsMission = [], onAlignerMission, onSave, onDelete, onClose }: Props) {
+  const { t: tr } = useTranslation();
   const [form, setForm] = useState<TachePlanning>(tache);
+  const [missionEnCours, setMissionEnCours] = useState(false);
+  const ecartMission = ecartJalonMission(form, jalonsMission);
   const set = <K extends keyof TachePlanning>(cle: K, valeur: TachePlanning[K]) => setForm(prev => ({ ...prev, [cle]: valeur }));
 
   const libelle = form.libelle.trim();
   const datesValides = !!form.debut && !!form.fin && form.fin >= form.debut;
-  const erreur = !libelle ? 'Indiquez l’intitulé de la tâche.' : !form.debut ? 'Indiquez la date de début.' : !datesValides && !form.jalon ? 'La fin doit suivre le début.' : null;
+  const toutes = [...taches.filter(t => t.id !== form.id), form];
+  const cycle = cycleDependances(toutes);
+  const conflits = incoherencesDependances(toutes, ouvre).filter(c => c.tache.id === form.id || c.precedent.id === form.id);
+  /** Un délai qui ne tient plus pousse la tâche après son prédécesseur (jamais l'inverse). */
+  const changerDelai = (id: string, valeur: number) => setForm(prev => {
+    const n = Math.min(MAX_DELAI, Math.max(0, Math.round(valeur) || 0));
+    const delais = { ...(prev.delais ?? {}) };
+    if (n) delais[id] = n; else delete delais[id];
+    const suivante: TachePlanning = { ...prev, delais: Object.keys(delais).length ? delais : undefined };
+    const enConflit = incoherencesDependances([...taches.filter(t => t.id !== prev.id), suivante], ouvre).some(c => c.tache.id === prev.id);
+    return enConflit ? placerApresPredecesseurs(suivante, taches, ouvre) : suivante;
+  });
+  const erreur = cycle ? tr('planning_cycle') : !libelle ? 'Indiquez l’intitulé de la tâche.' : !form.debut ? 'Indiquez la date de début.' : !datesValides && !form.jalon ? 'La fin doit suivre le début.' : null;
 
   const enregistrer = () => {
     if (erreur) return;
@@ -72,6 +97,34 @@ export function PlanningTacheDialog({ tache, nouvelle, lots, onSave, onDelete, o
             <input type="checkbox" checked={!!form.jalon} onChange={e => set('jalon', e.target.checked)} />
             Jalon (échéance sans durée : hors d’eau, réception...)
           </label>
+          {form.jalon && jalonsMission.length > 0 && (
+            <div className="space-y-1">
+              <label className={etiquette} htmlFor="planning-mission">{tr('planning_mission_link')}</label>
+              <select id="planning-mission" className={champ} value={form.jalonMission ?? ''} onChange={e => set('jalonMission', e.target.value || undefined)}>
+                <option value="">{tr('planning_mission_none')}</option>
+                {jalonsMission.map(m => <option key={m.id} value={m.id}>{m.title} · {m.due_date}{m.completed ? ` · ${tr('planning_mission_done')}` : ''}</option>)}
+              </select>
+              {ecartMission && ecartMission.jours === 0 && <p className="text-xs text-[var(--tblr-muted)]">{tr('planning_mission_same')}</p>}
+              {ecartMission && ecartMission.jours !== 0 && (
+                <>
+                  <p role="status" className="text-xs text-[var(--tblr-text)]">
+                    {tr('planning_mission_gap', { title: ecartMission.mission.title, date: ecartMission.mission.due_date, n: Math.abs(ecartMission.jours), sens: tr(ecartMission.jours > 0 ? 'planning_mission_later' : 'planning_mission_earlier') })}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn btn-secondary" onClick={() => setForm(prev => ({ ...prev, debut: ecartMission.mission.due_date, fin: ecartMission.mission.due_date }))}>
+                      {tr('planning_mission_take')}
+                    </button>
+                    {onAlignerMission && (
+                      <button type="button" className="btn btn-secondary disabled:opacity-60" disabled={missionEnCours || !form.debut}
+                        onClick={async () => { setMissionEnCours(true); try { await onAlignerMission(ecartMission.mission.id, form.debut); } finally { setMissionEnCours(false); } }}>
+                        {tr('planning_mission_push')}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className={etiquette} htmlFor="planning-debut">{form.jalon ? 'Date' : 'Début'}</label>
@@ -86,13 +139,49 @@ export function PlanningTacheDialog({ tache, nouvelle, lots, onSave, onDelete, o
             )}
           </div>
           {!form.jalon && datesValides && (
-            <p className="text-xs text-[var(--tblr-muted)]">Durée : {dureeJours(form)} jour{dureeJours(form) > 1 ? 's' : ''} calendaires.</p>
+            <p className="text-xs text-[var(--tblr-muted)]">{joursOuvres
+              ? tr('planning_duration_working', { n: dureeOuvree(form, ouvre), cal: dureeJours(form) })
+              : `Durée : ${dureeJours(form)} jour${dureeJours(form) > 1 ? 's' : ''} calendaires.`}</p>
           )}
           <div>
             <label className={etiquette} htmlFor="planning-avancement">Avancement : {form.avancement} %</label>
             <input id="planning-avancement" type="range" min={0} max={100} step={5} className="w-full" value={form.avancement}
               onChange={e => set('avancement', Number(e.target.value))} />
           </div>
+          <fieldset className="space-y-2">
+            <legend className={etiquette}>{tr('planning_predecessors')}</legend>
+            <p className="text-xs text-[var(--tblr-muted)]">{tr('planning_dependencies_help')}</p>
+            <div className="max-h-48 overflow-y-auto rounded border border-[var(--tblr-border)]">
+              {taches.filter(t => t.id !== form.id).map(t => {
+                const coche = (form.dependencies ?? []).includes(t.id);
+                const interdit = !coche && cycleDependances(toutes.map(x => x.id === form.id ? { ...x, dependencies: [...(form.dependencies ?? []), t.id] } : x));
+                const lot = lots.find(l => l.id === t.lotId);
+                return <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-2 min-h-11 text-sm">
+                  <label className="flex items-start gap-2 flex-1 min-w-[12rem]">
+                    <input type="checkbox" checked={coche} disabled={interdit} onChange={e => {
+                      const checked = e.target.checked;
+                      setForm(prev => {
+                        // Retirer un lien retire aussi son délai.
+                        const delais = Object.fromEntries(Object.entries(prev.delais ?? {}).filter(([id]) => checked || id !== t.id));
+                        const suivante = { ...prev, dependencies: checked ? [...(prev.dependencies ?? []), t.id] : (prev.dependencies ?? []).filter(id => id !== t.id), delais: Object.keys(delais).length ? delais : undefined };
+                        return checked ? placerApresPredecesseurs(suivante, taches, ouvre) : suivante;
+                      });
+                    }} />
+                    <span>{t.libelle} · {lot ? `Lot ${lot.lot_number}` : tr('planning_general_short')}{t.jalon ? ` · ${tr('planning_milestone')}` : ''}{interdit ? ` · ${tr('planning_cycle_forbidden')}` : ''}</span>
+                  </label>
+                  {coche && <label className="inline-flex items-center gap-1 text-xs text-[var(--tblr-muted)]">{tr('planning_delay')}
+                    <input type="number" inputMode="numeric" min={0} max={MAX_DELAI} step={1} aria-label={tr('planning_delay_after', { name: t.libelle })}
+                      className="w-16 rounded border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] px-2 py-1 text-sm pointer-coarse:min-h-11"
+                      value={form.delais?.[t.id] ?? 0} onChange={e => changerDelai(t.id, Number(e.target.value))} />
+                    <span>{tr(joursOuvres ? 'planning_delay_unit_working' : 'planning_delay_unit')}</span>
+                  </label>}
+                </div>;
+              })}
+            </div>
+          </fieldset>
+          {conflits.length > 0 && <div role="status" className="text-xs text-[var(--tblr-text)]">
+            {conflits.map(c => <p key={`${c.tache.id}:${c.precedent.id}`}>{tr('planning_dates_conflict', { task: c.tache.libelle, predecessor: c.precedent.libelle, date: c.precedent.fin })}</p>)}
+          </div>}
           {erreur && <p role="alert" className="text-xs text-red-600">{erreur}</p>}
         </form>
       </ModalShell>

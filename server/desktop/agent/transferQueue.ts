@@ -86,9 +86,10 @@ export class TransferQueue {
    * Advisory snapshot only; callers must not use it to mutate the queue. */
   listPersisted() { return this.jobs(false); }
   enqueue(file: string, target: TransferTarget, baseVersion: number | null, mimeType = 'application/octet-stream', capture?: {
-    sourceId: string; sha256: string; name: string; authorize(): Promise<unknown>;
+    sourceId: string; sha256: string; name: string; conflictSourceId?:string; authorize(): Promise<unknown>;
   }) {
     return this.serial(async () => {
+      if(capture?.conflictSourceId&&!ID.test(capture.conflictSourceId))throw error('INVALID_CAPTURE');
       if(capture && (!/^[a-f0-9]{64}$/.test(capture.sourceId)||!/^[a-f0-9]{64}$/.test(capture.sha256)||typeof capture.name!=='string'||!capture.name||capture.name.length>512))throw error('INVALID_CAPTURE');
       if ('documentId' in target && (!target.documentId || !Number.isSafeInteger(baseVersion) || baseVersion! < 1)) throw error('BASE_VERSION_REQUIRED');
       if ('create' in target && !target.create?.parentId) throw error('INVALID_TARGET');
@@ -122,7 +123,7 @@ export class TransferQueue {
         if (duplicate) { await output.close(); output = undefined; await fs.rm(snapshot); return duplicate; }
         const job: TransferJob = { ...this.identity, formatVersion: 1, id, target: structuredClone(target), baseVersion,
           name, mimeType, size, sha256, bumpIndice: false, state: 'queued', createdAt: jobs.reduce((latest,j) => Math.max(latest,j.createdAt + 1), this.now()), attempts: 0, nextAttemptAt: 0, errorCode: null,
-          ...(capture?{sourceId:capture.sourceId}:{}) };
+          ...(capture?{sourceId:capture.sourceId,...(capture.conflictSourceId?{conflictSourceId:capture.conflictSourceId}:{})}:{}) };
         await this.save(job); return job;
       } catch (e) { await output?.close(); output = undefined; await fs.rm(snapshot, { force: true }); throw e; }
       finally { await output?.close(); await source.close(); }

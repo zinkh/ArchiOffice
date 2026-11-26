@@ -20,6 +20,7 @@ import {
 } from '../lib/actExport';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
 import ACTEntreprisesTable from './ACTEntreprisesTable';
+import { completerEmailsContact, completerTelephoneContact, destinatairesEntreprise, todayIso } from '../lib/actEntreprises';
 import { EntrepriseSearchDialog, type EntrepriseChoisie } from './EntrepriseSearchDialog';
 import { EntrepriseAddForm, type NouvelleEntreprise } from './EntrepriseAddForm';
 import { useQualifications } from '../hooks/useQualifications';
@@ -38,18 +39,39 @@ import AttributionDirecte from './act/AttributionDirecte';
 import { attribuerSansOffre, estAttributionDirecte, retirerAttribution } from '../lib/attributionDirecte';
 import type { ParametresMarche } from '../lib/actMarche';
 import { useConsultationDepot } from '../hooks/useConsultationDepot';
+import { marquageEnvoi } from '../lib/dceEnvoiGroupe';
+import { entreprisesDeLaReponse, marquerDiffusee, questionsAReprendre, reponseDiffusable, type QuestionRecue } from '../lib/depotQuestions';
+import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
+import DceAdditifPanel from './act/DceAdditifPanel';
+import { marquerRevisionNotifiee, type DceRevision } from '../lib/dceRevisions';
+import {
+  ecartsQuantites, quantitesAcceptees, quantitesEntreprise, totalLotQuantites, type BaseQuantites,
+} from '../lib/quantitesEntreprise';
+import { quantitesApresReponses, type LotQuantitesAConfirmer, type ReponseQuantite } from '../lib/quantitesConfirmation';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
+import OffresHorsPlateformePanel from './act/OffresHorsPlateformePanel';
+import { getAccessToken } from '../lib/authToken';
+import {
+  ajouterOffresRecues, CATEGORIE_OFFRES_RECUES, marquerOffreRecue, offresRecues, retirerOffreRecue, type OffreFichierRecu, type PieceRecue,
+} from '../lib/offresRecues';
+import type { ContexteDocumentsRecus } from './pro/OffreImportDialog';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
 import OffrePostesDialog from './act/OffrePostesDialog';
-import ComparatifPrixUnitaires from './act/ComparatifPrixUnitaires';
+import ComparatifPrixUnitaires, { type ChangementRattachement } from './act/ComparatifPrixUnitaires';
+import { rattacherPoste } from '../lib/postesAjoutes';
 import { OffreImportDialog } from './pro/OffreImportDialog';
 import { useOffresDocument, type CibleDocument } from '../hooks/useOffresDocument';
 import {
-  aDesPrix, ajoutsEntreprise, chapitresDuLot, comparatifDepuisOffres, modeEffectif, prixEntreprise, totalLotPostes,
-  type EntrepriseComparee, type ModeSaisie,
+  aDesPrix, ajoutsEntreprise, chapitresDuLot, comparatifDepuisOffres, modeEffectif, prixEntreprise,
+  type EntrepriseComparee, type ModeSaisie, type PrixSaisi,
 } from '../lib/comparatifPrix';
 import type { Lot as LotDocument, OffreDocument } from '../types/dpgf';
+import { lignesIndices, type DocumentDce } from '../lib/dceIndices';
+import DceMatrice from './act/DceMatrice';
+import DceVersementPro from './act/DceVersementPro';
+import { genererPiecesMarchePdf } from '../lib/marchePieces';
+import { rattacherPieces, type SpecPieceDce } from '../lib/dceVersement';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -59,6 +81,15 @@ interface DCEDocument {
   type_doc: 'RC' | 'CCAP' | 'CCTP' | 'DPGF' | 'BPU' | 'DQE' | 'Plans' | 'Autre';
   tous_lots: boolean;
   lots_ids: string[];
+  /** Documents de l'affaire joints à cette pièce (indice lu sur leur fiche). */
+  document_ids?: string[];
+  /**
+   * Dossier partagé (zip, document ou lien externe) : accessible sur la page de dépôt de l'entreprise,
+   * jamais joint au mail ni repris dans le tableau d'indices.
+   */
+  partage?: boolean;
+  /** Liens externes (https) d'un dossier partagé. */
+  liens_externes?: Array<{ libelle: string; url: string }>;
 }
 
 interface EntrepriseConsultee {
@@ -66,6 +97,7 @@ interface EntrepriseConsultee {
   contact_id?: string;
   nom: string;
   email?: string;
+  emails_supplementaires?: string;
   lots_ids: string[];
   envoyer_dce: boolean;
   /** Codes de la nomenclature FFB (ref_corps_etat, Bibliothèque d'ouvrages) — une entreprise en couvre souvent plusieurs. */
@@ -74,6 +106,14 @@ interface EntrepriseConsultee {
   relance_le?: string;
   offre_recue_le?: string;
   ne_repond_pas?: boolean;
+  visite_creneau_id?: string;
+  visite_presence?: import('../lib/actVisites').PresenceVisite;
+  /** Créneau cité dans le dernier message de convocation (ou d'envoi du DCE) et date de ce message. */
+  visite_convoquee_creneau_id?: string;
+  visite_convoquee_le?: string;
+  /** Date du message « quantités à confirmer » (ouvre la confirmation sur la page de dépôt de l'entreprise). */
+  quantites_demandees_le?: string;
+  observation?: string;
 }
 
 interface CritereNotation {
@@ -96,6 +136,13 @@ interface QuestionReponse {
   reponse?: string;
   date_reponse?: string;
   publique: boolean;
+  /** Question posée depuis la page de dépôt : objet, lot visé et origine. */
+  objet?: string;
+  lot_id?: string;
+  source?: 'depot';
+  /** Diffusion par mail d'une réponse publique : entreprises déjà destinataires et date du dernier envoi. */
+  diffusee_a?: string[];
+  diffusee_le?: string;
 }
 
 interface Offre {
@@ -106,6 +153,10 @@ interface Offre {
   note_technique: number;
   conforme: boolean;
   motif_nc?: string;
+  /** Devis qui ne chiffre qu'une partie du lot (spécialiste en chape, par exemple) : jamais classé ni noté. */
+  partielle?: boolean;
+  /** Ce que couvre l'offre partielle, en clair (« Chape liquide uniquement »). */
+  perimetre?: string;
   /**
    * Comment l'offre de ce lot a été saisie. « total » : montant_base est tapé.
    * « postes » : les prix unitaires sont dans les offres du document de
@@ -134,6 +185,8 @@ interface ComparatifArticle {
   is_subtotal?: boolean;
   /** Entreprise qui a ajouté ce poste, absent du marché : la ligne est colorée. */
   ajoute_par?: string;
+  /** Propositions d'entreprises rattachées à cet article (leur montant est déjà dans `prix`). */
+  propositions?: { entrepriseId: string; entrepriseNom: string; designation: string; montant: number }[];
 }
 
 interface ComparatifLot {
@@ -143,10 +196,19 @@ interface ComparatifLot {
 
 interface Consultation extends DonneesNegociation {
   dce_documents: DCEDocument[];
+  /** Additifs au DCE : pièces modifiées, motif, entreprises prévenues (jsonb). */
+  dce_revisions?: DceRevision[];
+  /** Base du total et du classement des offres « poste par poste » : quantités du MOE (sauf acceptées) ou de chaque entreprise. */
+  base_quantites?: BaseQuantites;
   entreprises: EntrepriseConsultee[];
+  creneaux_visite?: import('../lib/actVisites').CreneauVisite[];
+  /** Lieu et consignes de la visite de site, cités dans le mail d'envoi du DCE. */
+  visite_site?: import('../lib/actVisites').VisiteSite;
   criteres: CritereNotation[];
   pieces_admin: PieceAdmin[];
   questions: QuestionReponse[];
+  /** Fin des questions des entreprises (page de dépôt) : au-delà, elles sont refusées. */
+  date_limite_questions?: string;
   offres: Offre[];
   attributions: Attribution[];
   comparatif: ComparatifLot[];
@@ -154,6 +216,8 @@ interface Consultation extends DonneesNegociation {
   marche?: ParametresMarche;
   /** Document dont les articles et l'estimation servent à comparer les offres (DPGF par défaut). */
   document_reference?: CibleDocument;
+  /** Pièces d'offre remises hors plateforme (PDF, contenu d'un ZIP), rangées dans les documents de l'affaire. */
+  offres_recues_fichiers?: OffreFichierRecu[];
 }
 
 type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'negociation' | 'analyse' | 'marches';
@@ -216,6 +280,8 @@ function fmt(n?: number) {
 interface ACTModuleProps {
   projectId: string;
   projectName: string;
+  /** Photo du projet, imprimée sur la page de garde du CCTP et du DPGF des marchés. */
+  projectImageUrl?: string;
   lots: ProjectLot[];
   contacts: Contact[];
   /** Données de l'affaire reprises dans les documents du marché. */
@@ -224,7 +290,7 @@ interface ACTModuleProps {
   isPublicClient?: boolean;
 }
 
-export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, contacts, operation, isPublicClient }: ACTModuleProps) {
+export default function ACTModule({ projectId, projectName, projectImageUrl, lots: lotsDuProjet, contacts, operation, isPublicClient }: ACTModuleProps) {
   const { t } = useTranslation();
   // Les lots s'affichent toujours par numéro (01, 02, 10...), quel que soit l'ordre de la liste reçue.
   const lots = useMemo(
@@ -241,6 +307,12 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
   // (une saisie arrivée trop tôt écraserait la consultation enregistrée par
   // une consultation vide), et un échec relance une tentative plus tard.
   const [loaded, setLoaded] = useState(false);
+  /** Question dont la réponse publique est en cours de diffusion par mail. */
+  const [diffusionPour, setDiffusionPour] = useState<string | null>(null);
+  /** Fenêtre « demander la confirmation des quantités » ouverte. */
+  const [confirmationQuantites, setConfirmationQuantites] = useState(false);
+  /** Réponses des entreprises aux quantités à confirmer (page de dépôt). */
+  const [reponsesQuantites, setReponsesQuantites] = useState<Array<ReponseQuantite & { entrepriseId: string }>>([]);
   const [saveError, setSaveError] = useState(false);
   const [retryTick, setRetryTick] = useState(0);
   const editVersion = useRef(0);
@@ -260,7 +332,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
   const [extraContacts, setExtraContacts] = useState<Contact[]>([]);
   const allContacts = useMemo(() => {
     const byId = new Map(contacts.map(c => [c.id, c]));
-    for (const c of extraContacts) byId.set(c.id, c);
+    for (const c of extraContacts) byId.set(c.id, { ...byId.get(c.id), ...c });
     return [...byId.values()];
   }, [contacts, extraContacts]);
   const entrepriseContacts = useMemo(() => allContacts.filter(isEntrepriseContact), [allContacts]);
@@ -309,6 +381,76 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
     } catch (err) { console.error('Échec de la synchronisation du corps d\'état vers le contact:', err); }
   }, [allContacts, corpsEtat]);
 
+  // Lignes dont la fiche est en cours de création : évite deux fiches si l'on quitte deux champs d'affilée.
+  const fichesEnCreation = useRef(new Set<string>());
+
+  /**
+   * Reporte sur la fiche contact les adresses saisies sur la ligne (e-mail et autres adresses) :
+   * une adresse corrigée remplace l'ancienne, les nouvelles complètent les champs vides.
+   * Une ligne sans fiche en reçoit une : celle d'une entreprise déjà connue (même adresse,
+   * puis même nom) est reprise, sinon une fiche « Entreprise » est créée.
+   */
+  const syncEmailsToContact = useCallback(async (e: EntrepriseConsultee, avant: string[]) => {
+    const adresses = destinatairesEntreprise(e);
+    if (!e.contact_id) {
+      const nom = (e.nom || '').trim();
+      if (!nom || adresses.length === 0 || fichesEnCreation.current.has(e.id)) return;
+      const cle = (a?: string | null) => (a ?? '').trim().toLowerCase();
+      const connue = entrepriseContacts.find(c =>
+        [c.email, c.email_work, c.email_home, c.email_other].some(a => cle(a) && adresses.some(x => cle(x) === cle(a))))
+        ?? entrepriseContacts.find(c => cle(c.company_name) === cle(nom));
+      if (connue) {
+        updateEntreprise(e.id, { contact_id: connue.id, corps_etat_codes: e.corps_etat_codes?.length ? e.corps_etat_codes : corpsEtatCodesFromContact(connue) });
+        const patch = completerEmailsContact(connue, e);
+        if (patch) {
+          try {
+            await apiFetch(`/api/contacts/${connue.id}`, { method: 'PUT', body: JSON.stringify(patch) });
+            setExtraContacts(prev => [...prev.filter(c => c.id !== connue.id), { ...connue, ...patch }]);
+          } catch (err) { console.error('Échec de la synchronisation des adresses vers le contact:', err); }
+        }
+        return;
+      }
+      fichesEnCreation.current.add(e.id);
+      try {
+        const id = crypto.randomUUID();
+        const emails = completerEmailsContact({}, e) ?? {};
+        const corps = (e.corps_etat_codes || []).map(code => corpsEtat.find(ce => ce.code === code)?.libelle).filter((l): l is string => !!l);
+        const fiche = {
+          id, first_name: '', last_name: '', company_name: nom, category: CONTACT_CATEGORY_ENTREPRISE,
+          ...emails, ...(corps.length > 0 ? { corps_etat: corps } : {}),
+        };
+        await apiFetch('/api/contacts', { method: 'POST', body: JSON.stringify(fiche) });
+        setExtraContacts(prev => [...prev, { ...fiche, email: emails.email || emails.email_work || '', phone: '' } as unknown as Contact]);
+        updateEntreprise(e.id, { contact_id: id });
+      } catch (err) {
+        console.error('Échec de la création de la fiche entreprise:', err);
+      } finally {
+        fichesEnCreation.current.delete(e.id);
+      }
+      return;
+    }
+    const contact = allContacts.find(c => c.id === e.contact_id);
+    if (!contact) return;
+    const patch = completerEmailsContact(contact, e, avant);
+    if (!patch) return;
+    try {
+      await apiFetch(`/api/contacts/${contact.id}`, { method: 'PUT', body: JSON.stringify(patch) });
+      setExtraContacts(prev => [...prev.filter(c => c.id !== contact.id), { ...contact, ...patch }]);
+    } catch (err) { console.error('Échec de la synchronisation des adresses vers le contact:', err); }
+  }, [allContacts, entrepriseContacts, corpsEtat, corpsEtatCodesFromContact]);
+
+  /** Reporte sur la fiche contact le numéro saisi sur la ligne (voir completerTelephoneContact). */
+  const syncTelephoneToContact = useCallback(async (e: EntrepriseConsultee, numero: string) => {
+    const contact = allContacts.find(c => c.id === e.contact_id);
+    if (!contact) return;
+    const patch = completerTelephoneContact(contact, numero);
+    if (!patch) return;
+    try {
+      await apiFetch(`/api/contacts/${contact.id}`, { method: 'PUT', body: JSON.stringify(patch) });
+      setExtraContacts(prev => [...prev.filter(c => c.id !== contact.id), { ...contact, ...patch }]);
+    } catch (err) { console.error('Échec de la synchronisation du téléphone vers le contact:', err); }
+  }, [allContacts]);
+
   // Q&R form
   const [showQRForm, setShowQRForm] = useState(false);
   const [qrForm, setQrForm] = useState({ entreprise_id: '', question: '', reponse: '', publique: false });
@@ -348,6 +490,30 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
 
   useEffect(() => { load(); }, [load]);
 
+  // Questions posées par les entreprises depuis la page de dépôt : reprises dans la consultation, où la
+  // réponse est saisie. Comparées par identifiant, donc rejouables sans doublon ; reprises aussi au retour
+  // sur l'onglet, une question pouvant arriver pendant que l'écran est ouvert.
+  useEffect(() => {
+    if (!loaded) return;
+    let vivant = true;
+    const reprendre = async () => {
+      try {
+        const recues = await apiFetch<QuestionRecue[]>(`/api/projects/${projectId}/depot/questions`);
+        if (!vivant || !Array.isArray(recues)) return;
+        setConsultation(prev => {
+          const nouvelles = questionsAReprendre(prev.questions, recues);
+          if (nouvelles.length === 0) return prev;
+          editVersion.current += 1;
+          setDirty(true);
+          return { ...prev, questions: [...prev.questions, ...nouvelles] };
+        });
+      } catch { /* boîte de réception indisponible : rien à reprendre */ }
+    };
+    void reprendre();
+    window.addEventListener('focus', reprendre);
+    return () => { vivant = false; window.removeEventListener('focus', reprendre); };
+  }, [loaded, projectId]);
+
   const save = useCallback((c: Consultation, p: Phase): Promise<void> => {
     // Les écritures partent l'une après l'autre : deux requêtes en vol
     // pourraient sinon se doubler, et la plus ancienne gagner.
@@ -358,6 +524,8 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
         await apiFetch(`/api/projects/${projectId}/act`, {
           method: 'PUT',
           body: JSON.stringify({ consultation: c, act_phase: p }),
+          // Une requête qui ne répond jamais finit en échec (nouvel essai), au lieu de bloquer la chaîne d'écritures.
+          signal: AbortSignal.timeout(30_000),
         });
         setSaveError(false);
         // Une modification faite pendant l'écriture reste à enregistrer.
@@ -385,6 +553,15 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
     const timer = setTimeout(() => { void save(consultation, phase); }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [consultation, phase, dirty, loaded, retryTick, save]);
+
+  // Fermer ou recharger la page avec une saisie non envoyée (délai de 1,2 s, ou échec en cours de nouvel
+  // essai) : confirmation du navigateur. Le démontage ci-dessous ne s'exécute pas sur un rechargement.
+  useEffect(() => {
+    if (!dirty && !saveError) return;
+    const avertir = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', avertir);
+    return () => window.removeEventListener('beforeunload', avertir);
+  }, [dirty, saveError]);
 
   // Quitter l'onglet avant l'échéance du délai ne perd pas la dernière saisie.
   const latest = useRef({ consultation, phase, dirty, loaded, save });
@@ -504,14 +681,73 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
     [lots],
   );
 
+  // Les dossiers partagés (zip, liens) n'entrent ni dans les pièces jointes du mail ni dans le tableau d'indices.
   const dcePieces = useMemo(
-    () => consultation.dce_documents.map(d => ({
+    () => consultation.dce_documents.filter(d => !d.partage).map(d => ({
+      id: d.id,
       libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
       tous_lots: d.tous_lots,
       lots_ids: d.lots_ids,
+      document_ids: d.document_ids ?? [],
+      type_doc: d.type_doc,
     })),
     [consultation.dce_documents],
   );
+  const dcePartages = useMemo(
+    () => consultation.dce_documents.filter(d => d.partage).map(d => ({
+      id: d.id,
+      libelle: d.nom,
+      tous_lots: d.tous_lots,
+      lots_ids: d.lots_ids,
+      document_ids: d.document_ids ?? [],
+      liens_externes: d.liens_externes ?? [],
+    })),
+    [consultation.dce_documents],
+  );
+
+  /** Crée la pièce d'un dossier partagé pour les lots de l'entreprise (vide : tous les lots). */
+  const ajouterPartage = (partage: { libelle: string; documentId?: string; url?: string }, lotsIds: string[]): string => {
+    const id = crypto.randomUUID();
+    const piece: DCEDocument = {
+      id, nom: partage.libelle, type_doc: 'Autre', partage: true,
+      tous_lots: lotsIds.length === 0, lots_ids: lotsIds,
+      document_ids: partage.documentId ? [partage.documentId] : [],
+      liens_externes: partage.url ? [{ libelle: partage.libelle, url: partage.url }] : [],
+    };
+    update({ ...consultation, dce_documents: [...consultation.dce_documents, piece] });
+    return id;
+  };
+  const retirerPartage = (id: string) => {
+    update({ ...consultation, dce_documents: consultation.dce_documents.filter(d => d.id !== id) });
+  };
+
+  // Documents de l'affaire proposés pour composer le DCE. Un échec de lecture
+  // laisse la liste vide : les pièces restent des intitulés, comme avant.
+  const [documentsAffaire, setDocumentsAffaire] = useState<DocumentDce[]>([]);
+  const [docsVersion, setDocsVersion] = useState(0);
+  useEffect(() => {
+    let vivant = true;
+    apiFetch<DocumentDce[]>(`/api/documents?project_id=${encodeURIComponent(projectId)}`)
+      .then(d => { if (vivant) setDocumentsAffaire(Array.isArray(d) ? d : []); })
+      .catch(() => {});
+    return () => { vivant = false; };
+  }, [projectId, docsVersion]);
+
+  /** Rattache les documents versés au DCE à leur pièce (créée si besoin) et rafraîchit la liste des documents. */
+  const verserAuDce = (versements: Array<{ spec: SpecPieceDce; documentId: string }>) => {
+    update({ ...consultation, dce_documents: rattacherPieces(consultation.dce_documents, versements) });
+    setDocsVersion(v => v + 1);
+  };
+
+  const telechargerTableauIndices = async () => {
+    const { genererTableauIndicesPdf } = await import('../lib/dceIndicesPdf');
+    const fichier = await genererTableauIndicesPdf({ projectName, lignes: lignesIndices(dcePieces, documentsAffaire) });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(fichier);
+    a.download = fichier.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
 
   // ── Offres poste par poste (document de référence : DPGF ou bordereau) ─────
   // Les offres des entreprises restent dans leur colonne séparée du document ;
@@ -549,8 +785,8 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
   // Le comparatif lu par l'analyse, la négociation et l'export Excel se déduit
   // des offres pour les lots rattachés au document ; les autres gardent leur saisie manuelle.
   const comparatifEffectif = useMemo(
-    () => comparatifDepuisOffres(lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif),
-    [lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif],
+    () => comparatifDepuisOffres(lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif, consultation.base_quantites ?? 'moe'),
+    [lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif, consultation.base_quantites],
   );
   const lotsSansDocument = useMemo(
     () => lots.filter(l => !lotsDocument.some(d => d.projectLotId === l.id)),
@@ -560,7 +796,18 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
   const totalPostesLot = (lotId: string, entrepriseId: string, offres: OffreDocument[]): number => {
     const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
     if (!lotDoc) return 0;
-    return totalLotPostes(lotDoc, prixEntreprise(offres, entrepriseId), ajoutsEntreprise(offres, entrepriseId, lotDoc.id)) ?? 0;
+    // Le total suit la base de quantités choisie : c'est lui qui nourrit le classement de l'analyse.
+    return totalLotQuantites(
+      lotDoc, prixEntreprise(offres, entrepriseId), ajoutsEntreprise(offres, entrepriseId, lotDoc.id),
+      latest.current.consultation.base_quantites ?? 'moe', quantitesEntreprise(offres, entrepriseId), quantitesAcceptees(offres, entrepriseId),
+    ) ?? 0;
+  };
+
+  /** Change la base de comparaison : les offres « poste par poste » sont recalculées par l'effet de lecture ci-dessous. */
+  const changerBaseQuantites = (base_quantites: BaseQuantites) => {
+    const c = latest.current.consultation;
+    if ((c.base_quantites ?? 'moe') === base_quantites) return;
+    update({ ...c, base_quantites });
   };
 
   /** Modifie (ou crée) l'offre d'un lot x entreprise sur la consultation la plus récente. */
@@ -585,12 +832,149 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
   const enregistrerSaisie = async (
     lotId: string, entreprise: EntrepriseConsultee, lotDoc: LotDocument,
     prix: Parameters<typeof docs.ecrireSaisie>[0]['prix'], ajouts: Parameters<typeof docs.ecrireSaisie>[0]['postesAjoutes'],
+    quantites?: Parameters<typeof docs.ecrireSaisie>[0]['quantites'], acceptees?: Parameters<typeof docs.ecrireSaisie>[0]['acceptees'],
   ) => {
     const idsLot = chapitresDuLot(lotDoc).flatMap(c => c.lignes.map(l => l.id));
     const suivantes = await docs.ecrireSaisie({
-      entreprise: { id: entreprise.id, nom: entreprise.nom }, lotId: lotDoc.id, idsLot, prix, postesAjoutes: ajouts,
+      entreprise: { id: entreprise.id, nom: entreprise.nom }, lotId: lotDoc.id, idsLot, prix, postesAjoutes: ajouts, quantites, acceptees,
     });
     patchOffre(lotId, entreprise.id, { mode_saisie: 'postes', montant_base: totalPostesLot(lotId, entreprise.id, suivantes) });
+  };
+
+  /**
+   * Accepte (ou retire l'acceptation de) la quantité qu'une entreprise a remise sur un poste. Ne modifie QUE son
+   * offre : le DPGF / DQE reste celui du maître d'œuvre. Les prix et postes ajoutés de l'entreprise sont réécrits tels quels.
+   */
+  const accepterQuantite = async (lotId: string, entrepriseId: string, ligneId: string, accepte: boolean) => {
+    const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+    const entreprise = latest.current.consultation.entreprises.find(e => e.id === entrepriseId);
+    if (!lotDoc || !entreprise) return;
+    const idsLot = chapitresDuLot(lotDoc).flatMap(c => c.lignes.map(l => l.id));
+    const quantites = quantitesEntreprise(docs.offres, entrepriseId);
+    const acceptees = new Set(quantitesAcceptees(docs.offres, entrepriseId));
+    if (accepte) acceptees.add(ligneId); else acceptees.delete(ligneId);
+    const prixTous = prixEntreprise(docs.offres, entrepriseId);
+    const prix: Record<string, PrixSaisi> = {};
+    for (const id of idsLot) prix[id] = prixTous[id];
+    await enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id), quantites, acceptees);
+  };
+
+
+  /**
+   * Rattache (ou détache) des postes ajoutés par des entreprises à un article du document. Ne modifie que leurs offres :
+   * les prix et quantités saisis sont réécrits tels quels, le DPGF / DQE reste celui du maître d'œuvre. Un lot à la fois,
+   * une écriture par entreprise, calculées depuis les offres lues UNE fois (plusieurs changements d'un coup ne se
+   * marchent donc pas dessus) ; une entreprise qui échoue arrête la série et l'erreur remonte à l'écran.
+   */
+  const rattacherPostes = async (lotId: string, changements: ChangementRattachement[]) => {
+    const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+    if (!lotDoc) throw new Error('Ce lot n’est pas rattaché à un lot du document.');
+    const idsLot = new Set(chapitresDuLot(lotDoc).flatMap(c => c.lignes.map(l => l.id)));
+    if (changements.some(c => c.ligneId !== null && !idsLot.has(c.ligneId))) throw new Error('Le poste choisi n’existe plus dans le document.');
+    const parEntreprise = new Map<string, ChangementRattachement[]>();
+    for (const c of changements) parEntreprise.set(c.entrepriseId, [...(parEntreprise.get(c.entrepriseId) ?? []), c]);
+    for (const [entrepriseId, liste] of parEntreprise) {
+      const entreprise = latest.current.consultation.entreprises.find(e => e.id === entrepriseId);
+      if (!entreprise) continue;
+      const avant = ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id);
+      const apres = liste.reduce((postes, c) => rattacherPoste(postes, c.posteId, c.ligneId), avant);
+      if (apres === avant) continue;
+      const prixTous = prixEntreprise(docs.offres, entrepriseId);
+      const prix: Record<string, PrixSaisi> = {};
+      for (const id of idsLot) prix[id] = prixTous[id];
+      await enregistrerSaisie(lotId, entreprise, lotDoc, prix, apres);
+    }
+  };
+
+  /** Par entreprise, ses postes dont la quantité diffère du dossier et n'est pas déjà acceptée (à lui faire confirmer). */
+  const quantitesAConfirmerParEntreprise = useMemo(() => {
+    const out: Record<string, LotQuantitesAConfirmer[]> = {};
+    for (const e of consultation.entreprises) {
+      const quantites = quantitesEntreprise(docs.offres, e.id);
+      if (Object.keys(quantites).length === 0) continue;
+      const acceptees = quantitesAcceptees(docs.offres, e.id);
+      const prix = prixEntreprise(docs.offres, e.id);
+      const groupes: LotQuantitesAConfirmer[] = [];
+      for (const lotDoc of lotsDocument) {
+        if (!lotDoc.projectLotId || !e.lots_ids.includes(lotDoc.projectLotId)) continue;
+        const lignes = ecartsQuantites(lotDoc, prix, quantites, acceptees).filter(x => !x.acceptee).map(x => ({
+          ligneId: x.ligneId, code: x.code, titre: x.titre, unite: x.unite, quantiteDossier: x.quantiteMoe, quantiteEntreprise: x.quantiteEntreprise,
+        }));
+        const lot = lots.find(l => l.id === lotDoc.projectLotId);
+        if (lignes.length) groupes.push({ lot: lot ? `Lot ${lot.lot_number} ${lot.lot_title}` : `Lot ${lotDoc.numero} ${lotDoc.titre}`, lignes });
+      }
+      if (groupes.length) out[e.id] = groupes;
+    }
+    return out;
+  }, [consultation.entreprises, docs.offres, lotsDocument, lots]);
+
+  const chargerReponsesQuantites = useCallback(() => {
+    if (!projectId) return;
+    apiFetch<Array<{ entreprise_id: string; ligne_id: string; choix: ReponseQuantite['choix']; quantite: number | null }>>(
+      `/api/projects/${encodeURIComponent(projectId)}/depot/quantites/reponses`,
+    ).then(r => setReponsesQuantites((r || []).map(x => ({
+      entrepriseId: x.entreprise_id, ligneId: x.ligne_id, choix: x.choix, ...(x.quantite != null ? { quantite: x.quantite } : {}),
+    })))).catch(() => {});
+  }, [projectId]);
+  useEffect(() => { chargerReponsesQuantites(); }, [chargerReponsesQuantites]);
+
+  /**
+   * Applique à l'offre d'une entreprise les réponses qu'elle a données sur la page de dépôt. Ne modifie QUE son
+   * offre (jamais le DPGF / DQE) et jamais d'elle-même : c'est l'architecte qui déclenche.
+   */
+  const appliquerReponsesQuantites = async (lotId: string, entrepriseId: string) => {
+    const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+    const entreprise = latest.current.consultation.entreprises.find(e => e.id === entrepriseId);
+    if (!lotDoc || !entreprise) return;
+    const dossier = new Map<string, number>();
+    for (const c of chapitresDuLot(lotDoc)) for (const l of c.lignes) dossier.set(l.id, l.quantite || 0);
+    const idsLot = [...dossier.keys()];
+    const reponses = reponsesQuantites.filter(r => r.entrepriseId === entrepriseId && dossier.has(r.ligneId));
+    const suite = quantitesApresReponses(quantitesEntreprise(docs.offres, entrepriseId), reponses, dossier);
+    const quantites: Record<string, number> = {};
+    for (const [id, q] of Object.entries(suite)) if (typeof q === 'number') quantites[id] = q;
+    const prixTous = prixEntreprise(docs.offres, entrepriseId);
+    const prix: Record<string, PrixSaisi> = {};
+    for (const id of idsLot) prix[id] = prixTous[id];
+    await enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajoutsEntreprise(docs.offres, entrepriseId, lotDoc.id), quantites, quantitesAcceptees(docs.offres, entrepriseId));
+  };
+
+  /**
+   * Range les documents d'une offre remise hors plateforme dans les documents de l'affaire (catégorie
+   * « Consultation - offres reçues ») et les référence dans la consultation. Rend les pièces NON envoyées :
+   * la fenêtre ne garde que celles-là, un nouvel essai ne crée donc aucun doublon.
+   */
+  const enregistrerDocumentsRecus = async (pieces: PieceRecue[], ctx: ContexteDocumentsRecus): Promise<PieceRecue[]> => {
+    const token = await getAccessToken();
+    const entreprise = ctx.entrepriseId ? latest.current.consultation.entreprises.find(e => e.id === ctx.entrepriseId) : undefined;
+    const nouvelles: OffreFichierRecu[] = [];
+    const restantes: PieceRecue[] = [];
+    for (const p of pieces) {
+      try {
+        const form = new FormData();
+        form.append('file', p.file);
+        form.append('project_id', projectId);
+        form.append('name', `${ctx.entrepriseNom} - ${p.file.name}`);
+        form.append('category', CATEGORIE_OFFRES_RECUES);
+        form.append('phase', 'ACT');
+        form.append('description', `Offre remise hors plateforme par ${ctx.entrepriseNom}${p.archive ? ` (archive ${p.archive}, ${p.chemin})` : ''}`);
+        form.append('uploaded_by', 'ACT');
+        const r = await fetch('/api/documents', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+        const doc = await r.json().catch(() => ({}));
+        if (!r.ok || !doc?.id) throw new Error(doc?.error || 'envoi refusé');
+        nouvelles.push({
+          id: crypto.randomUUID(), entreprise_id: ctx.entrepriseId, entreprise_nom: ctx.entrepriseNom,
+          lots_ids: entreprise?.lots_ids ?? [], document_id: doc.id, file_url: doc.file_url, nom: p.file.name,
+          chemin: p.chemin !== p.file.name ? p.chemin : undefined, archive: p.archive, taille: p.file.size,
+          recu_le: ctx.dateReception, statut: 'recu', origine: 'hors_plateforme',
+        });
+      } catch {
+        restantes.push(p);
+      }
+    }
+    if (nouvelles.length > 0) update(ajouterOffresRecues(latest.current.consultation, nouvelles));
+    if (nouvelles.length === 0 && restantes.length > 0) throw new Error("Aucun document n'a pu être enregistré : vérifiez le format et la taille (50 Mo au plus par fichier), puis réessayez.");
+    return restantes;
   };
 
   /** Un bordereau importé passe en « poste par poste » les lots de l'entreprise qu'il chiffre. */
@@ -636,7 +1020,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
     }
     if (change) update({ ...c, offres });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, docs.chargement, docs.document, docs.offres]);
+  }, [loaded, docs.chargement, docs.document, docs.offres, consultation.base_quantites]);
 
   // ── Phase helpers ─────────────────────────────────────────────────────────
 
@@ -782,73 +1166,59 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconFileText size={15} /> Dossier de Consultation des Entreprises (DCE)
                 </h3>
-                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Listez les documents du DCE et précisez leur disponibilité par lot</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Listez les pièces du DCE, joignez-y les documents de l'affaire et précisez leur disponibilité par lot. Les fichiers et le tableau d'indices partent avec le mail d'invitation.</p>
               </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+              {consultation.dce_documents.length > 0 && (
+                <button onClick={telechargerTableauIndices}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition">
+                  <IconFileText size={13} /> Tableau d'indices (PDF)
+                </button>
+              )}
               <button onClick={() => {
                 const newDoc: DCEDocument = { id: crypto.randomUUID(), nom: '', type_doc: 'RC', tous_lots: true, lots_ids: [] };
                 update({ ...consultation, dce_documents: [...consultation.dce_documents, newDoc] });
               }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition">
                 <IconPlus size={13} /> Ajouter
               </button>
+              </div>
             </div>
-            <div className="p-5 space-y-3">
-              {consultation.dce_documents.length === 0 && (
-                <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun document DCE. Cliquez sur "Ajouter" pour commencer.</p>
-              )}
-              {consultation.dce_documents.map((doc, idx) => (
-                <div key={doc.id} className="flex items-start gap-3 p-3 rounded-lg bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)]">
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <select
-                      className="px-2.5 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                      value={doc.type_doc}
-                      onChange={e => {
-                        const docs = [...consultation.dce_documents];
-                        docs[idx] = { ...doc, type_doc: e.target.value as DCEDocument['type_doc'], nom: TYPE_DOC_LABELS[e.target.value] || '' };
-                        update({ ...consultation, dce_documents: docs });
-                      }}
-                    >
-                      {Object.entries(TYPE_DOC_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                    </select>
-                    <input
-                      className="px-2.5 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="Intitulé précis"
-                      value={doc.nom}
-                      onChange={e => {
-                        const docs = [...consultation.dce_documents];
-                        docs[idx] = { ...doc, nom: e.target.value };
-                        update({ ...consultation, dce_documents: docs });
-                      }}
-                    />
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <label className="flex items-center gap-1.5 text-xs text-[var(--tblr-muted)] cursor-pointer">
-                        <input type="checkbox" checked={doc.tous_lots} onChange={e => {
-                          const docs = [...consultation.dce_documents];
-                          docs[idx] = { ...doc, tous_lots: e.target.checked };
-                          update({ ...consultation, dce_documents: docs });
-                        }} className="rounded w-3.5 h-3.5" />
-                        Tous les lots
-                      </label>
-                      {!doc.tous_lots && lots.map(lot => (
-                        <label key={lot.id} className="flex items-center gap-1 text-xs text-[var(--tblr-muted)] cursor-pointer">
-                          <input type="checkbox"
-                            checked={doc.lots_ids.includes(lot.id)}
-                            onChange={e => {
-                              const docs = [...consultation.dce_documents];
-                              const ids = e.target.checked ? [...doc.lots_ids, lot.id] : doc.lots_ids.filter(i => i !== lot.id);
-                              docs[idx] = { ...doc, lots_ids: ids };
-                              update({ ...consultation, dce_documents: docs });
-                            }}
-                            className="rounded w-3.5 h-3.5"
-                          />
-                          Lot {lot.lot_number}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <button onClick={() => update({ ...consultation, dce_documents: consultation.dce_documents.filter(d => d.id !== doc.id) })} className="p-1 text-zinc-300 hover:text-red-500 transition-colors flex-shrink-0 mt-1"><IconTrash size={13} /></button>
-                </div>
-              ))}
+            <DceVersementPro projectId={projectId} projectName={projectName} codeAffaire={operation?.code || projectName} lots={lots} dce={consultation.dce_documents}
+              documentsAffaire={documentsAffaire} onVerser={verserAuDce} />
+            <div className="p-5">
+              <DceMatrice
+                pieces={consultation.dce_documents}
+                lots={lots}
+                documentsAffaire={documentsAffaire}
+                typeLabels={TYPE_DOC_LABELS}
+                onChange={dce_documents => update({ ...consultation, dce_documents })}
+                onAjouter={() => {
+                  const newDoc: DCEDocument = { id: crypto.randomUUID(), nom: '', type_doc: 'RC', tous_lots: true, lots_ids: [] };
+                  update({ ...consultation, dce_documents: [...consultation.dce_documents, newDoc] });
+                }}
+              />
             </div>
+            <DceAdditifPanel
+              projectId={projectId}
+              pieces={consultation.dce_documents.map(d => ({
+                id: d.id, nom: d.nom, libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
+                tous_lots: d.tous_lots, lots_ids: d.lots_ids, document_ids: d.document_ids, partage: d.partage,
+              }))}
+              documents={documentsAffaire}
+              revisions={consultation.dce_revisions ?? []}
+              entreprises={consultation.entreprises}
+              contexte={{ projectId, projectName, lots, pieces: dcePieces, documents: documentsAffaire, depotActif: false }}
+              onChangeRevisions={dce_revisions => update({ ...consultation, dce_revisions })}
+              // Mise à jour fonctionnelle : la fenêtre d'envoi reste ouverte pendant plusieurs envois et plusieurs rendus.
+              onNotifiee={(revisionId, entrepriseId) => {
+                editVersion.current += 1;
+                setDirty(true);
+                setConsultation(prev => ({
+                  ...prev,
+                  dce_revisions: (prev.dce_revisions ?? []).map(r => (r.id === revisionId ? marquerRevisionNotifiee(r, entrepriseId, todayIso()) : r)),
+                }));
+              }}
+            />
           </div>
 
           {/* Entreprises consultées */}
@@ -862,14 +1232,14 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => settings && exportEntreprisesConsulteesToExcel(consultation.entreprises, lots, settings, projectName)}
+                  onClick={() => settings && exportEntreprisesConsulteesToExcel(consultation.entreprises, lots, settings, projectName, consultation.creneaux_visite, allContacts)}
                   disabled={!settings}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
                 >
                   <IconDownload size={13} /> Excel
                 </button>
                 <button
-                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, lots, settings, projectName)}
+                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, lots, settings, projectName, consultation.creneaux_visite, allContacts)}
                   disabled={!settings}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition"
                 >
@@ -918,9 +1288,22 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
               depotRecuLe={depot.depotRecuLe}
               onInviterDepot={e => setInviterPour(e.id)}
               entreprises={consultation.entreprises}
+              creneauxVisite={consultation.creneaux_visite || []}
+              onChangeCreneaux={creneaux_visite => update({ ...consultation, creneaux_visite })}
+              visiteSite={consultation.visite_site}
+              onChangeVisiteSite={visite_site => update({ ...consultation, visite_site })}
               onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
               dcePieces={dcePieces}
+              dcePartages={dcePartages}
+              onAjouterPartage={ajouterPartage}
+              onRetirerPartage={retirerPartage}
+              onDocumentDepose={() => setDocsVersion(v => v + 1)}
+              documentsAffaire={documentsAffaire}
+              projectId={projectId}
+              depotDeadlineAt={depot.deadlineAt}
+              genererPiecesMarche={() => genererPiecesMarchePdf({ consultation: consultation as any, lots, operation: { nom: projectName, ...operation } })}
               entrepriseContacts={entrepriseContacts}
+              contactsTelephone={allContacts}
               corpsEtatOptions={corpsEtatOptions}
               lotOptions={lotOptions}
               onChangeCorpsEtat={changeCorpsEtat}
@@ -932,6 +1315,8 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                 updateEntreprise(rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
               }}
               onCreateContact={(rowId, name) => setContactModalFor({ rowId, name })}
+              onSyncEmails={(e, avant) => void syncEmailsToContact(e as EntrepriseConsultee, avant)}
+              onSyncTelephone={(e, numero) => void syncTelephoneToContact(e as EntrepriseConsultee, numero)}
             />
           </div>
         </div>
@@ -1034,6 +1419,9 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
               contacts={allContacts}
               operation={{ nom: projectName, ...operation }}
               onChange={marche => update({ ...consultation, marche })}
+              projectId={projectId}
+              documentsAffaire={documentsAffaire}
+              onVerserAuDce={verserAuDce}
               onImporterOffres={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
             />
           </div>
@@ -1073,7 +1461,17 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconMessageDots size={15} /> Questions / Réponses
                 </h3>
-                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Centralisez les questions des entreprises et les réponses publiques</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Centralisez les questions des entreprises et les réponses publiques. Celles posées depuis la page de dépôt arrivent ici.</p>
+                <label className="mt-2 flex items-center gap-2 text-[0.6875rem] text-[var(--tblr-muted)]">
+                  Date limite des questions
+                  <input type="datetime-local" aria-label="Date limite des questions des entreprises"
+                    className="text-xs px-2 py-1 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none"
+                    value={consultation.date_limite_questions || ''}
+                    onChange={e => update({ ...consultation, date_limite_questions: e.target.value || undefined })} />
+                  {consultation.date_limite_questions && (
+                    <button type="button" className="underline" onClick={() => update({ ...consultation, date_limite_questions: undefined })}>Retirer</button>
+                  )}
+                </label>
               </div>
               <button onClick={() => setShowQRForm(!showQRForm)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700">
                 <IconPlus size={13} /> Nouvelle question
@@ -1132,12 +1530,33 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                         <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{q.entreprise_nom}</span>
                         <span className="text-[0.6875rem] text-[var(--tblr-muted)]">{new Date(q.date_question).toLocaleDateString('fr-FR')}</span>
                         {q.publique && <span className="text-[0.6875rem] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">Publique</span>}
+                        {q.source === 'depot' && <span className="text-[0.6875rem] px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 font-bold">Page de dépôt</span>}
+                        {q.lot_id && (() => { const l = lots.find(x => x.id === q.lot_id); return l ? <span className="text-[0.6875rem] text-[var(--tblr-muted)]">Lot {l.lot_number}</span> : null; })()}
                       </div>
-                      <p className="text-sm text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)] rounded-lg px-3 py-2">{q.question}</p>
+                      {q.objet && <p className="text-xs font-semibold mb-1">{q.objet}</p>}
+                      <p className="text-sm text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)] rounded-lg px-3 py-2 whitespace-pre-line">{q.question}</p>
+                      <label className="mt-1.5 inline-flex items-center gap-1.5 text-[0.6875rem] text-[var(--tblr-muted)] cursor-pointer">
+                        <input type="checkbox" className="rounded w-3.5 h-3.5" checked={q.publique}
+                          onChange={e => update({ ...consultation, questions: consultation.questions.map(x => (x.id === q.id ? { ...x, publique: e.target.checked } : x)) })} />
+                        Réponse communiquée à toutes les entreprises du lot (sans citer l'auteur)
+                      </label>
                       {q.reponse ? (
                         <div className="mt-2 ml-4 pl-3 border-l-2 border-blue-300">
                           <p className="text-xs text-[var(--tblr-muted)] mb-0.5">Réponse — {q.date_reponse && new Date(q.date_reponse).toLocaleDateString('fr-FR')}</p>
                           <p className="text-sm text-blue-700 dark:text-blue-300">{q.reponse}</p>
+                          {reponseDiffusable(q) && (
+                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                              <button type="button" onClick={() => setDiffusionPour(q.id)}
+                                className="text-xs px-2.5 py-1 rounded-lg font-bold border border-[var(--tblr-border)] hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-1">
+                                <IconSend size={11} /> Diffuser par mail
+                              </button>
+                              {q.diffusee_le && (
+                                <span className="text-[0.6875rem] text-[var(--tblr-muted)]">
+                                  Diffusée le {new Date(q.diffusee_le).toLocaleDateString('fr-FR')} à {(q.diffusee_a ?? []).length} entreprise{(q.diffusee_a ?? []).length > 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         repondreId === q.id ? (
@@ -1168,12 +1587,42 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                         )
                       )}
                     </div>
-                    <button onClick={() => update({ ...consultation, questions: consultation.questions.filter(x => x.id !== q.id) })} className="p-1 text-zinc-300 hover:text-red-500 flex-shrink-0"><IconTrash size={13} /></button>
+                    <button onClick={() => {
+                      update({ ...consultation, questions: consultation.questions.filter(x => x.id !== q.id) });
+                      // Une question de la page de dépôt quitte aussi la boîte de réception, sinon elle serait reprise au prochain chargement.
+                      if (q.source === 'depot') void apiFetch(`/api/projects/${projectId}/depot/questions/${encodeURIComponent(q.id)}`, { method: 'DELETE' }).catch(() => {});
+                    }} className="p-1 text-zinc-300 hover:text-red-500 flex-shrink-0" aria-label="Supprimer la question"><IconTrash size={13} /></button>
                   </div>
                 </div>
               ))}
               {consultation.questions.length === 0 && <div className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune question enregistrée.</div>}
             </div>
+            {(() => {
+              const q = consultation.questions.find(x => x.id === diffusionPour);
+              if (!q || !reponseDiffusable(q)) return null;
+              return (
+                <DceEnvoiGroupeDialog
+                  titre="Diffuser la réponse par mail"
+                  mode="reponse"
+                  dejaDiffusee={new Set(q.diffusee_a ?? [])}
+                  entreprises={entreprisesDeLaReponse(consultation.entreprises, q)}
+                  contexte={{
+                    projectId, projectName, lots, pieces: [], documents: [], depotActif: false,
+                    questionReponse: { objet: q.objet, question: q.question, reponse: q.reponse as string },
+                  }}
+                  // Mise à jour fonctionnelle : la fenêtre reste ouverte pendant plusieurs envois et plusieurs rendus.
+                  onEnvoye={entrepriseId => {
+                    editVersion.current += 1;
+                    setDirty(true);
+                    setConsultation(prev => ({
+                      ...prev,
+                      questions: prev.questions.map(x => (x.id === q.id ? marquerDiffusee(x, entrepriseId, todayIso()) : x)),
+                    }));
+                  }}
+                  onClose={() => setDiffusionPour(null)}
+                />
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1190,6 +1639,15 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
             onChangeConsultation={next => update(next as Consultation)}
             onImporterActe={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
             onOpenSettings={() => setReglagesDepotOuverts(true)}
+          />
+          <OffresHorsPlateformePanel
+            projectId={projectId}
+            offres={offresRecues(consultation)}
+            lots={lots}
+            consultation={consultation as any}
+            onChangeConsultation={next => update(next as Consultation)}
+            onMarquer={(id, statut) => update(marquerOffreRecue(consultation, id, statut))}
+            onRetirer={id => update(retirerOffreRecue(consultation, id))}
           />
           {/* Document de référence : ses articles et son estimation servent à saisir et comparer les offres poste par poste. */}
           <div className="rounded-lg p-4 flex flex-wrap items-center justify-between gap-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
@@ -1253,6 +1711,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Note technique /100</th>
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Conforme</th>
                         <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Motif NC</th>
+                        <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Offre partielle</th>
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Options / variantes</th>
                       </tr>
                     </thead>
@@ -1332,6 +1791,20 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                                   onChange={e => updateOffre({ motif_nc: e.target.value })} />
                               )}
                             </td>
+                            <td className="px-4 py-3">
+                              <label className="inline-flex items-center gap-1.5 text-xs font-bold cursor-pointer">
+                                <input type="checkbox" checked={!!offre.partielle}
+                                  onChange={e => updateOffre({ partielle: e.target.checked, ...(e.target.checked ? {} : { perimetre: '' }) })}
+                                  className="w-4 h-4 rounded accent-amber-600" />
+                                Partielle
+                              </label>
+                              {offre.partielle && (
+                                <input className="mt-1.5 w-full min-w-[9rem] text-xs px-2 py-1.5 border border-amber-300 dark:border-amber-700 rounded-lg bg-white dark:bg-zinc-900 outline-none"
+                                  placeholder="Périmètre (ex. chape uniquement)" aria-label={`Périmètre de l'offre partielle de ${entreprise.nom}`}
+                                  value={offre.perimetre || ''}
+                                  onChange={e => updateOffre({ perimetre: e.target.value })} />
+                              )}
+                            </td>
                             <td className="px-4 py-3 text-center">
                               <button
                                 type="button" aria-expanded={lignesOuvertes.has(cleLignes)} onClick={() => basculerLignes(cleLignes)}
@@ -1343,7 +1816,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                           </tr>
                           {lignesOuvertes.has(cleLignes) && (
                             <tr className="bg-[var(--tblr-surface-2)]/40">
-                              <td colSpan={7} className="px-4 py-3">
+                              <td colSpan={8} className="px-4 py-3">
                                 <LignesOffreEditor
                                   lotId={lot.id} entrepriseId={entreprise.id} negociations={consultation.negociations}
                                   onChange={negociations => update({ ...consultation, negociations })}
@@ -1355,7 +1828,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                         );
                       })}
                       {entreprisesLot.length === 0 && (
-                        <tr><td colSpan={7} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
+                        <tr><td colSpan={8} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1373,7 +1846,35 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
             entreprisesDuLot={entreprisesDuLot}
             documentLabel={libelleDocument}
             onExport={() => generateComparatifExcel(lots, consultationCourante, projectName, settings ?? {})}
+            base={consultation.base_quantites ?? 'moe'}
+            onChangeBase={changerBaseQuantites}
+            onAccepterQuantite={(lotId, entrepriseId, ligneId, accepte) => { void accepterQuantite(lotId, entrepriseId, ligneId, accepte); }}
+            reponses={reponsesQuantites}
+            onAppliquerReponses={(lotId, entrepriseId) => { void appliquerReponsesQuantites(lotId, entrepriseId); }}
+            nbADemander={Object.keys(quantitesAConfirmerParEntreprise).length}
+            onDemanderConfirmation={() => setConfirmationQuantites(true)}
+            onRattacher={rattacherPostes}
           />
+          {confirmationQuantites && (
+            <DceEnvoiGroupeDialog
+              titre="Demander aux entreprises de confirmer leurs quantités"
+              mode="quantites"
+              entreprises={consultation.entreprises.filter(e => !!quantitesAConfirmerParEntreprise[e.id])}
+              contexte={{
+                projectId, projectName, lots, pieces: [], documents: [], depotActif: !!depot.eligibilite?.eligible,
+                depotIndisponible: depot.eligibilite?.message, deadlineAt: depot.deadlineAt, quantites: quantitesAConfirmerParEntreprise,
+              }}
+              onEnvoye={entrepriseId => {
+                editVersion.current += 1;
+                setDirty(true);
+                setConsultation(prev => ({
+                  ...prev,
+                  entreprises: prev.entreprises.map(e => (e.id === entrepriseId ? { ...e, ...marquageEnvoi(e, 'quantites', todayIso(), false) } : e)),
+                }));
+              }}
+              onClose={() => setConfirmationQuantites(false)}
+            />
+          )}
 
           {/* ── Comparatif manuel : seulement pour les lots sans article de référence ── */}
           {lotsSansDocument.length > 0 && (
@@ -1575,6 +2076,12 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                                           Ajouté par {article.ajoute_par}
                                         </span>
                                       )}
+                                      {article.propositions?.map(p => (
+                                        <span key={`${p.entrepriseId}-${p.designation}`} className="mt-1 block rounded px-1.5 py-0.5 text-[0.6875rem] bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
+                                              title={p.designation}>
+                                          Proposition de {p.entrepriseNom} rattachée : {p.designation}
+                                        </span>
+                                      ))}
                                     </td>
                                     <td className="px-3 py-2">
                                       <input type="number" min={0} step={100}
@@ -1650,7 +2157,8 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
           {/* Par lot */}
           {lots.map(lot => {
             const offresLot = offresCourantes.filter(o => o.lot_id === lot.id);
-            const offresConformes = offresLot.filter(o => o.conforme && o.montant_base > 0);
+            // Une offre partielle ne couvre pas tout le lot : ni moins-disant, ni notée, ni classée.
+            const offresConformes = offresLot.filter(o => o.conforme && !o.partielle && o.montant_base > 0);
             const minMontant = offresConformes.length > 0 ? Math.min(...offresConformes.map(o => o.montant_base)) : 0;
             const attribution = consultation.attributions.find(a => a.lot_id === lot.id);
             const poidsPrix = consultation.criteres.find(c => c.id === 'prix')?.poids ?? 60;
@@ -1658,12 +2166,12 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
 
             const scored = offresLot.map(offre => {
               const entreprise = consultation.entreprises.find(e => e.id === offre.entreprise_id);
-              const notePrix = offre.conforme && offre.montant_base > 0 && minMontant > 0
+              const notePrix = offre.conforme && !offre.partielle && offre.montant_base > 0 && minMontant > 0
                 ? minMontant / offre.montant_base * 100 : 0;
-              const noteGlobale = offre.conforme
+              const noteGlobale = offre.conforme && !offre.partielle
                 ? notePrix * poidsPrix / 100 + (offre.note_technique || 0) * poidsTech / 100 : 0;
               return { offre, entreprise, notePrix, noteGlobale };
-            }).sort((a, b) => b.noteGlobale - a.noteGlobale);
+            }).sort((a, b) => Number(!!a.offre.partielle) - Number(!!b.offre.partielle) || b.noteGlobale - a.noteGlobale);
 
             return (
               <div key={lot.id} className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
@@ -1719,13 +2227,18 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                             !offre.conforme && 'bg-red-50/50 dark:bg-red-900/10',
                           )}>
                             <td className="px-4 py-3 text-center">
-                              {offre.conforme ? (
+                              {offre.partielle ? (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Partielle</span>
+                              ) : offre.conforme ? (
                                 <span className={cn('text-sm font-black', rank === 0 ? 'text-yellow-500' : rank === 1 ? 'text-[var(--tblr-muted)]' : rank === 2 ? 'text-amber-600' : 'text-[var(--tblr-muted)]')}>
                                   {rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `#${rank + 1}`}
                                 </span>
                               ) : <span className="text-red-500 text-xs font-bold">NC</span>}
                             </td>
-                            <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">{entreprise?.nom || '—'}</td>
+                            <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">
+                              {entreprise?.nom || '—'}
+                              {offre.partielle && <span className="block text-[0.6875rem] font-normal text-amber-700 dark:text-amber-300">Offre partielle{offre.perimetre ? ` : ${offre.perimetre}` : ''}</span>}
+                            </td>
                             <td className="px-4 py-3 text-right font-bold text-[var(--tblr-text)]">
                               {fmt(offre.montant_base)}
                               {(() => {
@@ -1736,17 +2249,17 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
                               })()}
                             </td>
                             <td className="px-4 py-3 text-right text-[var(--tblr-muted)] text-xs">
-                              {offre.conforme && pctMinDisant !== '—' ? `+${pctMinDisant}%` : '—'}
+                              {offre.conforme && !offre.partielle && pctMinDisant !== '—' ? `+${pctMinDisant}%` : '—'}
                             </td>
                             <td className="px-4 py-3 text-center font-bold" style={{ color: offre.conforme ? '#206bc4' : '#d63939' }}>
-                              {offre.conforme ? notePrix.toFixed(1) : 'NC'}
+                              {!offre.conforme ? 'NC' : offre.partielle ? '—' : notePrix.toFixed(1)}
                             </td>
                             <td className="px-4 py-3 text-center font-bold text-indigo-600 dark:text-indigo-400">
-                              {offre.conforme ? (offre.note_technique || '—') : 'NC'}
+                              {!offre.conforme ? 'NC' : offre.partielle ? '—' : (offre.note_technique || '—')}
                             </td>
                             <td className="px-4 py-3 text-center">
-                              <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', offre.conforme && rank === 0 ? 'bg-green-100 text-green-700' : 'text-[var(--tblr-muted)]')}>
-                                {offre.conforme ? noteGlobale.toFixed(1) : 'NC'}
+                              <span className={cn('text-sm font-black px-2 py-0.5 rounded-lg', offre.conforme && !offre.partielle && rank === 0 ? 'bg-green-100 text-green-700' : 'text-[var(--tblr-muted)]')}>
+                                {!offre.conforme ? 'NC' : offre.partielle ? '—' : noteGlobale.toFixed(1)}
                               </span>
                             </td>
                             <td className="px-4 py-3 text-center">
@@ -1785,6 +2298,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
         <MarchesPhase
           projectId={projectId}
           projectName={projectName}
+          projectImageUrl={projectImageUrl}
           lots={lots}
           contacts={allContacts}
           consultation={consultationCourante as any}
@@ -1815,7 +2329,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
         return e ? (
           <InviterDepotDialog
             projectId={projectId} projectName={projectName} lots={lots}
-            entreprise={{ id: e.id, nom: e.nom, email: e.email, contact_id: e.contact_id, lots_ids: e.lots_ids }}
+            entreprise={{ id: e.id, nom: e.nom, email: e.email, emails_supplementaires: e.emails_supplementaires, contact_id: e.contact_id, lots_ids: e.lots_ids }}
             deadlineAt={depot.deadlineAt}
             onOpenSettings={() => { setInviterPour(null); setReglagesDepotOuverts(true); }}
             onClose={() => setInviterPour(null)}
@@ -1836,7 +2350,9 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
             entreprise={{ id: entreprise.id, nom: entreprise.nom }}
             prixInitial={prixEntreprise(docs.offres, entreprise.id)}
             ajoutsInitiaux={ajoutsEntreprise(docs.offres, entreprise.id, lotDoc.id)}
-            onSave={(prix, ajouts) => enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajouts)}
+            quantitesInitiales={quantitesEntreprise(docs.offres, entreprise.id)}
+            accepteesInitiales={quantitesAcceptees(docs.offres, entreprise.id)}
+            onSave={(prix, ajouts, quantites, acceptees) => enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajouts, quantites, acceptees)}
             onClose={() => setSaisieOuverte(null)}
           />
         ) : null;
@@ -1850,6 +2366,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
           entrepriseInitiale={importOuvert.entreprise ? { id: importOuvert.entreprise.id, nom: importOuvert.entreprise.nom } : undefined}
           onClose={() => setImportOuvert(null)}
           onConfirm={confirmerImport}
+          onDocumentsRecus={enregistrerDocumentsRecus}
         />
       )}
 

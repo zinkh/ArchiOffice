@@ -50,10 +50,15 @@ export async function tenantSupabaseStorageBytes(
   const measured = await measuredStorageBytes(supabaseAdmin, tenantId);
   if (measured !== null) return measured;
 
-  const { data } = await supabaseAdmin
-    .from('document_versions')
-    .select('size_bytes')
-    .eq('tenant_id', tenantId)
-    .eq('storage_backend', 'supabase');
-  return ((data as any[]) || []).reduce((sum: number, row: any) => sum + (row.size_bytes || 0), 0);
+  // PostgREST caps unpaged selects; count every version beyond its first page.
+  const pageSize=1000;let total=0,offset=0;
+  for (;;) {
+    const {data,error}=await supabaseAdmin.from('document_versions').select('size_bytes')
+      .eq('tenant_id',tenantId).eq('storage_backend','supabase').order('id')
+      .range(offset,offset+pageSize-1);
+    if(error)throw error;
+    const rows=(data||[]) as Array<{size_bytes:number|null}>;
+    total+=rows.reduce((sum,row)=>sum+(row.size_bytes||0),0);
+    if(rows.length<pageSize)return total;offset+=pageSize;
+  }
 }

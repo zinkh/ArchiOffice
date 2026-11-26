@@ -34,7 +34,7 @@ describe('Arborescence', () => {
     const tenantId = makeTenant();
     const actor = await makeActor(app, tenantId, 'admin');
     seedProject(tenantId, 'p1');
-    seedDocument(tenantId, { id: 'd1', project_id: 'p1', phase: 'APD', name: 'Plan RDC.pdf' });
+    seedDocument(tenantId, { id: 'd1', project_id: 'p1', phase: 'APD', name: 'Plan RDC.pdf', doc_type: 'PLAN' });
     seedDocument(tenantId, { id: 'd2', project_id: 'p1', phase: 'ESQ', name: 'Esquisse.pdf' });
     seedDocument(tenantId, { id: 'd3', project_id: 'p1', phase: null, name: 'Note.pdf' });
     seedDocument(tenantId, { id: 'd4', project_id: null, phase: null, name: 'Vrac.pdf' });
@@ -53,6 +53,7 @@ describe('Arborescence', () => {
     expect(files.body.nodes).toHaveLength(1);
     expect(files.body.nodes[0]).toMatchObject({
       id: 'doc:d1', kind: 'file', parentId: 'phase:p1:APD', name: 'Plan RDC.pdf',
+      projectId: 'p1', phase: 'APD', documentType: 'PLAN',
       path: '26014 - Villa Martin/APD/Plan RDC.pdf', version: 1, indice: 'A', etag: 'v1',
       readOnlyReason: null, permissions: { read: true, write: true, delete: true },
     });

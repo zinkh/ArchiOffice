@@ -103,7 +103,7 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
         }
         const { data: openNotes } = await supabaseAdmin.from('site_report_notes').select('*').eq('report_id', prevId).eq('status', 'open');
         if (openNotes && openNotes.length > 0) {
-          const newNotes = openNotes.map((note: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, report_id: id, category: note.category, note_number: note.note_number, responsible_company: note.responsible_company, issue_date: note.issue_date, due_date: note.due_date, status: 'open' }));
+          const newNotes = openNotes.map((note: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, report_id: id, category: note.category, note_number: note.note_number, responsible_company: note.responsible_company, issue_date: note.issue_date, due_date: note.due_date, text: note.text ?? null, status: 'open' }));
           await supabaseAdmin.from('site_report_notes').insert(newNotes);
         }
       }

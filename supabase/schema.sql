@@ -240,7 +240,8 @@ CREATE TABLE IF NOT EXISTS tenders (
   complexity_rate NUMERIC, base_fee_percent NUMERIC, miqcp_assessment TEXT,
   mandatory_visit BOOLEAN DEFAULT false, visit_date TEXT,
   withdrawal_deadline TEXT, archived BOOLEAN DEFAULT false,
-  ville_execution TEXT, description TEXT
+  ville_execution TEXT, description TEXT,
+  adresse_terrain TEXT, site_lat DOUBLE PRECISION, site_lon DOUBLE PRECISION
 );
 
 CREATE TABLE IF NOT EXISTS tender_specialties (
@@ -355,10 +356,13 @@ CREATE TABLE IF NOT EXISTS proposals (
   ed_report_header TEXT, custom_building TEXT, custom_architect TEXT,
   custom_client TEXT, fee_distribution TEXT, construction_cost_num NUMERIC,
   construction_cost NUMERIC DEFAULT 0, ratio_rehab NUMERIC DEFAULT 0, ratio_extension NUMERIC DEFAULT 0,
+  ratio_comment TEXT,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, exe_fee_percent NUMERIC,
   comp_fee_percent NUMERIC, vat_rate NUMERIC, decimal_precision INTEGER,
-  miqcp_assessment TEXT, parcelles_selection TEXT, is_erp BOOLEAN,
-  operation_nature TEXT, surface_existante TEXT, surface_rehabilitee TEXT
+  miqcp_assessment TEXT, parcelles_selection TEXT, is_erp BOOLEAN, illustrations TEXT,
+  operation_nature TEXT, surface_existante TEXT, surface_rehabilitee TEXT,
+  fee_gross NUMERIC, fee_rounding TEXT, discount_mode TEXT, discount_value NUMERIC,
+  mission_scope TEXT, scope_share_pct NUMERIC, planning TEXT
 );
 
 CREATE TABLE IF NOT EXISTS proposal_specialties (
@@ -411,6 +415,97 @@ CREATE TABLE IF NOT EXISTS invoices (
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_project ON invoices(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_client_id ON invoices(client_id);
+-- Deux factures d'un même cabinet ne portent jamais le même numéro. Index
+-- partiel : une facture en cours de synchronisation avec un connecteur
+-- comptable n'a pas encore de numéro (voir migrate_accounting_sync.sql).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_tenant_invoice_number
+  ON invoices(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL;
+
+-- ── Numérotation atomique des devis, notes d'honoraires et factures ─────────
+-- Reprise de supabase/migrate_atomic_document_numbering.sql (voir ce fichier
+-- pour le détail). Une série par cabinet ET par année ; l'incrément se fait
+-- dans un seul UPDATE ... RETURNING, sous verrou de ligne Postgres : deux
+-- créations simultanées ne reçoivent jamais la même valeur.
+-- Séries : 'invoice', 'proposal', 'note_honoraires', 'acompte:<projet>'.
+CREATE TABLE IF NOT EXISTS document_sequences (
+  tenant_id  UUID   NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  series     TEXT   NOT NULL,
+  year       INT    NOT NULL DEFAULT 0,
+  last_value BIGINT NOT NULL DEFAULT 0 CHECK (last_value >= 0),
+  PRIMARY KEY (tenant_id, series, year)
+);
+-- Table réservée au serveur (service role) : RLS activée sans aucune politique.
+ALTER TABLE document_sequences ENABLE ROW LEVEL SECURITY;
+
+CREATE OR REPLACE FUNCTION document_sequence_seed(p_tenant_id UUID, p_series TEXT, p_year INT)
+RETURNS BIGINT LANGUAGE plpgsql AS $$
+DECLARE
+  v_max   BIGINT := 0;
+  v_count BIGINT := 0;
+  v_re    TEXT := '-' || p_year || '-(\d{1,9})\s*$';
+BEGIN
+  IF p_series = 'invoice' THEN
+    SELECT COALESCE(max((regexp_match(invoice_number, v_re))[1]::BIGINT), 0)
+      INTO v_max FROM invoices WHERE tenant_id = p_tenant_id;
+  ELSIF p_series = 'proposal' THEN
+    SELECT COALESCE(max((regexp_match(reference, v_re))[1]::BIGINT), 0)
+      INTO v_max FROM proposals WHERE tenant_id = p_tenant_id;
+  ELSIF p_series = 'note_honoraires' THEN
+    SELECT COALESCE(max((regexp_match(numero, v_re))[1]::BIGINT), 0)
+      INTO v_max FROM notes_honoraires WHERE tenant_id = p_tenant_id;
+  ELSIF p_series LIKE 'acompte:%' THEN
+    SELECT count(*) INTO v_count FROM invoices
+      WHERE tenant_id = p_tenant_id
+        AND project_id = substring(p_series FROM 9)::UUID
+        AND invoice_type = 'acompte';
+    RETURN v_count;
+  ELSE
+    RAISE EXCEPTION 'Série de numérotation inconnue : %', p_series;
+  END IF;
+  RETURN v_max;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION next_document_number(p_tenant_id UUID, p_series TEXT, p_year INT)
+RETURNS BIGINT LANGUAGE plpgsql AS $$
+DECLARE
+  v_next BIGINT;
+  v_year INT := CASE WHEN p_series LIKE 'acompte:%' THEN 0 ELSE p_year END;
+BEGIN
+  -- Amorçage à la première demande seulement (ON CONFLICT couvre deux
+  -- premiers appels simultanés).
+  IF NOT EXISTS (SELECT 1 FROM document_sequences WHERE tenant_id = p_tenant_id AND series = p_series AND year = v_year) THEN
+    INSERT INTO document_sequences (tenant_id, series, year, last_value)
+    VALUES (p_tenant_id, p_series, v_year, document_sequence_seed(p_tenant_id, p_series, v_year))
+    ON CONFLICT (tenant_id, series, year) DO NOTHING;
+  END IF;
+
+  UPDATE document_sequences SET last_value = last_value + 1
+  WHERE tenant_id = p_tenant_id AND series = p_series AND year = v_year
+  RETURNING last_value INTO v_next;
+
+  RETURN v_next;
+END;
+$$;
+
+-- Réservées au serveur : un compte connecté ne doit pas pouvoir faire avancer
+-- la séquence d'un autre cabinet par l'API REST.
+REVOKE ALL ON FUNCTION document_sequence_seed(UUID, TEXT, INT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION next_document_number(UUID, TEXT, INT) FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON FUNCTION document_sequence_seed(UUID, TEXT, INT) FROM anon;
+    REVOKE ALL ON FUNCTION next_document_number(UUID, TEXT, INT) FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON FUNCTION document_sequence_seed(UUID, TEXT, INT) FROM authenticated;
+    REVOKE ALL ON FUNCTION next_document_number(UUID, TEXT, INT) FROM authenticated;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION document_sequence_seed(UUID, TEXT, INT) TO service_role;
+    GRANT EXECUTE ON FUNCTION next_document_number(UUID, TEXT, INT) TO service_role;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS invoice_items (
   id TEXT PRIMARY KEY,
@@ -552,6 +647,31 @@ CREATE TABLE IF NOT EXISTS site_report_notes (
   description TEXT, statut TEXT,
   photos TEXT[] NOT NULL DEFAULT '{}'
 );
+
+-- Croquis de réunion et de compte-rendu (supabase/migrate_croquis.sql).
+-- `meeting_id` : la clé vers `meetings` n'est PAS posée ici. Cette table n'est créée que par
+-- migrate_add_meetings.sql, rejouée après ce fichier sur un poste local neuf ; migrate_croquis.sql
+-- ajoute la clé `croquis_meeting_id_fkey` une fois `meetings` présente.
+CREATE TABLE IF NOT EXISTS croquis (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  meeting_id TEXT,
+  site_report_id TEXT REFERENCES site_reports(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT 'Croquis',
+  scene JSONB NOT NULL DEFAULT '{"version":1,"elements":[]}'::jsonb,
+  bg_path TEXT,
+  bg_opacity REAL NOT NULL DEFAULT 0.35 CHECK (bg_opacity >= 0.05 AND bg_opacity <= 1),
+  bg_width INTEGER, bg_height INTEGER,
+  preview_path TEXT,
+  created_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT croquis_one_parent CHECK (meeting_id IS NULL OR site_report_id IS NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_croquis_tenant_meeting ON croquis(tenant_id, meeting_id) WHERE meeting_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_croquis_tenant_site_report ON croquis(tenant_id, site_report_id) WHERE site_report_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_croquis_tenant_project ON croquis(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_site_report_notes_tenant_report ON site_report_notes(tenant_id, report_id);
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -705,8 +825,30 @@ CREATE TABLE IF NOT EXISTS cctps (
 CREATE TABLE IF NOT EXISTS dpgfs (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  project_id TEXT, cctp_id TEXT, data TEXT
+  project_id TEXT, cctp_id TEXT, data TEXT,
+  -- Compteur incrémenté par le déclencheur dpgfs_bump_revision à chaque changement de `data`
+  -- (voir migrate_dpgfs_revision.sql) : sert aux écritures conditionnelles.
+  revision BIGINT NOT NULL DEFAULT 0
 );
+
+CREATE OR REPLACE FUNCTION dpgfs_bump_revision() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.data IS DISTINCT FROM OLD.data THEN
+    NEW.revision := OLD.revision + 1;
+  ELSE
+    NEW.revision := OLD.revision;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS dpgfs_bump_revision ON dpgfs;
+CREATE TRIGGER dpgfs_bump_revision
+  BEFORE UPDATE ON dpgfs
+  FOR EACH ROW EXECUTE FUNCTION dpgfs_bump_revision();
 
 CREATE TABLE IF NOT EXISTS dpgf_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -791,7 +933,8 @@ CREATE TABLE IF NOT EXISTS lignes_ouvrages (
 CREATE TABLE IF NOT EXISTS articles_type (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  designation TEXT, unite TEXT, prix_unitaire NUMERIC, categorie TEXT
+  designation TEXT, unite TEXT, prix_unitaire NUMERIC, categorie TEXT,
+  associes JSONB NOT NULL DEFAULT '[]'::jsonb  -- postes associés (migrate_articles_associes.sql)
 );
 
 CREATE TABLE IF NOT EXISTS project_members (
@@ -805,6 +948,96 @@ CREATE TABLE IF NOT EXISTS project_members (
 );
 CREATE INDEX IF NOT EXISTS idx_project_members_project_id ON project_members(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_members_tenant_id  ON project_members(tenant_id);
+
+-- Partage d'une affaire avec un confrère (supabase/migrate_project_shares.sql,
+-- server/projectShares/). Aucun droit par défaut : ce qui n'est pas accordé est invisible.
+CREATE TABLE IF NOT EXISTS project_shares (
+  id            TEXT PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id       TEXT NOT NULL,
+  email         TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'active',
+  invited_by    TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  revoked_at    TIMESTAMPTZ,
+  -- Fiche contact du confrère choisie à l'invitation (supabase/migrate_project_shares_contact.sql)
+  confrere_contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+  CONSTRAINT project_shares_status_check CHECK (status IN ('active', 'revoked')),
+  UNIQUE (project_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_shares_tenant_project ON project_shares(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_project_shares_user           ON project_shares(user_id, status);
+
+CREATE TABLE IF NOT EXISTS project_share_grants (
+  id            TEXT PRIMARY KEY,
+  share_id      TEXT NOT NULL REFERENCES project_shares(id) ON DELETE CASCADE,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  resource_kind TEXT NOT NULL,
+  access        TEXT NOT NULL DEFAULT 'read',
+  -- project_lots.id pour les droits par lot (CCTP, DPGF), supabase/migrate_project_share_lots_comments.sql.
+  project_lot_id TEXT,
+  -- Détail de l'atelier de chantier accordé (photos, présences, pénalités, coordonnées), supabase/migrate_project_share_detail.sql.
+  detail        BOOLEAN NOT NULL DEFAULT FALSE,
+  CONSTRAINT project_share_grants_access_check CHECK (access IN ('read', 'comment', 'write'))
+);
+CREATE INDEX IF NOT EXISTS idx_project_share_grants_share ON project_share_grants(share_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_project_share_grants_share_kind_lot
+  ON project_share_grants (share_id, resource_kind, COALESCE(project_lot_id, ''));
+
+CREATE TABLE IF NOT EXISTS project_share_comments (
+  id             TEXT PRIMARY KEY,
+  tenant_id      UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  share_id       TEXT NOT NULL REFERENCES project_shares(id) ON DELETE CASCADE,
+  parent_id      TEXT REFERENCES project_share_comments(id) ON DELETE CASCADE,
+  author_id      TEXT NOT NULL,
+  author_kind    TEXT NOT NULL,
+  resource_kind  TEXT NOT NULL,
+  project_lot_id TEXT NOT NULL,
+  target_type    TEXT NOT NULL,
+  target_id      TEXT NOT NULL,
+  body           TEXT NOT NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at    TIMESTAMPTZ,
+  resolved_by    TEXT,
+  CONSTRAINT project_share_comments_author_kind_check CHECK (author_kind IN ('guest', 'cabinet')),
+  CONSTRAINT project_share_comments_resource_check CHECK (resource_kind IN ('cctp', 'dpgf')),
+  CONSTRAINT project_share_comments_target_check CHECK (target_type IN ('lot', 'chapitre', 'ligne')),
+  CONSTRAINT project_share_comments_body_check CHECK (char_length(body) BETWEEN 1 AND 2000)
+);
+CREATE INDEX IF NOT EXISTS idx_project_share_comments_project ON project_share_comments(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_comments_share   ON project_share_comments(share_id);
+
+-- Propositions de modification des textes du CCTP par un confrère, validées par le cabinet
+-- (supabase/migrate_project_share_proposals.sql, server/routes/projectShareProposals.ts).
+CREATE TABLE IF NOT EXISTS project_share_proposals (
+  id             TEXT PRIMARY KEY,
+  tenant_id      UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  share_id       TEXT NOT NULL REFERENCES project_shares(id) ON DELETE CASCADE,
+  author_id      TEXT NOT NULL,
+  project_lot_id TEXT NOT NULL,
+  target_type    TEXT NOT NULL,
+  target_id      TEXT NOT NULL,
+  field          TEXT NOT NULL,
+  base_value     TEXT NOT NULL DEFAULT '',
+  proposed_value TEXT NOT NULL DEFAULT '',
+  status         TEXT NOT NULL DEFAULT 'pending',
+  decided_by     TEXT,
+  decided_at     TIMESTAMPTZ,
+  decision_note  TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT project_share_proposals_status_check CHECK (status IN ('pending', 'applied', 'rejected', 'withdrawn', 'outdated')),
+  CONSTRAINT project_share_proposals_target_check CHECK (target_type IN ('lot', 'chapitre', 'ligne')),
+  CONSTRAINT project_share_proposals_field_check  CHECK (field IN ('cctpDescription', 'titre', 'designation', 'quantite', 'prixUnitaire', 'unite', 'metre')),
+  CONSTRAINT project_share_proposals_size_check   CHECK (
+    char_length(proposed_value) <= 20000 AND char_length(base_value) <= 20000
+    AND (decision_note IS NULL OR char_length(decision_note) <= 1000)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_project_share_proposals_project ON project_share_proposals(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_proposals_share   ON project_share_proposals(share_id, status);
 
 CREATE TABLE IF NOT EXISTS custom_references (
   id                UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -869,6 +1102,7 @@ ALTER TABLE phone_calls          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ordres_de_service    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_reports         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_report_notes    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE croquis              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE documents            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_versions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE visas                ENABLE ROW LEVEL SECURITY;
@@ -980,6 +1214,8 @@ CREATE POLICY "tenant_isolation" ON ordres_de_service
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON site_reports
   USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON croquis
+  USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON site_report_notes
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON documents
@@ -1056,6 +1292,19 @@ CREATE POLICY "tenant_isolation" ON custom_references
 -- TEXT from the pre-schema.sql migration that created this table — see
 -- migrate_add_missing_rls.sql.
 CREATE POLICY "tenant_isolation" ON project_members
+  USING (tenant_id::text = my_tenant_id()::text);
+
+ALTER TABLE project_shares       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_share_grants ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON project_shares
+  USING (tenant_id::text = my_tenant_id()::text);
+CREATE POLICY "tenant_isolation" ON project_share_grants
+  USING (tenant_id::text = my_tenant_id()::text);
+ALTER TABLE project_share_comments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON project_share_comments
+  USING (tenant_id::text = my_tenant_id()::text);
+ALTER TABLE project_share_proposals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON project_share_proposals
   USING (tenant_id::text = my_tenant_id()::text);
 
 -- Activity Feed tables
@@ -1416,6 +1665,8 @@ CREATE TABLE IF NOT EXISTS consultation_depot_invites (
   expires_at    TIMESTAMPTZ NOT NULL,
   revoked_at    TIMESTAMPTZ,
   last_opened_at TIMESTAMPTZ,
+  -- Présence à la visite de site confirmée par l'entreprise depuis sa page (jamais écrite dans la consultation).
+  visite_confirmee_le TIMESTAMPTZ,
   created_by    UUID,
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
@@ -1469,6 +1720,56 @@ CREATE INDEX IF NOT EXISTS idx_consultation_depots_invite
 ALTER TABLE consultation_depots ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON consultation_depots;
 CREATE POLICY tenant_isolation ON consultation_depots
+  USING (tenant_id = my_tenant_id());
+
+-- ------------------------------------------------------------
+-- 4. Questions des entreprises (boîte de réception ; la réponse vit dans consultation.questions)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS consultation_depot_questions (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  invite_id     UUID REFERENCES consultation_depot_invites(id) ON DELETE CASCADE NOT NULL,
+  entreprise_id TEXT NOT NULL,
+  entreprise_nom TEXT NOT NULL,
+  -- Lot visé (project_lots.id) ; NULL = question générale.
+  lot_id        TEXT,
+  objet         TEXT,
+  question      TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_consultation_depot_questions_project
+  ON consultation_depot_questions(tenant_id, project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consultation_depot_questions_invite
+  ON consultation_depot_questions(invite_id);
+
+ALTER TABLE consultation_depot_questions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON consultation_depot_questions;
+CREATE POLICY tenant_isolation ON consultation_depot_questions
+  USING (tenant_id = my_tenant_id());
+
+-- ------------------------------------------------------------
+-- 5. Accusés de réception des additifs au DCE (posés par l'entreprise depuis le lien de son mail)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS consultation_additif_accuses (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  -- Identifiants DANS consultation (jsonb) : consultation.dce_revisions[].id et consultation.entreprises[].id.
+  revision_id   TEXT NOT NULL,
+  entreprise_id TEXT NOT NULL,
+  entreprise_nom TEXT NOT NULL,
+  accuse_le     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Une entreprise n'accuse réception d'un additif qu'une fois : le premier accusé fait foi.
+CREATE UNIQUE INDEX IF NOT EXISTS consultation_additif_accuses_uniq
+  ON consultation_additif_accuses(project_id, revision_id, entreprise_id);
+CREATE INDEX IF NOT EXISTS idx_consultation_additif_accuses_project
+  ON consultation_additif_accuses(tenant_id, project_id);
+
+ALTER TABLE consultation_additif_accuses ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON consultation_additif_accuses;
+CREATE POLICY tenant_isolation ON consultation_additif_accuses
   USING (tenant_id = my_tenant_id());
 
 -- ============================================================
@@ -1651,3 +1952,83 @@ CREATE INDEX IF NOT EXISTS idx_doe_visas_project ON doe_visas(tenant_id, project
 ALTER TABLE doe_visas ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS tenant_isolation ON doe_visas;
 CREATE POLICY tenant_isolation ON doe_visas USING (tenant_id = my_tenant_id());
+
+-- Proposition follow-up and signature providers
+-- Additive, replayable. Existing Sent proposals have no invented send date.
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS archive_reason TEXT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS last_response_at TIMESTAMPTZ;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS last_reminder_at TIMESTAMPTZ;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS next_follow_up_at TIMESTAMPTZ;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS reminder_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signature_provider TEXT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signature_request_id TEXT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signature_status TEXT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signature_recipient_email TEXT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signature_recipient_name TEXT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signature_sent_at TIMESTAMPTZ;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signature_completed_at TIMESTAMPTZ;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signature_provider_region TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS signature_provider TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS zoho_sign_refresh_token TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS docuseal_api_key TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS docuseal_region TEXT NOT NULL DEFAULT 'eu';
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS firma_workspace_id TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS firma_workspace_api_key TEXT;
+ALTER TABLE settings ADD COLUMN IF NOT EXISTS firma_workspace_state TEXT;
+CREATE INDEX IF NOT EXISTS proposals_follow_up_due_idx ON proposals (tenant_id, next_follow_up_at)
+  WHERE status = 'Sent' AND archived_at IS NULL AND last_response_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS proposals_signature_request_idx ON proposals (tenant_id, signature_provider, signature_request_id)
+  WHERE signature_request_id IS NOT NULL;
+
+-- Rappel téléphonique d'une proposition sans réponse après un mois (supabase/migrate_proposal_callback.sql)
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS callback_call_id TEXT;
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS callback_created_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS proposals_callback_due_idx ON proposals (tenant_id, sent_at)
+  WHERE status = 'Sent' AND archived_at IS NULL AND callback_call_id IS NULL;
+
+-- Affaire créée à l'acceptation d'une proposition : informations reprises et lien d'origine
+-- (supabase/migrate_project_from_proposal.sql)
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS source_proposal_id TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS operation_nature TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS surface_existante TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS surface_rehabilitee TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS is_erp BOOLEAN;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS parcelles_selection TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS illustrations TEXT;
+CREATE INDEX IF NOT EXISTS idx_projects_source_proposal ON projects(tenant_id, source_proposal_id)
+  WHERE source_proposal_id IS NOT NULL;
+
+-- ============================================================
+-- Quantités à confirmer : réponses des entreprises depuis la page de dépôt (ACT)
+-- ============================================================
+-- Après le message « quantités à confirmer », l'entreprise répond poste par poste depuis son lien
+-- personnel : elle reprend la quantité du dossier, maintient la sienne ou en propose une autre.
+-- La réponse arrive ici et ne modifie JAMAIS l'offre : l'architecte l'applique depuis l'ACT.
+-- Une seule réponse courante par poste et par entreprise (la dernière remplace la précédente).
+-- Ajouts seulement, rien n'est modifié.
+
+CREATE TABLE IF NOT EXISTS consultation_quantites_reponses (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  invite_id     UUID REFERENCES consultation_depot_invites(id) ON DELETE CASCADE NOT NULL,
+  entreprise_id TEXT NOT NULL,
+  entreprise_nom TEXT NOT NULL,
+  -- Article du bordereau (Ligne.id) concerné.
+  ligne_id      TEXT NOT NULL,
+  choix         TEXT NOT NULL CHECK (choix IN ('moe', 'maintenue', 'autre')),
+  -- Renseignée seulement pour le choix « autre ».
+  quantite      NUMERIC,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (invite_id, ligne_id)
+);
+CREATE INDEX IF NOT EXISTS idx_consultation_quantites_reponses_project
+  ON consultation_quantites_reponses(tenant_id, project_id);
+
+ALTER TABLE consultation_quantites_reponses ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON consultation_quantites_reponses;
+CREATE POLICY tenant_isolation ON consultation_quantites_reponses
+  USING (tenant_id = my_tenant_id());

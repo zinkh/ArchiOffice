@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useId, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -37,10 +37,27 @@ import { attendeesUrl, toAttendeeContact, loadContactsForAttendees, loadMeetingA
 import { db } from '../db';
 import { SignedImage } from '../components/SignedImage';
 import { PhotoSourcePicker } from '../components/PhotoSourcePicker';
+import CroquisPanel from '../components/croquis/CroquisPanel';
+import MeetingRecordingPanel from '../components/MeetingRecordingPanel';
+import { appendMeetingNotes } from '../lib/meetingRecordingDrafts';
 import { useImageDrop } from '../hooks/useImageDrop';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
 import { exportMeetingToPDF, exportMeetingToDocx, type AgencySettings } from '../lib/meetingExport';
+import { useConfirmDialog } from '../components/ui/ConfirmDialog';
+import { useEscapeKey } from '../hooks/useEscapeKey';
+
+// Focus de la charte : bordure bleue et halo de 3 px, au clavier seulement.
+const FOCUS = 'focus-visible:outline-none focus-visible:border-[var(--tblr-primary)] focus-visible:shadow-[0_0_0_3px_var(--tblr-primary-lt)]';
+// Cible tactile de 44 px sur écran tactile, taille compacte à la souris.
+const TOUCH = 'pointer-coarse:min-h-11 pointer-coarse:min-w-11';
+// Bouton d'icône seul : toujours nommé par un aria-label au point d'emploi.
+const ICON_BTN = `inline-flex items-center justify-center min-h-7 min-w-7 rounded text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)] hover:text-[var(--tblr-text)] transition-colors ${FOCUS} ${TOUCH}`;
+const ICON_BTN_DANGER = `inline-flex items-center justify-center min-h-7 min-w-7 rounded text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)] hover:text-[var(--tblr-danger)] transition-colors ${FOCUS} ${TOUCH}`;
+// Champ de saisie et boutons : rayon de 4 px pour ce qu'on actionne.
+const INPUT = `rounded border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] ${FOCUS}`;
+const BTN_PRIMARY = `inline-flex items-center justify-center gap-1.5 rounded bg-[var(--tblr-primary)] text-white hover:brightness-110 active:scale-[0.97] transition ${FOCUS} ${TOUCH}`;
+const BTN_SECONDARY = `inline-flex items-center justify-center gap-1.5 rounded border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] active:scale-[0.97] transition ${FOCUS} ${TOUCH}`;
 
 type Subsection = 'projet' | 'visite_candidature' | 'visite_proposition';
 type MobileView = 'projects' | 'meetings' | 'detail';
@@ -85,6 +102,45 @@ async function resolveMeetingNotes(meetingId: string, known: string | undefined)
   return { notes: pending ?? known ?? '', fromDraft: false };
 }
 
+/**
+ * Section repliable du détail d'une réunion. Le contenu reste monté quand la section est repliée
+ * (état des intervenants, envoi de photos en cours) ; le choix est mémorisé par section et par poste.
+ */
+function DetailSection({ id, title, icon, count, action, children }: {
+  id: string; title: string; icon: ReactNode; count?: number; action?: ReactNode; children: ReactNode;
+}) {
+  const storageKey = `reunions:section:${id}`;
+  const headingId = useId();
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(storageKey) !== '0'; } catch { return true; }
+  });
+  const toggle = () => setOpen(prev => {
+    try { localStorage.setItem(storageKey, prev ? '0' : '1'); } catch { /* stockage indisponible */ }
+    return !prev;
+  });
+  return (
+    <section aria-labelledby={headingId} className="mt-4 pt-1 border-t border-[var(--tblr-border)]">
+      <div className="flex items-center justify-between gap-2">
+        <h2 id={headingId} className="flex-1 min-w-0 text-sm font-semibold">
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={toggle}
+            className={`w-full flex items-center gap-2 py-2 text-left rounded text-[var(--tblr-text)] ${FOCUS} pointer-coarse:min-h-11`}
+          >
+            {open ? <IconChevronDown size={16} aria-hidden="true" /> : <IconChevronRight size={16} aria-hidden="true" />}
+            {icon}
+            <span>{title}</span>
+            {count !== undefined && <span className="font-normal text-[var(--tblr-muted)]">({count})</span>}
+          </button>
+        </h2>
+        {action}
+      </div>
+      <div hidden={!open} className="pt-1">{children}</div>
+    </section>
+  );
+}
+
 function contactDisplayName(c: MeetingAttendee['contact']) {
   if (!c) return 'Inconnu';
   return [c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name || 'Sans nom';
@@ -94,10 +150,14 @@ function contactDisplayName(c: MeetingAttendee['contact']) {
 
 interface AttendeesPanelProps {
   meetingId: string;
+  /** Prévient la page du nombre d'intervenants, pour l'afficher dans l'en-tête de la section. */
+  onCountChange?: (count: number) => void;
 }
 
-function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
+function AttendeesPanel({ meetingId, onCountChange }: AttendeesPanelProps) {
+  const { confirm, dialog } = useConfirmDialog();
   const [attendees, setAttendees] = useState<MeetingAttendee[]>([]);
+  useEffect(() => { onCountChange?.(attendees.length); }, [attendees.length, onCountChange]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [mode, setMode] = useState<null | 'search' | 'new'>(null);
   const [query, setQuery] = useState('');
@@ -181,7 +241,16 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
     setMode(null);
   };
 
-  const removeAttendee = async (id: string) => {
+  const removeAttendee = async (att: MeetingAttendee) => {
+    const id = att.id;
+    const ok = await confirm({
+      title: 'Retirer cet intervenant ?',
+      message: `${contactDisplayName(att.contact)} ne figurera plus dans cette réunion. Sa fiche contact reste dans votre carnet d'adresses.`,
+      confirmLabel: 'Retirer',
+      cancelLabel: 'Annuler',
+      tone: 'danger',
+    });
+    if (!ok) return;
     await queuedJsonRequest({ entity: 'meetingAttendee', id: `delete:${id}`, method: 'DELETE', url: `${attendeesUrl(meetingId)}/${id}` });
     setAttendees(prev => prev.filter(a => a.id !== id));
   };
@@ -201,14 +270,11 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
         <p className="text-sm italic mb-3" style={{ color: 'var(--tblr-muted)' }}>Aucun intervenant ajouté</p>
       )}
       {attendees.length > 0 && (
-        <div className="mb-3 rounded-xl overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
+        <ul aria-label="Intervenants de la réunion" className="mb-3 rounded-lg overflow-hidden border border-[var(--tblr-border)]">
           {attendees.map((att, idx) => (
-            <div key={att.id} className="flex items-center gap-3 px-3 py-2.5" style={{
-              background: 'var(--tblr-surface)',
-              borderTop: idx > 0 ? '1px solid var(--tblr-border)' : undefined,
-            }}>
+            <li key={att.id} className={`flex items-center gap-3 px-3 py-2.5 bg-[var(--tblr-surface)] ${idx > 0 ? 'border-t border-[var(--tblr-border)]' : ''}`}>
               <div className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'var(--tblr-surface-2)' }}>
-                <IconUser size={16} style={{ color: 'var(--tblr-muted)' }} />
+                <IconUser size={16} aria-hidden="true" style={{ color: 'var(--tblr-muted)' }} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -217,8 +283,8 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
                     <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{att.contact.company_name}</span>
                   )}
                   {incomplete(att) && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold border" style={{ background: '#fff3bf', color: '#e67700', borderColor: '#ffe066' }}>
-                      <IconAlertTriangle size={9} />
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold bg-[var(--tblr-warning-lt)] text-[var(--tblr-warning)]">
+                      <IconAlertTriangle size={11} aria-hidden="true" />
                       À compléter
                     </span>
                   )}
@@ -229,74 +295,66 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
                       type="text"
                       value={roleValue}
                       onChange={e => setRoleValue(e.target.value)}
-                      placeholder="Rôle / Entreprise..."
+                      aria-label={`Rôle ou entreprise de ${contactDisplayName(att.contact)}`}
+                      placeholder="Rôle / Entreprise…"
                       autoFocus
-                      className="flex-1 px-2 py-0.5 text-xs rounded outline-none focus:ring-1 focus:ring-blue-500"
-                      style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-                      onKeyDown={e => e.key === 'Enter' && saveRole(att.id)}
+                      className={`flex-1 min-w-0 px-2 py-1 text-xs ${INPUT} pointer-coarse:min-h-11`}
+                      onKeyDown={e => { if (e.key === 'Enter') saveRole(att.id); if (e.key === 'Escape') setEditingRole(null); }}
                     />
-                    <button onClick={() => saveRole(att.id)} className="p-1" style={{ color: 'var(--tblr-primary)' }}><IconCheck size={12} /></button>
-                    <button onClick={() => setEditingRole(null)} className="p-1" style={{ color: 'var(--tblr-muted)' }}><IconX size={12} /></button>
+                    <button type="button" aria-label="Enregistrer le rôle" onClick={() => saveRole(att.id)} className={ICON_BTN}><IconCheck size={14} /></button>
+                    <button type="button" aria-label="Annuler la modification du rôle" onClick={() => setEditingRole(null)} className={ICON_BTN}><IconX size={14} /></button>
                   </div>
                 ) : (
                   <button
+                    type="button"
                     onClick={() => { setEditingRole(att.id); setRoleValue(att.role || ''); }}
-                    className="text-xs mt-0.5 text-left"
-                    style={{ color: 'var(--tblr-muted)' }}
+                    aria-label={att.role ? `Modifier le rôle de ${contactDisplayName(att.contact)} : ${att.role}` : `Ajouter un rôle ou une entreprise pour ${contactDisplayName(att.contact)}`}
+                    className={`text-xs mt-0.5 text-left rounded text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] pointer-coarse:min-h-11 pointer-coarse:flex pointer-coarse:items-center ${FOCUS}`}
                   >
                     {att.role || <span className="italic">+ Rôle / Entreprise</span>}
                   </button>
                 )}
               </div>
               <button
-                onClick={() => removeAttendee(att.id)}
-                className="flex-shrink-0 p-1 transition-colors"
-                style={{ color: 'var(--tblr-muted)' }}
-                onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-danger)')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
+                type="button"
+                aria-label={`Retirer ${contactDisplayName(att.contact)} de la réunion`}
+                onClick={() => removeAttendee(att)}
+                className={`flex-shrink-0 ${ICON_BTN_DANGER}`}
               >
-                <IconTrash size={14} />
+                <IconTrash size={16} />
               </button>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
       {!mode && (
         <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => setMode('search')}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors"
-            style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
-          >
-            <IconSearch size={12} />
+          <button type="button" onClick={() => setMode('search')} className={`px-3 py-1.5 text-xs ${BTN_SECONDARY}`}>
+            <IconSearch size={14} aria-hidden="true" />
             Contact existant
           </button>
-          <button
-            onClick={() => setMode('new')}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors"
-            style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
-          >
-            <IconUserPlus size={12} />
+          <button type="button" onClick={() => setMode('new')} className={`px-3 py-1.5 text-xs ${BTN_SECONDARY}`}>
+            <IconUserPlus size={14} aria-hidden="true" />
             Nouveau contact
           </button>
         </div>
       )}
 
       {mode === 'search' && (
-        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
+        <div className="rounded-lg overflow-hidden border border-[var(--tblr-border)]">
           <div className="flex items-center gap-2 px-3 py-2" style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
-            <IconSearch size={14} style={{ color: 'var(--tblr-muted)' }} />
+            <IconSearch size={14} aria-hidden="true" style={{ color: 'var(--tblr-muted)' }} />
             <input
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Rechercher un contact..."
+              aria-label="Rechercher un contact"
+              placeholder="Rechercher un contact…"
               autoFocus
-              className="flex-1 bg-transparent text-sm outline-none"
-              style={{ color: 'var(--tblr-text)' }}
+              className={`flex-1 min-w-0 px-2 py-1 text-sm ${INPUT} pointer-coarse:min-h-11`}
             />
-            <button onClick={() => { setMode(null); setQuery(''); }} style={{ color: 'var(--tblr-muted)' }}><IconX size={14} /></button>
+            <button type="button" aria-label="Fermer la recherche de contact" onClick={() => { setMode(null); setQuery(''); }} className={ICON_BTN}><IconX size={16} /></button>
           </div>
           {filteredContacts.length === 0 ? (
             <p className="px-3 py-3 text-sm italic" style={{ color: 'var(--tblr-muted)' }}>
@@ -307,13 +365,9 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
               {filteredContacts.map((c, idx) => (
                 <button
                   key={c.id}
+                  type="button"
                   onClick={() => addExisting(c)}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors"
-                  style={{
-                    borderTop: idx > 0 ? '1px solid var(--tblr-border)' : undefined,
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
-                  onMouseLeave={e => (e.currentTarget.style.background = '')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-[var(--tblr-surface-2)] pointer-coarse:min-h-11 ${FOCUS} ${idx > 0 ? 'border-t border-[var(--tblr-border)]' : ''}`}
                 >
                   <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'var(--tblr-surface-2)' }}>
                     <IconUser size={14} style={{ color: 'var(--tblr-muted)' }} />
@@ -324,8 +378,8 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
                         {[c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name}
                       </span>
                       {isContactIncomplete(c) && (
-                        <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[0.6875rem] font-semibold border whitespace-nowrap" style={{ background: '#fff3bf', color: '#e67700', borderColor: '#ffe066' }}>
-                          <IconAlertTriangle size={8} />
+                        <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[0.6875rem] font-semibold whitespace-nowrap bg-[var(--tblr-warning-lt)] text-[var(--tblr-warning)]">
+                          <IconAlertTriangle size={11} aria-hidden="true" />
                           À compléter
                         </span>
                       )}
@@ -340,57 +394,51 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
       )}
 
       {mode === 'new' && (
-        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
-          <div className="flex items-center justify-between px-3 py-2" style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
+        <div className="rounded-lg overflow-hidden border border-[var(--tblr-border)]">
+          <div className="flex items-center justify-between px-3 py-1 gap-2" style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
             <span className="text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>Nouveau contact</span>
-            <button onClick={() => setMode(null)} style={{ color: 'var(--tblr-muted)' }}><IconX size={14} /></button>
+            <button type="button" aria-label="Fermer le formulaire de nouveau contact" onClick={() => setMode(null)} className={ICON_BTN}><IconX size={16} /></button>
           </div>
-          <div className="p-3 grid grid-cols-2 gap-2" style={{ background: 'var(--tblr-surface)' }}>
-            <input type="text" placeholder="Prénom" value={newFirst} onChange={e => setNewFirst(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} />
-            <input type="text" placeholder="Nom *" value={newLast} onChange={e => setNewLast(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} />
-            <input type="text" placeholder="Entreprise" value={newCompany} onChange={e => setNewCompany(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} />
-            <input type="text" placeholder="Fonction" value={newJob} onChange={e => setNewJob(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} />
-            <input type="tel" placeholder="Portable / Téléphone" value={newPhone} onChange={e => setNewPhone(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} />
-            <input type="email" placeholder="Email" value={newEmail} onChange={e => setNewEmail(e.target.value)}
-              className="px-2 py-1.5 text-sm rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} />
-            <input type="text" placeholder="Rôle dans la réunion" value={newRole} onChange={e => setNewRole(e.target.value)}
-              className="col-span-2 px-2 py-1.5 text-sm rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} />
+          <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2" style={{ background: 'var(--tblr-surface)' }}>
+            <input type="text" aria-label="Prénom" placeholder="Prénom" value={newFirst} onChange={e => setNewFirst(e.target.value)}
+              className={`px-2 py-1.5 text-sm ${INPUT} pointer-coarse:min-h-11`} />
+            <input type="text" aria-label="Nom (obligatoire)" aria-required="true" placeholder="Nom *" value={newLast} onChange={e => setNewLast(e.target.value)}
+              className={`px-2 py-1.5 text-sm ${INPUT} pointer-coarse:min-h-11`} />
+            <input type="text" aria-label="Entreprise" placeholder="Entreprise" value={newCompany} onChange={e => setNewCompany(e.target.value)}
+              className={`px-2 py-1.5 text-sm ${INPUT} pointer-coarse:min-h-11`} />
+            <input type="text" aria-label="Fonction" placeholder="Fonction" value={newJob} onChange={e => setNewJob(e.target.value)}
+              className={`px-2 py-1.5 text-sm ${INPUT} pointer-coarse:min-h-11`} />
+            <input type="tel" aria-label="Portable ou téléphone" placeholder="Portable / Téléphone" value={newPhone} onChange={e => setNewPhone(e.target.value)}
+              className={`px-2 py-1.5 text-sm ${INPUT} pointer-coarse:min-h-11`} />
+            <input type="email" aria-label="Adresse e-mail" placeholder="E-mail" value={newEmail} onChange={e => setNewEmail(e.target.value)}
+              className={`px-2 py-1.5 text-sm ${INPUT} pointer-coarse:min-h-11`} />
+            <input type="text" aria-label="Rôle dans la réunion" placeholder="Rôle dans la réunion" value={newRole} onChange={e => setNewRole(e.target.value)}
+              className={`sm:col-span-2 px-2 py-1.5 text-sm ${INPUT} pointer-coarse:min-h-11`} />
           </div>
           {(!newFirst.trim() && !newLast.trim()) ? null : (
             (!newPhone.trim() || !newEmail.trim()) && (
-              <div className="mx-3 mb-2 flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5 border" style={{ color: '#e67700', background: '#fff3bf', borderColor: '#ffe066' }}>
-                <IconAlertTriangle size={12} />
+              <div role="status" className="mx-3 mb-2 flex items-center gap-1.5 text-xs rounded px-2.5 py-1.5 bg-[var(--tblr-warning-lt)] text-[var(--tblr-warning)]">
+                <IconAlertTriangle size={14} aria-hidden="true" />
                 Ce contact sera marqué « À compléter » dans votre carnet d'adresses.
               </div>
             )
           )}
           <div className="px-3 pb-3 flex gap-2" style={{ background: 'var(--tblr-surface)' }}>
             <button
+              type="button"
               onClick={createAndAdd}
               disabled={!newFirst.trim() && !newLast.trim()}
-              className="flex-1 py-2 text-sm rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+              className={`flex-1 py-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed ${BTN_PRIMARY}`}
             >
               Créer et ajouter
             </button>
-            <button onClick={() => setMode(null)} className="px-3 py-2 text-sm rounded-lg transition-colors" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+            <button type="button" onClick={() => setMode(null)} className={`px-3 py-2 text-sm ${BTN_SECONDARY}`}>
               Annuler
             </button>
           </div>
         </div>
       )}
+      {dialog}
     </div>
   );
 }
@@ -468,6 +516,22 @@ export default function Reunions() {
   const [editingCaption, setEditingCaption] = useState<string | null>(null);
   const [captionValue, setCaptionValue] = useState('');
   const [lightboxPhoto, setLightboxPhoto] = useState<MeetingPhoto | null>(null);
+  useEscapeKey(!!lightboxPhoto, () => setLightboxPhoto(null));
+  useEscapeKey(!!editingCaption, () => setEditingCaption(null));
+  const { confirm: askConfirm, dialog: confirmDialog } = useConfirmDialog();
+
+  // État de l'enregistrement des notes, dit à voix haute : c'est ce qui rassure sur le chantier.
+  type NotesStatus = { kind: 'idle' } | { kind: 'saving' } | { kind: 'saved'; at: number } | { kind: 'queued' } | { kind: 'error' };
+  const [notesStatus, setNotesStatus] = useState<NotesStatus>({ kind: 'idle' });
+  const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+  const [attendeeCount, setAttendeeCount] = useState(0);
 
   const [agencySettings, setAgencySettings] = useState<AgencySettings>({});
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -767,8 +831,16 @@ export default function Reunions() {
     return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
   }, []);
 
-  const deleteMeeting = async (id: string) => {
-    if (!confirm(t('reunions_confirm_delete'))) return;
+  const deleteMeeting = async (meeting: Meeting) => {
+    const id = meeting.id;
+    const ok = await askConfirm({
+      title: 'Supprimer cette réunion ?',
+      message: `« ${meeting.title} » du ${formatDate(meeting.date)}, avec ses notes, ses croquis et ses photos, sera supprimée.`,
+      confirmLabel: 'Supprimer',
+      cancelLabel: 'Annuler',
+      tone: 'danger',
+    });
+    if (!ok) return;
     await queuedJsonRequest({ entity: 'meeting', id: crypto.randomUUID(), method: 'DELETE', url: `/api/meetings/${id}` });
     setMeetings(prev => prev.filter(m => m.id !== id));
     if (selectedMeeting?.id === id) setSelectedMeeting(null);
@@ -778,14 +850,22 @@ export default function Reunions() {
   // les enregistrements successifs se remplacent dans la file, il n'en part
   // qu'un, avec le dernier texte.
   const persistNotes = async (meetingId: string, value: string, base: Pick<Meeting, 'title' | 'date'>) => {
-    await queuedJsonRequest({
-      entity: 'meeting', id: notesWriteId(meetingId), method: 'PUT', url: `/api/meetings/${meetingId}`,
-      body: { title: base.title, date: base.date, notes: value },
-    });
-    // Le brouillon n'est libéré que si rien n'a été tapé entre-temps.
-    if (readNotesDraft(meetingId) === value) clearNotesDraft(meetingId);
-    setSelectedMeeting(prev => prev && prev.id === meetingId ? { ...prev, notes: value } : prev);
-    setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, notes: value } : m));
+    setNotesStatus({ kind: 'saving' });
+    try {
+      const { queued } = await queuedJsonRequest({
+        entity: 'meeting', id: notesWriteId(meetingId), method: 'PUT', url: `/api/meetings/${meetingId}`,
+        body: { title: base.title, date: base.date, notes: value },
+      });
+      // Le brouillon n'est libéré que si rien n'a été tapé entre-temps.
+      if (readNotesDraft(meetingId) === value) clearNotesDraft(meetingId);
+      setSelectedMeeting(prev => prev && prev.id === meetingId ? { ...prev, notes: value } : prev);
+      setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, notes: value } : m));
+      setNotesStatus(queued ? { kind: 'queued' } : { kind: 'saved', at: Date.now() });
+    } catch (err) {
+      // Le brouillon local reste : rien n'est perdu, mais la personne doit le savoir.
+      setNotesStatus({ kind: 'error' });
+      throw err;
+    }
   };
 
   const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -804,7 +884,7 @@ export default function Reunions() {
     setSavingNotes(true);
     try {
       await persistNotes(selectedMeeting.id, notesValue, selectedMeeting);
-    } finally {
+    } catch { /* l'échec est affiché par l'état d'enregistrement ; le brouillon local reste */ } finally {
       setSavingNotes(false);
     }
   };
@@ -813,6 +893,7 @@ export default function Reunions() {
     setNotesValue(value);
     if (!selectedMeeting) return;
     const meeting = selectedMeeting;
+    setNotesStatus({ kind: 'saving' });
     writeNotesDraft(meeting.id, value);
     unsavedNotesRef.current = { meeting, value };
     if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
@@ -843,12 +924,19 @@ export default function Reunions() {
     return '';
   };
 
+  /** Les croquis de la réunion, prêts à entrer dans l'export (une lecture qui échoue n'empêche jamais l'export). */
+  const getCroquisForExport = async () => {
+    if (!selectedMeeting) return [];
+    const { loadCroquisExportItems } = await import('../lib/croquisExport');
+    return loadCroquisExportItems({ kind: 'meeting', id: selectedMeeting.id, projectId: selectedMeeting.project_id ?? null, pending: selectedMeeting.pendingSync });
+  };
+
   const handleExportPDF = async () => {
     if (!selectedMeeting) return;
     setExportingPdf(true);
     try {
       const attendees = await getAttendeesForExport();
-      await exportMeetingToPDF(selectedMeeting, attendees, agencySettings, getParentName());
+      await exportMeetingToPDF(selectedMeeting, attendees, agencySettings, getParentName(), await getCroquisForExport());
     } finally { setExportingPdf(false); }
   };
 
@@ -857,7 +945,7 @@ export default function Reunions() {
     setExportingDocx(true);
     try {
       const attendees = await getAttendeesForExport();
-      await exportMeetingToDocx(selectedMeeting, attendees, agencySettings, getParentName());
+      await exportMeetingToDocx(selectedMeeting, attendees, agencySettings, getParentName(), await getCroquisForExport());
     } finally { setExportingDocx(false); }
   };
 
@@ -908,6 +996,14 @@ export default function Reunions() {
 
   const deletePhoto = async (photoId: string) => {
     if (!selectedMeeting) return;
+    const ok = await askConfirm({
+      title: 'Supprimer cette photo ?',
+      message: 'La photo sera retirée de la réunion et de ses exports. Cette action est définitive.',
+      confirmLabel: 'Supprimer',
+      cancelLabel: 'Annuler',
+      tone: 'danger',
+    });
+    if (!ok) return;
     await queuedJsonRequest({ entity: 'meetingPhoto', id: crypto.randomUUID(), method: 'DELETE', url: `/api/meetings/${selectedMeeting.id}/photos/${photoId}` });
     setSelectedMeeting(prev => prev ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== photoId) } : prev);
   };
@@ -940,6 +1036,9 @@ export default function Reunions() {
     setExpandedTopSections(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  // Le statut d'une réunion ne suit pas la suivante.
+  useEffect(() => { setNotesStatus({ kind: 'idle' }); }, [selectedMeeting?.id]);
+
   const hasActiveEntity = activeKind === 'project' ? !!selectedProject : activeKind === 'proposal' ? !!selectedProposal : !!selectedTender;
 
   // ── Panel: project/entity list ───────────────────────────────────────────────
@@ -963,8 +1062,8 @@ export default function Reunions() {
             placeholder="Rechercher..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 text-[0.8125rem] rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
-            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            aria-label="Rechercher un projet, une proposition ou un appel d'offres"
+            className={`w-full pl-8 pr-3 py-2 text-[0.8125rem] ${INPUT} pointer-coarse:min-h-11`}
           />
         </div>
         <PanelCollapseButton onClick={projectsPanel.toggle} label={panelLabels.collapse} expanded />
@@ -973,11 +1072,10 @@ export default function Reunions() {
         {/* ── Projets section ── */}
         <div>
           <button
+            type="button"
+            aria-expanded={expandedTopSections.projects}
             onClick={() => toggleTopSection('projects')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
-            style={{ color: 'var(--tblr-muted)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            className={`w-full flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface)] ${FOCUS} pointer-coarse:min-h-11`}
           >
             {expandedTopSections.projects ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
             <IconBuilding size={14} />
@@ -993,13 +1091,12 @@ export default function Reunions() {
                   return (
                     <button
                       key={project.id}
+                      type="button"
+                      aria-current={isActive ? 'true' : undefined}
                       onClick={() => selectProject(project)}
-                      className="w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate"
-                      style={isActive
-                        ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
-                        : { color: 'var(--tblr-muted)' }}
-                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
-                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
+                      className={`w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate ${FOCUS} pointer-coarse:min-h-11 ${isActive
+                        ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]'
+                        : 'text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface)] hover:text-[var(--tblr-text)]'}`}
                     >
                       <div className="truncate font-medium">{project.name}</div>
                       <div className="truncate text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
@@ -1015,11 +1112,10 @@ export default function Reunions() {
         <div>
           <div className="flex items-center gap-0.5 pr-1.5">
             <button
+              type="button"
+              aria-expanded={expandedTopSections.proposals}
               onClick={() => toggleTopSection('proposals')}
-              className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
-              style={{ color: 'var(--tblr-muted)' }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+              className={`flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface)] ${FOCUS} pointer-coarse:min-h-11`}
             >
               {expandedTopSections.proposals ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
               <IconBriefcase size={14} />
@@ -1028,11 +1124,9 @@ export default function Reunions() {
             <button
               type="button"
               onClick={() => { setNewParentKind('proposal'); setNewParentTitle(''); setExpandedTopSections(prev => ({ ...prev, proposals: true })); }}
-              className="flex-shrink-0 p-1 rounded transition-colors"
-              style={{ color: 'var(--tblr-muted)' }}
+              className={`flex-shrink-0 ${ICON_BTN}`}
               title="Nouvelle proposition"
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-primary)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+              aria-label="Nouvelle proposition"
             >
               <IconPlus size={14} />
             </button>
@@ -1044,29 +1138,30 @@ export default function Reunions() {
                   <input
                     type="text"
                     placeholder="Titre de la proposition"
+                    aria-label="Titre de la nouvelle proposition"
                     value={newParentTitle}
                     onChange={e => setNewParentTitle(e.target.value)}
                     autoFocus
-                    className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-1.5"
-                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    className={`w-full px-2 py-1.5 text-[0.8125rem] mb-1.5 ${INPUT} pointer-coarse:min-h-11`}
                     onKeyDown={e => e.key === 'Enter' && createParent()}
                   />
                   <div className="flex gap-1">
                     <button
                       onClick={createParent}
                       disabled={creatingParent || !newParentTitle.trim()}
-                      className="flex-1 py-1 text-xs rounded transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-                      style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                      type="button"
+                      className={`flex-1 py-1 text-xs disabled:opacity-50 ${BTN_PRIMARY}`}
                     >
                       {creatingParent ? <IconLoader2 size={11} className="animate-spin" /> : null}
                       Créer
                     </button>
                     <button
+                      type="button"
+                      aria-label="Annuler la création"
                       onClick={() => setNewParentKind(null)}
-                      className="px-2 py-1 text-xs rounded transition-colors"
-                      style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                      className={`px-2 py-1 text-xs ${BTN_SECONDARY}`}
                     >
-                      <IconX size={12} />
+                      <IconX size={14} aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -1079,13 +1174,12 @@ export default function Reunions() {
                   return (
                     <button
                       key={proposal.id}
+                      type="button"
+                      aria-current={isActive ? 'true' : undefined}
                       onClick={() => selectProposal(proposal)}
-                      className="w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate"
-                      style={isActive
-                        ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
-                        : { color: 'var(--tblr-muted)' }}
-                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
-                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
+                      className={`w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate ${FOCUS} pointer-coarse:min-h-11 ${isActive
+                        ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]'
+                        : 'text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface)] hover:text-[var(--tblr-text)]'}`}
                     >
                       <div className="truncate font-medium flex items-center gap-1.5">
                         {proposal.title}
@@ -1104,11 +1198,10 @@ export default function Reunions() {
         <div>
           <div className="flex items-center gap-0.5 pr-1.5">
             <button
+              type="button"
+              aria-expanded={expandedTopSections.tenders}
               onClick={() => toggleTopSection('tenders')}
-              className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
-              style={{ color: 'var(--tblr-muted)' }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+              className={`flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface)] ${FOCUS} pointer-coarse:min-h-11`}
             >
               {expandedTopSections.tenders ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
               <IconClipboardList size={14} />
@@ -1117,11 +1210,9 @@ export default function Reunions() {
             <button
               type="button"
               onClick={() => { setNewParentKind('tender'); setNewParentTitle(''); setExpandedTopSections(prev => ({ ...prev, tenders: true })); }}
-              className="flex-shrink-0 p-1 rounded transition-colors"
-              style={{ color: 'var(--tblr-muted)' }}
+              className={`flex-shrink-0 ${ICON_BTN}`}
               title="Nouvel appel d'offres"
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-primary)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+              aria-label="Nouvel appel d'offres"
             >
               <IconPlus size={14} />
             </button>
@@ -1133,29 +1224,30 @@ export default function Reunions() {
                   <input
                     type="text"
                     placeholder="Titre de l'appel d'offres"
+                    aria-label="Titre du nouvel appel d'offres"
                     value={newParentTitle}
                     onChange={e => setNewParentTitle(e.target.value)}
                     autoFocus
-                    className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-1.5"
-                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    className={`w-full px-2 py-1.5 text-[0.8125rem] mb-1.5 ${INPUT} pointer-coarse:min-h-11`}
                     onKeyDown={e => e.key === 'Enter' && createParent()}
                   />
                   <div className="flex gap-1">
                     <button
                       onClick={createParent}
                       disabled={creatingParent || !newParentTitle.trim()}
-                      className="flex-1 py-1 text-xs rounded transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-                      style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                      type="button"
+                      className={`flex-1 py-1 text-xs disabled:opacity-50 ${BTN_PRIMARY}`}
                     >
                       {creatingParent ? <IconLoader2 size={11} className="animate-spin" /> : null}
                       Créer
                     </button>
                     <button
+                      type="button"
+                      aria-label="Annuler la création"
                       onClick={() => setNewParentKind(null)}
-                      className="px-2 py-1 text-xs rounded transition-colors"
-                      style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                      className={`px-2 py-1 text-xs ${BTN_SECONDARY}`}
                     >
-                      <IconX size={12} />
+                      <IconX size={14} aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -1168,13 +1260,12 @@ export default function Reunions() {
                   return (
                     <button
                       key={tender.id}
+                      type="button"
+                      aria-current={isActive ? 'true' : undefined}
                       onClick={() => selectTender(tender)}
-                      className="w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate"
-                      style={isActive
-                        ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
-                        : { color: 'var(--tblr-muted)' }}
-                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
-                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
+                      className={`w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate ${FOCUS} pointer-coarse:min-h-11 ${isActive
+                        ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]'
+                        : 'text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface)] hover:text-[var(--tblr-text)]'}`}
                     >
                       <div className="truncate font-medium flex items-center gap-1.5">
                         {tender.title}
@@ -1218,20 +1309,20 @@ export default function Reunions() {
       {/* Mobile back button */}
       <div className="lg:hidden flex items-center justify-between gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
         <button
+          type="button"
           onClick={() => setMobileView('projects')}
-          className="flex items-center gap-1 text-xs font-medium"
-          style={{ color: 'var(--tblr-primary)' }}
+          className={`flex items-center gap-1 px-2 py-1.5 text-sm font-medium rounded text-[var(--tblr-primary)] ${FOCUS} pointer-coarse:min-h-11`}
         >
-          <IconChevronLeft size={14} />
+          <IconChevronLeft size={16} aria-hidden="true" />
           Retour
         </button>
         {hasActiveEntity && (
           <button
+            type="button"
             onClick={() => setShowNewMeeting(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
-            style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+            className={`px-3 py-1.5 text-sm font-semibold ${BTN_PRIMARY}`}
           >
-            <IconPlus size={14} />
+            <IconPlus size={16} aria-hidden="true" />
             Nouvelle réunion
           </button>
         )}
@@ -1243,14 +1334,13 @@ export default function Reunions() {
             <div className="flex items-center justify-between mb-1">
               <h3 className="text-[0.8125rem] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{activeEntityName}</h3>
               <button
+                type="button"
                 onClick={() => setShowNewMeeting(true)}
-                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors flex-shrink-0"
-                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
+                className={`hidden lg:inline-flex px-2 py-1 text-xs font-semibold flex-shrink-0 bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)] rounded hover:bg-[var(--tblr-primary)] hover:text-white transition-colors ${FOCUS} items-center gap-1`}
                 title="Nouvelle réunion"
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-primary)', e.currentTarget.style.color = '#fff')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--tblr-primary-lt)', e.currentTarget.style.color = 'var(--tblr-primary)')}
+                aria-label="Nouvelle réunion"
               >
-                <IconPlus size={13} />
+                <IconPlus size={14} aria-hidden="true" />
                 <span>Nouveau</span>
               </button>
             </div>
@@ -1262,39 +1352,40 @@ export default function Reunions() {
               <input
                 type="text"
                 placeholder="Titre de la réunion"
+                aria-label="Titre de la réunion"
                 value={newMeetingTitle}
                 onChange={e => { setNewMeetingTitle(e.target.value); setCreateError(''); }}
                 autoFocus
-                className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
-                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                className={`w-full px-2 py-1.5 text-[0.8125rem] mb-2 ${INPUT} pointer-coarse:min-h-11`}
                 onKeyDown={e => e.key === 'Enter' && createMeeting()}
               />
               <input
                 type="date"
+                aria-label="Date de la réunion"
                 value={newMeetingDate}
                 onChange={e => setNewMeetingDate(e.target.value)}
-                className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
-                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                className={`w-full px-2 py-1.5 text-[0.8125rem] mb-2 ${INPUT} pointer-coarse:min-h-11`}
               />
               {createError && (
-                <p className="text-[0.6875rem] mb-1.5 px-1" style={{ color: 'var(--tblr-danger)' }}>{createError}</p>
+                <p role="alert" className="text-[0.6875rem] mb-1.5 px-1" style={{ color: 'var(--tblr-danger)' }}>{createError}</p>
               )}
               <div className="flex gap-1">
                 <button
+                  type="button"
                   onClick={createMeeting}
                   disabled={creatingMeeting || !newMeetingTitle.trim()}
-                  className="flex-1 py-1 text-xs rounded transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
-                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                  className={`flex-1 py-1 text-xs disabled:opacity-50 ${BTN_PRIMARY}`}
                 >
-                  {creatingMeeting ? <IconLoader2 size={11} className="animate-spin" /> : null}
+                  {creatingMeeting ? <IconLoader2 size={14} className="animate-spin" aria-hidden="true" /> : null}
                   Créer
                 </button>
                 <button
+                  type="button"
+                  aria-label="Annuler la création de la réunion"
                   onClick={() => { setShowNewMeeting(false); setCreateError(''); }}
-                  className="px-2 py-1 text-xs rounded transition-colors"
-                  style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  className={`px-2 py-1 text-xs ${BTN_SECONDARY}`}
                 >
-                  <IconX size={12} />
+                  <IconX size={14} aria-hidden="true" />
                 </button>
               </div>
             </div>
@@ -1302,57 +1393,52 @@ export default function Reunions() {
 
           <div className="flex-1 overflow-y-auto">
             {loadingMeetings ? (
-              <div className="flex items-center justify-center h-20 text-[0.8125rem]" style={{ color: 'var(--tblr-muted)' }}>Chargement...</div>
+              <div role="status" className="flex items-center justify-center h-20 text-[0.8125rem]" style={{ color: 'var(--tblr-muted)' }}>Chargement…</div>
             ) : meetings.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-32 text-[0.8125rem] gap-2" style={{ color: 'var(--tblr-muted)' }}>
                 <IconNotes size={24} className="opacity-30" />
                 <p>Aucune réunion</p>
-                <button onClick={() => setShowNewMeeting(true)} className="hover:underline" style={{ color: 'var(--tblr-primary)' }}>+ Ajouter</button>
+                <button type="button" onClick={() => setShowNewMeeting(true)} className={`px-2 py-1 rounded text-[var(--tblr-primary)] hover:underline ${FOCUS} pointer-coarse:min-h-11`}>+ Ajouter</button>
               </div>
             ) : (
-              meetings.map(meeting => (
-                <div
-                  key={meeting.id}
-                  onClick={() => loadMeetingDetail(meeting)}
-                  className="group relative px-3 py-2.5 cursor-pointer transition-colors"
-                  style={{
-                    borderBottom: '1px solid var(--tblr-border)',
-                    background: selectedMeeting?.id === meeting.id ? 'var(--tblr-primary-lt)' : undefined,
-                  }}
-                  onMouseEnter={e => {
-                    if (selectedMeeting?.id !== meeting.id) e.currentTarget.style.background = 'var(--tblr-surface-2)';
-                  }}
-                  onMouseLeave={e => {
-                    if (selectedMeeting?.id !== meeting.id) e.currentTarget.style.background = '';
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-1">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[0.8125rem] font-medium truncate flex items-center gap-1.5" style={{ color: 'var(--tblr-text)' }}>
-                        {meeting.title}
-                        {meeting.pendingSync && (
-                          <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold flex-shrink-0" style={{ background: 'var(--tblr-warning-lt, #fff3bf)', color: 'var(--tblr-warning, #e67700)' }}>
-                            en attente
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-[0.6875rem] mt-0.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
-                        <IconCalendar size={11} />
-                        {formatDate(meeting.date)}
-                      </p>
-                    </div>
-                    <button
-                      onClick={e => { e.stopPropagation(); deleteMeeting(meeting.id); }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition"
-                      style={{ color: 'var(--tblr-muted)' }}
-                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-danger)')}
-                      onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
-                    >
-                      <IconTrash size={12} />
-                    </button>
-                  </div>
-                </div>
-              ))
+              <ul aria-label={`Réunions de ${activeEntityName}`}>
+                {meetings.map(meeting => {
+                  const isOpen = selectedMeeting?.id === meeting.id;
+                  return (
+                    <li key={meeting.id} className="group relative border-b border-[var(--tblr-border)]">
+                      {/* Deux boutons frères, jamais l'un dans l'autre : ouvrir et supprimer s'atteignent chacun au clavier. */}
+                      <button
+                        type="button"
+                        aria-current={isOpen ? 'true' : undefined}
+                        onClick={() => loadMeetingDetail(meeting)}
+                        className={`block w-full text-left pl-3 pr-12 py-2.5 transition-colors pointer-coarse:min-h-14 ${FOCUS} ${isOpen ? 'bg-[var(--tblr-primary-lt)]' : 'hover:bg-[var(--tblr-surface-2)]'}`}
+                      >
+                        <span className="block text-[0.8125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
+                          {meeting.title}
+                          {meeting.pendingSync && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold align-middle bg-[var(--tblr-warning-lt)] text-[var(--tblr-warning)]">
+                              en attente
+                            </span>
+                          )}
+                        </span>
+                        <span className="mt-0.5 flex items-center gap-1 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
+                          <IconCalendar size={11} aria-hidden="true" />
+                          {formatDate(meeting.date)}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Supprimer la réunion ${meeting.title}`}
+                        title="Supprimer la réunion"
+                        onClick={() => deleteMeeting(meeting)}
+                        className={`absolute right-1 top-1/2 -translate-y-1/2 ${ICON_BTN_DANGER} min-h-9 min-w-9 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100`}
+                      >
+                        <IconTrash size={16} />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
         </>
@@ -1360,13 +1446,6 @@ export default function Reunions() {
         <div className="flex flex-col items-center justify-center h-full text-[0.8125rem] gap-2 px-4 text-center" style={{ color: 'var(--tblr-muted)' }}>
           <IconBuilding size={28} className="opacity-20" />
           <p>Sélectionnez un projet, une proposition ou un appel d'offres</p>
-          <button
-            onClick={() => setMobileView('projects')}
-            className="lg:hidden hover:underline mt-1"
-            style={{ color: 'var(--tblr-primary)' }}
-          >
-            ← Retour
-          </button>
         </div>
       )}
     </CollapsiblePanel>
@@ -1383,11 +1462,11 @@ export default function Reunions() {
       {mobileView === 'detail' && (
         <div className="lg:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
           <button
+            type="button"
             onClick={() => setMobileView('meetings')}
-            className="flex items-center gap-1 text-xs font-medium"
-            style={{ color: 'var(--tblr-primary)' }}
+            className={`flex items-center gap-1 px-2 py-1.5 text-sm font-medium rounded text-[var(--tblr-primary)] ${FOCUS} pointer-coarse:min-h-11`}
           >
-            <IconChevronLeft size={14} />
+            <IconChevronLeft size={16} aria-hidden="true" />
             Réunions
           </button>
         </div>
@@ -1395,7 +1474,7 @@ export default function Reunions() {
 
       {selectedMeeting ? (
         loadingDetail ? (
-          <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--tblr-muted)' }}>Chargement...</div>
+          <div role="status" className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--tblr-muted)' }}>Chargement…</div>
         ) : (
           <div className="w-full min-w-0 p-4 sm:p-6">
             {/* Header */}
@@ -1404,133 +1483,155 @@ export default function Reunions() {
                 <h1 className="text-xl sm:text-2xl font-bold flex flex-wrap items-center gap-2 min-w-0 flex-1 break-words" style={{ color: 'var(--tblr-text)' }}>
                   {selectedMeeting.title}
                   {selectedMeeting.pendingSync && (
-                    <span className="px-2 py-0.5 rounded text-xs font-semibold" style={{ background: 'var(--tblr-warning-lt, #fff3bf)', color: 'var(--tblr-warning, #e67700)' }}>
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[var(--tblr-warning-lt)] text-[var(--tblr-warning)]">
                       En attente d'envoi
                     </span>
                   )}
                 </h1>
                 <div className="flex flex-wrap items-center gap-2 min-w-0">
                   <button
+                    type="button"
                     onClick={handleExportPDF}
                     disabled={exportingPdf}
                     title="Exporter en PDF"
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50"
-                    style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = '#ffe0e0'; e.currentTarget.style.color = 'var(--tblr-danger)'; e.currentTarget.style.borderColor = '#fca5a5'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.borderColor = 'var(--tblr-border)'; }}
+                    className={`px-3 py-1.5 text-xs disabled:opacity-50 ${BTN_SECONDARY}`}
                   >
-                    {exportingPdf ? <IconLoader2 size={13} className="animate-spin" /> : <IconFileTypePdf size={13} />}
+                    {exportingPdf ? <IconLoader2 size={14} className="animate-spin" aria-hidden="true" /> : <IconFileTypePdf size={14} aria-hidden="true" />}
                     PDF
                   </button>
                   <button
+                    type="button"
                     onClick={handleExportDocx}
                     disabled={exportingDocx}
                     title="Exporter en Word"
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50"
-                    style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--tblr-primary-lt)'; e.currentTarget.style.color = 'var(--tblr-primary)'; e.currentTarget.style.borderColor = 'var(--tblr-primary)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.borderColor = 'var(--tblr-border)'; }}
+                    className={`px-3 py-1.5 text-xs disabled:opacity-50 ${BTN_SECONDARY}`}
                   >
-                    {exportingDocx ? <IconLoader2 size={13} className="animate-spin" /> : <IconFileTypeDocx size={13} />}
+                    {exportingDocx ? <IconLoader2 size={14} className="animate-spin" aria-hidden="true" /> : <IconFileTypeDocx size={14} aria-hidden="true" />}
                     Word
                   </button>
                 </div>
               </div>
               <div className="flex items-center gap-2 sm:gap-3 text-sm flex-wrap" style={{ color: 'var(--tblr-muted)' }}>
-                <span className="flex items-center gap-1"><IconCalendar size={14} />{formatDate(selectedMeeting.date)}</span>
-                <span style={{ color: 'var(--tblr-border)' }}>•</span>
-                <span className="truncate max-w-[120px] sm:max-w-none">{activeEntityName}</span>
+                <span className="flex items-center gap-1"><IconCalendar size={14} aria-hidden="true" />{formatDate(selectedMeeting.date)}</span>
+                <span aria-hidden="true" style={{ color: 'var(--tblr-border)' }}>•</span>
+                <span className="truncate max-w-[7.5rem] sm:max-w-none">{activeEntityName}</span>
                 {activeKind === 'project' && (
                   <>
-                    <span className="hidden sm:inline" style={{ color: 'var(--tblr-border)' }}>•</span>
+                    <span aria-hidden="true" className="hidden sm:inline" style={{ color: 'var(--tblr-border)' }}>•</span>
                     <span className="hidden sm:inline">{activeEntitySubtitle}</span>
                   </>
                 )}
               </div>
+              {!online && (
+                <p role="status" className="mt-3 flex items-start gap-2 rounded px-3 py-2 text-xs bg-[var(--tblr-warning-lt)] text-[var(--tblr-warning)]">
+                  <IconAlertTriangle size={14} aria-hidden="true" className="mt-px flex-shrink-0" />
+                  Hors ligne : ce que vous saisissez reste sur cet appareil et part au retour du réseau.
+                </p>
+              )}
             </div>
 
-            {/* Intervenants */}
-            <div className="mb-8">
-              <h2 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
-                <IconUsers size={16} />
-                Intervenants
-              </h2>
-              <AttendeesPanel meetingId={selectedMeeting.id} />
-            </div>
-
-            <hr className="mb-8" style={{ borderColor: 'var(--tblr-border)' }} />
-
-            {/* Notes */}
-            <div className="mb-8">
-              <h2 className="text-sm font-semibold mb-2 flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
-                <IconNotes size={16} />
+            {/* Notes : ce que l'on vient faire ici, donc en premier et plus grand que le reste */}
+            <section aria-labelledby="reunion-notes-titre">
+              <h2 id="reunion-notes-titre" className="text-base font-semibold mb-2 flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
+                <IconNotes size={18} aria-hidden="true" />
                 Notes de réunion
               </h2>
               <textarea
                 value={notesValue}
                 onChange={e => handleNotesChange(e.target.value)}
                 onBlur={saveNotes}
-                placeholder="Saisissez vos notes de réunion ici..."
-                rows={10}
-                className="w-full px-4 py-3 text-sm rounded-xl outline-none focus:ring-2 focus:ring-blue-500 resize-y leading-relaxed"
-                style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                aria-label="Notes de la réunion"
+                aria-describedby="reunion-notes-etat"
+                placeholder="Saisissez vos notes de réunion ici…"
+                rows={12}
+                className={`w-full px-4 py-3 text-sm resize-y leading-relaxed ${INPUT}`}
               />
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-2 gap-2">
-                <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Sauvegarde automatique pendant la saisie, même hors ligne</p>
-                <button
-                  onClick={saveNotes}
-                  disabled={savingNotes}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 self-start sm:self-auto"
-                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 min-h-6">
+                <p
+                  id="reunion-notes-etat"
+                  role="status"
+                  aria-live="polite"
+                  className="text-xs flex items-center gap-1.5"
+                  style={{ color: notesStatus.kind === 'error' ? 'var(--tblr-danger)' : 'var(--tblr-muted)' }}
                 >
-                  <IconCheck size={12} />
-                  {savingNotes ? 'Sauvegarde...' : 'Sauvegarder'}
-                </button>
+                  {notesStatus.kind === 'saving' && (<><IconLoader2 size={14} className="animate-spin" aria-hidden="true" />Enregistrement…</>)}
+                  {notesStatus.kind === 'saved' && (<><IconCheck size={14} aria-hidden="true" />Enregistré à {new Date(notesStatus.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</>)}
+                  {notesStatus.kind === 'queued' && (<><IconAlertTriangle size={14} aria-hidden="true" />Gardé sur cet appareil : envoi au retour du réseau</>)}
+                  {notesStatus.kind === 'error' && (<><IconAlertTriangle size={14} aria-hidden="true" />L'enregistrement a échoué. Votre texte est gardé sur cet appareil.</>)}
+                  {notesStatus.kind === 'idle' && 'Enregistrement automatique pendant la saisie, même hors ligne'}
+                </p>
+                {notesStatus.kind === 'error' && (
+                  <button type="button" onClick={saveNotes} disabled={savingNotes} className={`px-3 py-1 text-xs disabled:opacity-50 ${BTN_SECONDARY}`}>
+                    Réessayer
+                  </button>
+                )}
               </div>
-            </div>
+              {/* Enregistrement audio : le panneau garde son avertissement aux participants et son état en cours */}
+              <div className="mt-4">
+                <MeetingRecordingPanel kind="meeting" parentId={selectedMeeting.id} onInsert={async text => {
+                  const meeting = selectedMeeting;
+                  // A retry after a lost acknowledgement must not append the same draft twice.
+                  const value = notesValue.trimEnd().endsWith(text) ? notesValue : appendMeetingNotes(notesValue, text);
+                  handleNotesChange(value);
+                  if (notesTimerRef.current) { clearTimeout(notesTimerRef.current); notesTimerRef.current = null; }
+                  unsavedNotesRef.current = null;
+                  await persistNotes(meeting.id, value, meeting);
+                }} />
+              </div>
+            </section>
 
-            <hr className="mb-8" style={{ borderColor: 'var(--tblr-border)' }} />
+            {/* Intervenants */}
+            <DetailSection id="intervenants" title="Intervenants" count={attendeeCount} icon={<IconUsers size={16} aria-hidden="true" />}>
+              <AttendeesPanel meetingId={selectedMeeting.id} onCountChange={setAttendeeCount} />
+            </DetailSection>
+
+            {/* Croquis : schéma rapide, sur feuille blanche ou par-dessus un plan ou une photo */}
+            <section className="mt-4 pt-3 border-t border-[var(--tblr-border)]">
+              <CroquisPanel
+                showHeading
+                parent={{ kind: 'meeting', id: selectedMeeting.id, projectId: selectedMeeting.project_id ?? null, pending: selectedMeeting.pendingSync }}
+              />
+            </section>
 
             {/* Photos : appareil photo, pellicule ou glisser-déposer */}
             <PhotoSourcePicker multiple disabled={uploadingPhoto} onFiles={files => { void uploadPhotoFiles(files); }}>
             {openPhotoPicker => (
-            <div
-              {...photoDropProps}
-              className="rounded-xl transition-shadow"
-              style={photoDropOver ? { boxShadow: '0 0 0 2px var(--tblr-primary)', background: 'var(--tblr-surface-2)' } : undefined}
-            >
-              <div className="flex flex-wrap items-center justify-between mb-3 gap-2 min-w-0">
-                <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
-                  <IconPhoto size={16} />
-                  Photos ({(selectedMeeting.photos || []).length})
-                </h2>
+            <DetailSection
+              id="photos"
+              title="Photos"
+              count={(selectedMeeting.photos || []).length}
+              icon={<IconPhoto size={16} aria-hidden="true" />}
+              action={
                 <button
+                  type="button"
                   onClick={openPhotoPicker}
                   disabled={uploadingPhoto}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap pointer-coarse:min-h-11"
-                  style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  className={`px-3 py-1.5 text-xs disabled:opacity-50 whitespace-nowrap ${BTN_SECONDARY}`}
                 >
-                  <IconCamera size={14} />
-                  {uploadingPhoto ? 'Upload...' : 'Ajouter'}
+                  <IconCamera size={14} aria-hidden="true" />
+                  {uploadingPhoto ? 'Envoi…' : 'Ajouter'}
                 </button>
-              </div>
-
+              }
+            >
+            <div
+              {...photoDropProps}
+              className="rounded-lg transition-shadow"
+              style={photoDropOver ? { boxShadow: '0 0 0 2px var(--tblr-primary)', background: 'var(--tblr-surface-2)' } : undefined}
+            >
               {(selectedMeeting.photos || []).length === 0 ? (
                 <button
+                  type="button"
                   onClick={openPhotoPicker}
-                  className="w-full border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-3 transition-colors"
-                  style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--tblr-primary)'; e.currentTarget.style.color = 'var(--tblr-primary)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--tblr-border)'; e.currentTarget.style.color = 'var(--tblr-muted)'; }}
+                  className={`w-full border-2 border-dashed border-[var(--tblr-border)] rounded-lg p-10 flex flex-col items-center gap-3 transition-colors text-[var(--tblr-muted)] hover:border-[var(--tblr-primary)] hover:text-[var(--tblr-primary)] ${FOCUS}`}
                 >
-                  <IconCamera size={32} className="opacity-50" />
+                  <IconCamera size={32} aria-hidden="true" />
                   <span className="text-sm">{photoDropOver ? 'Déposez les photos ici' : 'Appuyez pour ajouter des photos'}</span>
-                  <span className="text-xs opacity-70">Appareil photo, pellicule ou glisser-déposer</span>
+                  <span className="text-xs">Appareil photo, pellicule ou glisser-déposer</span>
                 </button>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
                   {(selectedMeeting.photos || []).map(photo => (
-                    <div key={photo.id} className="group relative rounded-xl overflow-hidden aspect-square" style={{ background: 'var(--tblr-surface-2)' }}>
+                    <div key={photo.id} className="group relative rounded-lg overflow-hidden aspect-square" style={{ background: 'var(--tblr-surface-2)' }}>
                       {photo.pendingSync ? (
                         // Pas encore de file_url côté serveur (envoi en file, hors-ligne) :
                         // aperçu local, SignedImage n'aurait rien à résoudre.
@@ -1552,38 +1653,49 @@ export default function Reunions() {
                           En attente d'envoi
                         </span>
                       )}
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex flex-col justify-between p-2 opacity-0 group-hover:opacity-100">
-                        <div className="flex justify-end gap-1">
-                          <button onClick={() => setLightboxPhoto(photo)} className="p-1 bg-white/20 backdrop-blur-sm rounded text-white hover:bg-white/30 transition-colors">
-                            <IconEye size={14} />
+                      {/* Les commandes restent visibles au toucher, et au clavier dès qu'une d'elles a le focus ; la souris les révèle au survol. */}
+                      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-2 transition-colors bg-black/0 group-hover:bg-black/40 group-focus-within:bg-black/40">
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            aria-label={`Agrandir la photo${photo.caption ? ` : ${photo.caption}` : ''}`}
+                            onClick={() => setLightboxPhoto(photo)}
+                            className={`pointer-events-auto inline-flex items-center justify-center min-h-8 min-w-8 rounded bg-black/60 text-white hover:bg-black/80 transition-colors ${FOCUS} ${TOUCH}`}
+                          >
+                            <IconEye size={16} />
                           </button>
-                          <button onClick={() => deletePhoto(photo.id)} className="p-1 bg-red-500/80 backdrop-blur-sm rounded text-white hover:bg-red-600 transition-colors">
-                            <IconTrash size={14} />
+                          <button
+                            type="button"
+                            aria-label={`Supprimer la photo${photo.caption ? ` : ${photo.caption}` : ''}`}
+                            onClick={() => deletePhoto(photo.id)}
+                            className={`pointer-events-auto inline-flex items-center justify-center min-h-8 min-w-8 rounded bg-[var(--tblr-danger)] text-white hover:brightness-110 transition ${FOCUS} ${TOUCH}`}
+                          >
+                            <IconTrash size={16} />
                           </button>
                         </div>
                         <button
+                          type="button"
                           onClick={() => { setEditingCaption(photo.id); setCaptionValue(photo.caption || ''); }}
-                          className="text-left p-1 bg-black/30 backdrop-blur-sm rounded text-white text-xs flex items-center gap-1 hover:bg-black/50 transition-colors"
+                          className={`pointer-events-auto text-left px-2 py-1 bg-black/60 rounded text-white text-xs flex items-center gap-1 min-w-0 hover:bg-black/80 transition-colors opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100 ${FOCUS} pointer-coarse:min-h-11`}
                         >
-                          <IconEdit size={10} />
-                          {photo.caption || 'Légende...'}
+                          <IconEdit size={12} aria-hidden="true" className="flex-shrink-0" />
+                          <span className="truncate">{photo.caption || 'Ajouter une légende'}</span>
                         </button>
                       </div>
                     </div>
                   ))}
                   <button
+                    type="button"
                     onClick={openPhotoPicker}
-                    className="aspect-square rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors"
-                    style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
-                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--tblr-primary)'; e.currentTarget.style.color = 'var(--tblr-primary)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--tblr-border)'; e.currentTarget.style.color = 'var(--tblr-muted)'; }}
+                    className={`aspect-square rounded-lg border-2 border-dashed border-[var(--tblr-border)] flex flex-col items-center justify-center gap-1 transition-colors text-[var(--tblr-muted)] hover:border-[var(--tblr-primary)] hover:text-[var(--tblr-primary)] ${FOCUS}`}
                   >
-                    <IconCamera size={20} />
+                    <IconCamera size={20} aria-hidden="true" />
                     <span className="text-xs">Ajouter</span>
                   </button>
                 </div>
               )}
             </div>
+            </DetailSection>
             )}
             </PhotoSourcePicker>
           </div>
@@ -1593,11 +1705,11 @@ export default function Reunions() {
           <IconNotes size={36} className="opacity-20" />
           <p className="text-sm">Sélectionnez ou créez une réunion</p>
           <button
+            type="button"
             onClick={() => setShowNewMeeting(true)}
-            className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors"
-            style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+            className={`px-4 py-2 text-sm ${BTN_PRIMARY}`}
           >
-            <IconPlus size={16} />
+            <IconPlus size={16} aria-hidden="true" />
             Nouvelle réunion
           </button>
         </div>
@@ -1619,31 +1731,39 @@ export default function Reunions() {
       {/* Caption edit modal */}
       {editingCaption && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditingCaption(null)}>
-          <div className="rounded-xl p-4 w-full max-w-xs shadow-2xl" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }} onClick={e => e.stopPropagation()}>
-            <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--tblr-text)' }}>Légende de la photo</h3>
+          <div role="dialog" aria-modal="true" aria-labelledby="reunion-legende-titre" className="rounded-lg p-4 w-full max-w-xs shadow-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }} onClick={e => e.stopPropagation()}>
+            <h3 id="reunion-legende-titre" className="text-sm font-semibold mb-2" style={{ color: 'var(--tblr-text)' }}>Légende de la photo</h3>
             <input
               type="text"
               value={captionValue}
               onChange={e => setCaptionValue(e.target.value)}
               autoFocus
-              placeholder="Saisissez une légende..."
-              className="w-full px-3 py-2 text-sm rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-              style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              aria-label="Légende de la photo"
+              placeholder="Saisissez une légende…"
+              className={`w-full px-3 py-2 text-sm ${INPUT} pointer-coarse:min-h-11`}
               onKeyDown={e => e.key === 'Enter' && saveCaption(editingCaption)}
             />
             <div className="flex gap-2 mt-3">
-              <button onClick={() => saveCaption(editingCaption)} className="flex-1 py-1.5 text-sm rounded-lg" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>Enregistrer</button>
-              <button onClick={() => setEditingCaption(null)} className="px-3 py-1.5 text-sm rounded-lg" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>Annuler</button>
+              <button type="button" onClick={() => saveCaption(editingCaption)} className={`flex-1 py-1.5 text-sm ${BTN_PRIMARY}`}>Enregistrer</button>
+              <button type="button" onClick={() => setEditingCaption(null)} className={`px-3 py-1.5 text-sm ${BTN_SECONDARY}`}>Annuler</button>
             </div>
           </div>
         </div>
       )}
 
+      {confirmDialog}
+
       {/* Photo lightbox */}
       {lightboxPhoto && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-4" onClick={() => setLightboxPhoto(null)}>
-          <button onClick={() => setLightboxPhoto(null)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
-            <IconX size={20} />
+        <div role="dialog" aria-modal="true" aria-label={lightboxPhoto.caption ? `Photo : ${lightboxPhoto.caption}` : 'Photo agrandie'} className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90 p-4" onClick={() => setLightboxPhoto(null)}>
+          <button
+            type="button"
+            autoFocus
+            aria-label="Fermer la photo"
+            onClick={() => setLightboxPhoto(null)}
+            className={`absolute top-4 right-4 inline-flex items-center justify-center min-h-11 min-w-11 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors ${FOCUS}`}
+          >
+            <IconX size={20} aria-hidden="true" />
           </button>
           {lightboxPhoto.pendingSync ? (
             <img

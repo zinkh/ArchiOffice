@@ -81,6 +81,11 @@ jobs:
       - name: Dependency vulnerability scan
         run: npm audit --audit-level=critical
 
+      - name: Check API route documentation
+        run: |
+          npm run test:docs
+          npm run docs:check
+
       - name: Type check
         run: npm run lint
 

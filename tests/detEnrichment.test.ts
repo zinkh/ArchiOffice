@@ -196,4 +196,35 @@ describe('site_report_notes — rubriques personnalisables', () => {
     expect(listed.body[0].text).toBe('Devis chiroptères transmis à la MOA');
     expect(listed.body[0].status).toBe('done');
   });
+
+  it('carries open notes, with their text, to the next report and leaves closed ones', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const projectId = 'project-report-notes';
+    fakeSupabaseAdmin.seed('projects', [{ id: projectId, tenant_id: tenantId, name: 'Chantier report' }]);
+
+    const first = await request(app)
+      .post(`/api/projects/${projectId}/reports`)
+      .set(authHeader(token))
+      .send({ date: '2026-10-07', report_number: 1 });
+    const firstId = first.body.id;
+    const note = (n: number, text: string) => request(app)
+      .post(`/api/reports/${firstId}/notes`)
+      .set(authHeader(token))
+      .send({ category: 'MOE', note_number: n, issue_date: '2026-10-07', responsible_company: 'AACZ', text });
+    const ouverte = await note(1, 'Mettre en copie le BET pour les OS');
+    const close = await note(2, 'Plan transmis');
+    await request(app).put(`/api/notes/${close.body.id}`).set(authHeader(token)).send({ status: 'done' });
+    expect(ouverte.status).toBe(201);
+
+    const second = await request(app)
+      .post(`/api/projects/${projectId}/reports`)
+      .set(authHeader(token))
+      .send({ date: '2026-10-14', report_number: 2 });
+    const reportees = await request(app).get(`/api/reports/${second.body.id}/notes`).set(authHeader(token));
+    expect(reportees.body).toHaveLength(1);
+    expect(reportees.body[0].text).toBe('Mettre en copie le BET pour les OS');
+    expect(reportees.body[0].category).toBe('MOE');
+    expect(reportees.body[0].status).toBe('open');
+  });
 });

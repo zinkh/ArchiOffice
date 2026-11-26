@@ -30,7 +30,7 @@ export const EXPORT_TABLES: readonly string[] = Array.from(new Set([
   'document_diffusions', 'document_templates',
   'feed_posts', 'feed_comments', 'feed_likes',
   'gpa_reserves', 'join_requests', 'leave_balances', 'leave_requests',
-  'meeting_attendees', 'meeting_photos', 'meetings', 'mentions',
+  'meeting_attendees', 'meeting_photos', 'meetings', 'mentions', 'croquis',
   // Photos de réserves (OPR et GPA) et dernières ouvertures d'affaires par
   // personne — du contenu et de l'activité du cabinet, donc exportés.
   'reserve_photos', 'project_recent_views',

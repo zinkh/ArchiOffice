@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
+  destinatairesEntreprise, completerEmailsContact, completerTelephoneContact, telephoneEntreprise, radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
 } from '../actEntreprises';
 
 const ent = (p: Partial<EntrepriseSuivi> = {}): EntrepriseSuivi => ({
@@ -162,5 +162,73 @@ describe('lotsCorrespondants', () => {
   it('rien quand aucun corps d\'état ne recoupe un lot', () => {
     expect(lotsCorrespondants(['Électricité'], lots)).toEqual([]);
     expect(lotsCorrespondants([], lots)).toEqual([]);
+  });
+});
+
+describe('destinatairesEntreprise', () => {
+  it('met l\'e-mail du contact en premier puis les adresses supplémentaires, sans doublon', () => {
+    expect(destinatairesEntreprise({ email: 'a@x.fr', emails_supplementaires: 'b@x.fr; A@x.fr, c@x.fr  d@x.fr' }))
+      .toEqual(['a@x.fr', 'b@x.fr', 'c@x.fr', 'd@x.fr']);
+  });
+  it('ignore ce qui n\'est pas une adresse et gère l\'absence d\'e-mail du contact', () => {
+    expect(destinatairesEntreprise({ emails_supplementaires: 'compta, b@x.fr' })).toEqual(['b@x.fr']);
+    expect(destinatairesEntreprise({})).toEqual([]);
+  });
+});
+
+describe('completerEmailsContact', () => {
+  it('place les adresses saisies dans les emplacements libres de la fiche', () => {
+    expect(completerEmailsContact({}, { email: 'a@x.fr', emails_supplementaires: 'b@x.fr, c@x.fr' }))
+      .toEqual({ email_work: 'a@x.fr', email: 'b@x.fr', email_home: 'c@x.fr' });
+  });
+  it('n\'écrase ni ne duplique une adresse déjà présente (casse ignorée)', () => {
+    expect(completerEmailsContact({ email_work: 'A@x.fr' }, { email: 'a@x.fr' })).toBeNull();
+    expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: 'a@x.fr', emails_supplementaires: 'b@x.fr' }))
+      .toEqual({ email: 'b@x.fr' });
+  });
+  it('laisse le surplus sur la ligne quand la fiche est pleine', () => {
+    expect(completerEmailsContact(
+      { email: '1@x.fr', email_work: '2@x.fr', email_home: '3@x.fr', email_other: '4@x.fr' },
+      { email: '5@x.fr' },
+    )).toBeNull();
+  });
+});
+
+describe('completerEmailsContact : adresse corrigée', () => {
+  it('remplace l\'ancienne adresse là où elle se trouve sur la fiche', () => {
+    expect(completerEmailsContact(
+      { email_work: 'faute@x.fr', email: 'faute@x.fr', email_other: 'autre@x.fr' },
+      { email: 'bon@x.fr', emails_supplementaires: 'autre@x.fr' },
+      ['faute@x.fr', 'autre@x.fr'],
+    )).toEqual({ email_work: 'bon@x.fr' });
+  });
+  it('garde l\'ancienne adresse quand elle est seulement supprimée de la ligne', () => {
+    expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: '' }, ['a@x.fr'])).toBeNull();
+  });
+  it('sans ancienne adresse sur la fiche, la nouvelle va dans un emplacement libre', () => {
+    expect(completerEmailsContact({ email_work: 'a@x.fr' }, { email: 'b@x.fr' }, ['z@x.fr']))
+      .toEqual({ email: 'b@x.fr' });
+  });
+});
+
+describe('completerTelephoneContact', () => {
+  it('place le numéro dans phone_work et phone quand la fiche n\'en a pas', () => {
+    expect(completerTelephoneContact({}, ' 03 29 58 37 99 ')).toEqual({ phone_work: '03 29 58 37 99', phone: '03 29 58 37 99' });
+  });
+
+  it('remplace le champ qui porte le numéro affiché', () => {
+    const contact = { phone_work: '', phone_mobile: '06 00 00 00 01', phone: '06 00 00 00 01' };
+    const patch = completerTelephoneContact(contact, '06 00 00 00 02');
+    expect(patch).toEqual({ phone_mobile: '06 00 00 00 02', phone: '06 00 00 00 02' });
+    expect(telephoneEntreprise({ contact_id: 'c' }, [{ id: 'c', ...contact, ...patch }])).toBe('06 00 00 00 02');
+  });
+
+  it('ne touche pas à phone quand il porte un autre numéro', () => {
+    expect(completerTelephoneContact({ phone_work: '01', phone: '02' }, '03')).toEqual({ phone_work: '03' });
+  });
+
+  it('rend null quand le numéro est inchangé ou vide', () => {
+    expect(completerTelephoneContact({ phone_work: '01 02 03 04 05' }, ' 01 02 03 04 05 ')).toBeNull();
+    expect(completerTelephoneContact({ phone_work: '01 02 03 04 05' }, '   ')).toBeNull();
   });
 });

@@ -31,9 +31,13 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const HELP_CARDS: { key: string; title: string; description: string; icon: React.ReactNode }[] = [
+  { key: 'workflow', title: 'De l’affaire au chantier', description: 'Cabinet, études, comptes-rendus DET, réception et réserves.', icon: <IconBuildingStore size={18} /> },
+  { key: 'mcp', title: 'Connecter un assistant avec le MCP', description: 'Connexion, choix d’agence, documents et actions disponibles.', icon: <IconMessageCircle size={18} /> },
+  { key: 'api', title: 'API et automatisations', description: 'Clés API, intégrations HTTP et résolution des erreurs.', icon: <IconFileText size={18} /> },
+  { key: 'troubleshooting', title: 'Résoudre un problème', description: 'Accès, synchronisation, documents et demande au support.', icon: <IconHelpCircle size={18} /> },
   { key: 'tips', title: 'Conseils et astuces', description: 'Conseils pour rationaliser vos calculs de frais, le visa des plans et le suivi de chantier.', icon: <IconBulb size={18} /> },
   { key: 'docs', title: "Documents d'aide", description: 'Prises en main pas à pas : projets, CCTP/DPGF, devis et factures.', icon: <IconFileText size={18} /> },
-  { key: 'faq', title: 'Forum aux questions', description: "Questions fréquentes sur l'essai, la facturation, les crédits IA et vos données.", icon: <IconHelpCircle size={18} /> },
+  { key: 'faq', title: 'Foire aux questions', description: "Questions fréquentes sur l'essai, la facturation, les crédits IA et vos données.", icon: <IconHelpCircle size={18} /> },
   { key: 'videos', title: "Vidéos d'aide", description: 'Tutoriels vidéo courts sur les fonctionnalités clés.', icon: <IconVideo size={18} /> },
   { key: 'guides', title: 'Guides pour les entreprises', description: 'Repères sur la décennale, la facturation BTP et le RGPD.', icon: <IconBuildingStore size={18} /> },
 ];
@@ -102,7 +106,7 @@ function FaqView({ onBack }: { onBack: () => void }) {
         <IconArrowLeft size={14} /> Retour à l'aide
       </button>
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6">
-        <h1 className="text-lg font-semibold text-zinc-900 dark:text-white mb-1">Forum aux questions</h1>
+        <h1 className="text-lg font-semibold text-zinc-900 dark:text-white mb-1">Foire aux questions</h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">Les questions les plus fréquentes des cabinets qui utilisent ArchiOffice.</p>
         <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {FAQ_ITEMS.map((item, i) => (

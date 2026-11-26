@@ -1,14 +1,16 @@
 // Bandeau « En groupement avec » des documents Word : même contenu que celui
 // des PDF (pdfLetterhead.drawPartnerLogos), pour les logos du groupement actif.
 import type { Paragraph } from 'docx';
-import { resolvePartnerLogos, type LogoImage } from './pdfLetterhead';
+import { getActiveMandataire, resolvePartnerLogos, type LogoImage } from './pdfLetterhead';
 
 const HAUTEUR_PX = 32;
 const LARGEUR_MAX_PX = 130;
 
 /** Paragraphe de logos, ou null quand le document n'a pas de groupement à montrer. */
 export async function partnerLogosParagraph(explicit?: LogoImage[]): Promise<Paragraph | null> {
-  const logos = resolvePartnerLogos(explicit);
+  // Un cotraitant mandataire tient l'en-tête : le cabinet rejoint le bandeau.
+  const actif = explicit === undefined ? getActiveMandataire() : null;
+  const logos = [...(actif?.logoCabinet ? [actif.logoCabinet] : []), ...resolvePartnerLogos(explicit)];
   if (logos.length === 0) return null;
   const { Paragraph, TextRun, ImageRun } = await import('docx');
   const images = logos.map(l => {

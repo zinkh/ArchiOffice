@@ -32,9 +32,15 @@ function callId(id: string | undefined, index: number): string {
   return id || `tool_${index}`;
 }
 
+/** Mistral refuse une requête qui porte plus de 8 images au total (400, code
+ *  3051). buildAgentContext() respecte déjà ce budget ; ce plafond est le
+ *  dernier filet, pour que l'appel n'échoue jamais pour ça. */
+export const MISTRAL_MAX_IMAGES = 8;
+
 function toMistralMessages(system: string | undefined, messages: LlmMessage[]): any[] {
   const out: any[] = [];
   if (system) out.push({ role: 'system', content: system });
+  let imagesLeft = MISTRAL_MAX_IMAGES;
 
   for (const msg of messages) {
     if (msg.role === 'user') {
@@ -42,14 +48,25 @@ function toMistralMessages(system: string | undefined, messages: LlmMessage[]): 
         out.push({ role: 'user', content: msg.content });
         continue;
       }
+      const sent = msg.images.slice(0, imagesLeft);
+      const dropped = msg.images.length - sent.length;
+      imagesLeft -= sent.length;
       // Une image jointe part en data URI dans `image_url` — une chaîne
       // simple (pas un objet {url: ...} comme chez OpenAI), voir
       // docs.mistral.ai/studio/conversations/vision. Le texte d'abord, comme
       // dans l'exemple de cette doc.
       const content: any[] = [];
       if (msg.content) content.push({ type: 'text', text: msg.content });
-      for (const img of msg.images) {
+      for (const img of sent) {
         content.push({ type: 'image_url', image_url: `data:${img.mimeType};base64,${img.data.toString('base64')}` });
+      }
+      // Dit au modèle ce qu'il n'a pas reçu : il ne doit pas présenter une
+      // lecture partielle comme complète.
+      if (dropped > 0) {
+        content.push({
+          type: 'text',
+          text: `[${dropped} image(s) jointe(s) n'ont pas pu être transmises : ce modèle accepte ${MISTRAL_MAX_IMAGES} images au plus. Dis-le à l'utilisateur, ne décris rien de ces images.]`,
+        });
       }
       out.push({ role: 'user', content });
       continue;
@@ -117,6 +134,7 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
     // généraliste. À revoir si un -latest change de version sous-jacente
     // sans le redevenir.
     supportsVision: true,
+    maxImages: MISTRAL_MAX_IMAGES,
     // Pas de supportsWebSearch : `web_search`/`web_search_premium` de Mistral
     // ne fonctionnent qu'avec son API Conversations (/v1/conversations), pas
     // avec l'endpoint Chat Completions que cet adaptateur appelle — la
@@ -126,7 +144,7 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
     // fournisseur ; web_search_enabled reste sans effet tant qu'un cabinet
     // fait tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
-    async chat({ system, messages, tools, timeoutMs, cachePrefix, cacheKey }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, timeoutMs, maxTokens, cachePrefix, cacheKey }: LlmChatParams): Promise<LlmChatResult> {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
         headers: {
@@ -137,7 +155,7 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
         signal: AbortSignal.timeout(timeoutMs ?? REQUEST_TIMEOUT_MS),
         body: JSON.stringify({
           model,
-          max_tokens: MAX_TOKENS,
+          max_tokens: maxTokens ? Math.min(maxTokens, MAX_TOKENS) : MAX_TOKENS,
           ...(cacheKey ? { prompt_cache_key: cacheKey } : {}),
           messages: toMistralMessages(system, prependCachePrefix(messages, cachePrefix)),
           ...(tools && tools.length > 0
@@ -160,6 +178,9 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
         // Read the body for the provider's own explanation, but never echo
         // the request back — it would carry the tenant's data into logs.
         const detail = await res.text().catch(() => '');
+        if (res.status === 400 && /number of images exceeds/i.test(detail)) {
+          throw new Error(`Trop d'images ou de pages jointes pour ce modèle (${MISTRAL_MAX_IMAGES} au maximum). Cliquez sur « Nouvelle discussion » ou joignez moins de pages.`);
+        }
         throw new Error(`Mistral a répondu ${res.status}${detail ? ` : ${detail.slice(0, 300)}` : ''}`);
       }
 

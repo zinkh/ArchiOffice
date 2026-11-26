@@ -5,6 +5,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { findMembership } from '../tenantMemberships';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -42,6 +43,12 @@ export function registerProjectMemberRoutes(app: Express, { supabaseAdmin, getTe
   app.post('/api/projects/:id/members', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      // Le projet vient de l'URL mais rien ne prouvait qu'il soit du cabinet :
+      // sans ce contrôle, on rattachait un membre à l'affaire d'un autre cabinet
+      // (issue #245). Même réponse pour un projet étranger et inexistant.
+      if (!(await assertTenantEntity(supabaseAdmin, 'projects', req.params.id, tenantId))) {
+        return res.status(404).json({ error: 'Projet introuvable pour ce cabinet.' });
+      }
       const { user_id, role } = req.body;
       if (!user_id) return res.status(400).json({ error: 'user_id is required' });
       if (!(await findMembership(supabaseAdmin, user_id, tenantId))) {

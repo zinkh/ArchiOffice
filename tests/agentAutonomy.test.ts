@@ -512,6 +512,45 @@ describe('lecture du CCTP et du DPGF', () => {
     expect((result.response as any).lots[0].numero).toBe('01');
   });
 
+  // Régression « articles incomplets en lecture MCP » : un lot long était coupé
+  // à 60 articles sans le dire, et le texte d'un article à 1200 caractères.
+  const gros = (n: number, longueur = 100) => ({
+    lots: [{ numero: '02', titre: 'Structure', chapitres: [
+      { numero: '2.1', titre: 'A', lignes: Array.from({ length: n }, (_, i) => ({ numero: `2.1.${i + 1}`, designation: `Art ${i + 1}`, cctpDescription: 'x'.repeat(longueur) })) },
+      { numero: '2.2', titre: 'B', lignes: [{ numero: '2.2.1', designation: 'Dernier', cctpDescription: 'fin' }] },
+    ] }],
+  });
+
+  it('annonce une lecture tronquée et permet de reprendre à l\'offset indiqué', () => {
+    const doc = gros(150, 1000);
+    const p1 = summarizeCctp(doc, '02') as any;
+    expect(p1.nb_articles_total).toBe(151);
+    expect(p1.tronque).toBe(true);
+    expect(p1.nb_articles_retournes).toBeLessThan(151);
+    expect(p1.suite.offset).toBe(p1.nb_articles_retournes);
+    const lus = new Set<string>();
+    let page = p1;
+    for (let i = 0; i < 10; i++) {
+      for (const c of page.lot.chapitres) for (const a of c.articles) lus.add(a.numero);
+      if (!page.tronque) break;
+      page = summarizeCctp(doc, '02', { offset: page.suite.offset }) as any;
+    }
+    expect(lus.size).toBe(151);
+    expect(page.tronque).toBeUndefined();
+  });
+
+  it('lit un chapitre seul et un article en entier', () => {
+    const doc = gros(3, 5000);
+    const ch = summarizeCctp(doc, '02', { chapitre: '2.2' }) as any;
+    expect(ch.lot.chapitres).toHaveLength(1);
+    expect(ch.nb_articles_total).toBe(1);
+    const court = (summarizeCctp(doc, '02') as any).lot.chapitres[0].articles[0];
+    expect(court.tronque).toBe(true);
+    expect(court.longueur_totale).toBe(5000);
+    const entier = summarizeCctp(doc, '02', { article: '2.1.1' }) as any;
+    expect(entier.article.contenu).toHaveLength(5000);
+  });
+
   it('signale un lot inexistant au lieu d\'en inventer un', () => {
     const summary = summarizeCctp(cctp, 'plomberie') as any;
     expect(summary.error).toContain('plomberie');

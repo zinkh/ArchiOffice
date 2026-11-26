@@ -73,8 +73,8 @@ export interface AgentResourceDef {
 
 export const AGENT_RESOURCES: AgentResourceDef[] = [
   { key: 'contacts', label: 'Contacts', basePath: '/api/contacts', create: true, update: true, delete: true, list: true,
-    knownFields: ['company_name', 'first_name', 'last_name', 'email', 'phone', 'category', 'address', 'city', 'zip', 'notes'],
-    fields: 'company_name, first_name, last_name, email, phone, category, address, city, zip, notes. ' +
+    knownFields: ['company_name', 'first_name', 'last_name', 'email', 'phone', 'category', 'address', 'city', 'zip', 'notes', 'website', 'siret', 'corps_etat', 'specialite'],
+    fields: 'company_name, first_name, last_name, email, phone, category, address, city, zip, notes, website, siret (14 chiffres), corps_etat (tableau de textes, entreprises : ["Couverture", "Bardage"]), specialite (tableau de textes, bureaux d\'études : ["Structure"]). ' +
       "Un contact identifie soit une personne (first_name* + last_name*), soit une société/un bureau d'études (company_name* seul, sans personne nommée) — " +
       "l'un des deux est obligatoire, mais jamais les deux ensemble ne sont requis. Pour un contact 'entreprise' (bureau d'études, société), " +
       "renseigne uniquement company_name (+ email/phone/adresse si connus) : ne laisse jamais un ajout de contact bloqué faute d'un prénom/nom de personne que la source ne fournit pas." },
@@ -271,7 +271,7 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     knownFields: ['title', 'project_id', 'reception_id', 'batiment', 'local', 'status', 'lots', 'entreprises', 'due_date', 'description'],
     required: ['title', 'project_id'],
     defaults: { status: 'A faire' },
-    fields: 'title*, project_id*, reception_id, batiment, local, status (A faire/En cours/Levée/Refusée par l\'entreprise/Quitus Transmis/Levée refusée par le MOE), lots, entreprises, due_date, description. Réserves de la garantie de parfait achèvement, distinctes des réserves de réception (resource "reserves").' },
+    fields: 'title*, project_id*, reception_id, batiment, local, status (A faire/En cours/Levée/Refusée par l\'entreprise/Quitus Transmis/Levée refusée par le MOE/Pour mémoire), lots, entreprises, due_date, description. Réserves de la garantie de parfait achèvement, distinctes des réserves de réception (resource "reserves").' },
   { key: 'time_entries', label: 'Temps passés', basePath: '/api/time_entries', create: true, update: true, delete: true, list: true, identityField: 'description', mergeOnUpdate: true,
     knownFields: ['entry_date', 'start_time', 'end_time', 'project_id', 'description'],
     required: ['entry_date', 'start_time', 'end_time'],

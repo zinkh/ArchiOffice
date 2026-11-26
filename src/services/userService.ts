@@ -68,3 +68,17 @@ export const decideJoinRequest = async (id: string, decision: 'approve' | 'rejec
     throw new Error(error.error || 'Failed to decide join request');
   }
 };
+
+export const revokeUser = async (id: string): Promise<{ accountBlocked: boolean }> => {
+  const res = await fetch(`/api/team/${id}/revoke`, { method: 'POST' });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error || 'Failed to revoke user');
+  return { accountBlocked: !!body?.accountBlocked };
+};
+
+export const resetUserPassword = async (id: string): Promise<{ emailSent: boolean; emailError: string | null }> => {
+  const res = await fetch(`/api/team/${id}/reset-password`, { method: 'POST' });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error || 'Failed to reset password');
+  return { emailSent: !!body?.emailSent, emailError: body?.emailError ?? null };
+};

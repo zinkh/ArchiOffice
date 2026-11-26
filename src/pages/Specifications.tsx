@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { fetchJson, apiFetch } from '../lib/api';
 import { formatCurrency, cn } from '../lib/utils';
 import { CATEGORIE_CLAUSES, estClause } from '../lib/bibliothequeClauses';
+import { PostesAssociesEditor } from '../components/pro/PostesAssociesEditor';
 import type {
   Referentiels, ArticleBibliotheque, PrixObservation, PrixStats,
   RepartitionBibliotheque, OrigineArticle,
@@ -668,6 +669,13 @@ export default function Specifications() {
                   style={styleChamp}
                 />
               </label>
+              {!estClause(brouillon as any) && (
+                <PostesAssociesEditor
+                  articleId={selection?.id}
+                  value={brouillon.associes ?? []}
+                  onChange={v => majBrouillon('associes', v)}
+                />
+              )}
             </div>
 
             {/* Historique de prix : une clause n'a pas de prix */}

@@ -366,7 +366,9 @@ export class FakeSupabaseAdmin {
 
   /** Test setup: seeds rows directly, bypassing the query builder. */
   seed(table: string, rows: Row[]) {
-    this.tables.set(table, [...(this.tables.get(table) || []), ...rows.map(r => ({ ...r }))]);
+    // dpgfs.revision vaut 0 par défaut en base (supabase/migrate_dpgfs_revision.sql).
+    const withDefaults = (r: Row): Row => (table === 'dpgfs' ? { revision: 0, ...r } : { ...r });
+    this.tables.set(table, [...(this.tables.get(table) || []), ...rows.map(withDefaults)]);
   }
 
   /** Test assertions: reads the current state of a table directly. */
@@ -632,6 +634,8 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
       if (latency > 0) await new Promise(resolve => setTimeout(resolve, latency));
       const inserted = (Array.isArray(this.payload) ? this.payload : [this.payload!]).map(r => ({
         id: r.id ?? crypto.randomUUID(),
+        // dpgfs.revision vaut 0 par défaut en base (supabase/migrate_dpgfs_revision.sql).
+        ...(this.table === 'dpgfs' ? { revision: 0 } : {}),
         ...r,
       }));
       rows.push(...inserted);
@@ -661,7 +665,15 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     const matched = rows.filter(row => this.filters.every(f => f(row)));
 
     if (this.op === 'update') {
-      matched.forEach(row => Object.assign(row, this.payload));
+      matched.forEach(row => {
+        // Reproduit le déclencheur SQL dpgfs_bump_revision (supabase/migrate_dpgfs_revision.sql) :
+        // `revision` n'avance que si le document `data` change réellement, quel que soit l'écrivain.
+        const revision = this.table === 'dpgfs'
+          ? Number(row.revision ?? 0) + (this.payload && 'data' in this.payload && this.payload.data !== row.data ? 1 : 0)
+          : undefined;
+        Object.assign(row, this.payload);
+        if (revision !== undefined) row.revision = revision;
+      });
       return { data: clone(this.wantSingle || this.wantMaybeSingle ? matched[0] ?? null : matched), error: null };
     }
 

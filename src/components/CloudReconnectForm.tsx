@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { IconCloud, IconLoader2 } from '@tabler/icons-react';
 
 // Formulaire de reconnexion au cloud d'un poste déjà lié : seul le mot de passe
@@ -16,10 +16,14 @@ interface CloudReconnectFormProps {
   onPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
   onCancel: () => void;
+  /** Widget de vérification de sécurité (Turnstile), affiché avant les boutons. */
+  captcha?: ReactNode;
+  /** Faux tant que le défi de sécurité n'est pas validé. */
+  canSubmit?: boolean;
 }
 
 export function CloudReconnectForm({
-  email, password, error, busy, onPasswordChange, onSubmit, onCancel,
+  email, password, error, busy, onPasswordChange, onSubmit, onCancel, captcha, canSubmit = true,
 }: CloudReconnectFormProps) {
   return (
     <form onSubmit={onSubmit} className="space-y-3 max-w-sm">
@@ -37,11 +41,12 @@ export function CloudReconnectForm({
           autoFocus
         />
       </div>
+      {captcha}
       {error && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{error}</p>}
       <div className="flex items-center gap-2">
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || !canSubmit}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
           style={{ background: 'var(--tblr-primary)' }}
         >

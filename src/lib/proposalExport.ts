@@ -9,6 +9,9 @@
 //
 // This file is intentionally React-free — JSX section rendering lives in
 // src/components/ProposalExportModal.tsx, which is the only place that needs it.
+import { scopeShare } from './proposalFees';
+import { parsePlanning, type PlanningOverride } from './proposalPlanning';
+import { listeTranches, tranchesActives, trancheDeMission, totauxParTranche } from './tranches';
 import type { Proposal, ProposalSpecialty } from '../types';
 import { isErpOperation } from './erp';
 import { operationNature, surfaceExistante, surfaceRehabilitee, surfaceDePlancher, toSurface } from './proposalSurfaces';
@@ -58,6 +61,8 @@ export interface MissionLine {
   montantHT: number;
   relPct: number;
   intervenants: MissionIntervenant[];
+  /** Tranche de rattachement (absent : tranche ferme, ou propositions sans tranches). */
+  trancheId?: string;
 }
 
 export interface CalendrierItem {
@@ -70,6 +75,8 @@ export interface CalendrierItem {
   apres: string;
   /** Ids des missions avec lesquelles celle-ci est menée en parallèle (VISA, EXE, OPC). */
   avec: string[];
+  /** Tranche de la mission, quand la proposition est découpée en tranches. */
+  trancheId?: string;
 }
 
 type PhaseMop = 'det' | 'aor' | 'visa' | 'exe' | 'opc';
@@ -104,13 +111,14 @@ export const DUREE_MISSION_PAR_DEFAUT_JOURS = 15;
 export function planifierCalendrier(
   missions: Array<{ id: string; designation: string }>,
   duree = DUREE_MISSION_PAR_DEFAUT_JOURS,
+  reglages: Record<string, PlanningOverride> = {},
 ): CalendrierItem[] {
   const phases = missions.map(m => phaseOf(m.id, m.designation));
   const detIndex = phases.indexOf('det');
   const parallele = (phase: PhaseMop | null) => detIndex !== -1 && (phase === 'visa' || phase === 'exe' || phase === 'opc');
 
   const items: CalendrierItem[] = missions.map(m => ({
-    id: 'c_' + m.id, mission: m.designation, dureeJours: duree, debutJours: 0, apres: '', avec: [],
+    id: 'c_' + m.id, mission: m.designation, dureeJours: reglages[m.id]?.duree ?? duree, debutJours: 0, apres: '', avec: [],
   }));
 
   // La chaîne : toutes les missions qui ne sont pas menées en parallèle, dans l'ordre de la liste.
@@ -118,9 +126,11 @@ export function planifierCalendrier(
   let precedent = '';
   items.forEach((item, i) => {
     if (parallele(phases[i])) return;
-    item.debutJours = fin;
-    item.apres = precedent;
-    fin += item.dureeJours;
+    const decale = reglages[missions[i].id]?.debut;
+    item.debutJours = decale ?? fin;
+    // Une mission décalée à la main ne dépend plus de la précédente.
+    item.apres = decale !== undefined ? '' : precedent;
+    fin = item.debutJours + item.dureeJours;
     precedent = item.id;
   });
 
@@ -130,9 +140,9 @@ export function planifierCalendrier(
     const aorIndex = phases.indexOf('aor');
     items.forEach((item, i) => {
       if (!parallele(phases[i])) return;
-      item.debutJours = det.debutJours;
+      item.debutJours = reglages[missions[i].id]?.debut ?? det.debutJours;
       item.avec = [det.id];
-      if (phases[i] === 'opc') {
+      if (phases[i] === 'opc' && reglages[missions[i].id]?.duree === undefined) {
         const aor = aorIndex !== -1 ? items[aorIndex] : null;
         item.dureeJours = Math.max(det.dureeJours, (aor ? aor.debutJours + aor.dureeJours : det.debutJours + det.dureeJours) - det.debutJours);
         if (aor) item.avec = [det.id, aor.id];
@@ -140,6 +150,60 @@ export function planifierCalendrier(
     });
   }
   return items;
+}
+
+/**
+ * Planning d'une proposition découpée en tranches : chaque tranche s'enchaîne comme un
+ * planning complet (phases parallèles comprises), la tranche suivante démarrant à la fin
+ * de la précédente (la conditionnelle après la ferme). Un jour de début réglé à la main
+ * reste absolu : il n'est jamais décalé. Sans tranches, identique à `planifierCalendrier`.
+ */
+export function planifierCalendrierParTranches(
+  missions: Array<{ id: string; designation: string; trancheId?: string }>,
+  tranches: Array<{ id: string; type: 'ferme' | 'conditionnelle' }>,
+  duree = DUREE_MISSION_PAR_DEFAUT_JOURS,
+  reglages: Record<string, PlanningOverride> = {},
+): CalendrierItem[] {
+  if (tranches.length <= 1) return planifierCalendrier(missions, duree, reglages);
+  const parDefaut = (tranches.find(t => t.type === 'ferme') ?? tranches[0]).id;
+  const connues = new Set(tranches.map(t => t.id));
+  const resultat: CalendrierItem[] = [];
+  let decalage = 0;
+  let derniereChaine = '';
+  for (const tranche of tranches) {
+    const lignes = missions.filter(m => {
+      const id = m.trancheId && connues.has(m.trancheId) ? m.trancheId : parDefaut;
+      return id === tranche.id;
+    });
+    if (lignes.length === 0) continue;
+    const items = planifierCalendrier(lignes, duree, reglages);
+    let fin = decalage;
+    items.forEach((item, i) => {
+      const manuel = reglages[lignes[i].id]?.debut !== undefined;
+      if (!manuel) item.debutJours += decalage;
+      // La première mission de la chaîne succède à la dernière de la tranche précédente.
+      if (!manuel && item.apres === '' && item.avec.length === 0 && derniereChaine) item.apres = derniereChaine;
+      item.trancheId = tranche.id;
+      fin = Math.max(fin, item.debutJours + item.dureeJours);
+    });
+    const chaine = items.filter(i => i.avec.length === 0);
+    if (chaine.length > 0) derniereChaine = chaine[chaine.length - 1].id;
+    resultat.push(...items);
+    decalage = fin;
+  }
+  return resultat;
+}
+
+const PROPOSAL_STATUS_LABELS_FR: Record<string, string> = {
+  draft: 'Brouillon',
+  sent: 'Envoyée',
+  accepted: 'Acceptée',
+  rejected: 'Refusée',
+};
+
+/** Libellé français du statut, pour le badge de la page de garde ; un statut inconnu reste tel quel. */
+export function proposalStatusLabel(status: string): string {
+  return PROPOSAL_STATUS_LABELS_FR[status.toLowerCase()] ?? status;
 }
 
 export interface ProposalPdfData {
@@ -192,10 +256,16 @@ export interface ProposalPdfData {
   tauxComplexite: number;
   ratioRehab: number;
   ratioExtension: number;
+  ratioCommentaire: string;
   pctHonorairesBase: number;
   pctAvecExe: number;
   pctMissionsComp: number;
   montantHonorairesHT: number;
+  /** Honoraires avant remise ; égal au net quand il n'y a pas de remise. */
+  montantHonorairesBrut: number;
+  remiseHonoraires: number;
+  /** Part des honoraires de la mission complète retenue pour un PC seul (null pour une mission complète). */
+  partPcSeul: number | null;
   tauxTVA: number;
   montantTVA: number;
   montantTTC: number;
@@ -204,6 +274,10 @@ export interface ProposalPdfData {
   /** Identité de chaque cotraitant (fiche contact), par identifiant de contact. Chargée à part. */
   cotraitantIdentites?: Record<string, CotraitantIdentityPdf>;
   missions: MissionLine[];
+  /** Tranches fermes et conditionnelles ; liste vide quand la proposition n'est pas découpée. */
+  tranches: Array<{ id: string; label: string; type: 'ferme' | 'conditionnelle'; condition: string }>;
+  /** Totaux HT par tranche (ferme, conditionnel, global) quand la proposition est découpée. */
+  totauxTranches: { ferme: number; conditionnel: number; global: number } | null;
   calendrier: CalendrierItem[];
   notes: string;
 
@@ -212,8 +286,20 @@ export interface ProposalPdfData {
   agenceLogo?: string;
   /** Logos des cotraitants (data URLs), chargés à part depuis leurs fiches contact. */
   cotraitantLogos?: string[];
+  /** Extraits de plan et photos de la proposition, déjà réduits en data URLs (chargés à part). */
+  illustrations?: IllustrationPdf[];
   architecteNom: string;
   oaNumber: string;
+}
+
+/** Une image du plan et des photos telle que le PDF l'imprime : data URL réduite, légende, format. */
+export interface IllustrationPdf {
+  dataUrl: string;
+  caption: string;
+  /** Photo (vs extrait de plan) : sert à regrouper les images sous « Plan » puis « Photos ». */
+  isPhoto: boolean;
+  width: number;
+  height: number;
 }
 
 /** Identité d'un cotraitant telle que le PDF l'imprime : le logo est une data URL déjà réduite. */
@@ -225,7 +311,7 @@ export type TableDensity = 'normal' | 'compact' | 'dense';
 
 export type ProposalSectionId =
   | 'garde' | 'objet' | 'surfaces' | 'honoraires' | 'repartition'
-  | 'cotraitants' | 'calendrier' | 'mafCost' | 'signatures';
+  | 'cotraitants' | 'calendrier' | 'mafCost' | 'illustrations' | 'signatures';
 
 export interface ProposalTemplate {
   detailLevel: 'court' | 'detaille';
@@ -305,19 +391,20 @@ export const PROPOSAL_SECTION_DEFS: { id: ProposalSectionId; label: string }[] =
   { id: 'cotraitants', label: 'Cotraitants & spécialités' },
   { id: 'calendrier', label: 'Calendrier prévisionnel' },
   { id: 'mafCost', label: 'Coût assurance MAF' },
+  { id: 'illustrations', label: 'Plan et photos' },
   { id: 'signatures', label: 'Conditions générales & signatures' },
 ];
 
 export const PRESET_COURT: ProposalTemplate['pages'] = {
   garde: false, objet: true, surfaces: false, honoraires: true,
   repartition: false, cotraitants: false, calendrier: true,
-  mafCost: false, signatures: true,
+  mafCost: false, illustrations: false, signatures: true,
 };
 
 export const PRESET_DETAILLE: ProposalTemplate['pages'] = {
   garde: true, objet: true, surfaces: true, honoraires: true,
   repartition: true, cotraitants: true, calendrier: true,
-  mafCost: false, signatures: true,
+  mafCost: false, illustrations: true, signatures: true,
 };
 
 const DEFAULT_MISSIONS_TEXT = [
@@ -354,9 +441,10 @@ export function buildDefaultTemplate(detailLevel: 'court' | 'detaille' = 'detail
       lineHeight: 1.5,
     },
     layout: {
-      // Les sauts de page entre sections sont la mise en page historique : on ne
-      // les retire que sur demande. Les tableaux, eux, sortent compacts d'office.
-      sectionBreaks: true,
+      // Les sections s'enchaînent sans saut de page forcé (seule la première s'ouvre sur une
+      // page neuve) ; le saut avant chaque section reste un réglage à cocher. Les tableaux,
+      // eux, sortent compacts d'office.
+      sectionBreaks: false,
       tableDensity: 'compact',
       cotraitantIdentity: true,
     },
@@ -452,9 +540,13 @@ function buildIntervenants(mission: FeeDistributionMission, specialties: Proposa
 
 export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): ProposalPdfData {
   let missions: MissionLine[] = [];
+  let tranches: ProposalPdfData['tranches'] = [];
+  let totauxTranches: ProposalPdfData['totauxTranches'] = null;
   try {
     const feeData = JSON.parse(p.fee_distribution || '{}');
     if (Array.isArray(feeData.missions)) {
+      const liste = listeTranches(feeData);
+      const actives = tranchesActives(feeData);
       missions = feeData.missions.map((m: FeeDistributionMission) => ({
         id: m.id,
         designation: m.name || '',
@@ -462,7 +554,13 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
         montantHT: m.amount || 0,
         relPct: m.default_pct || 0,
         intervenants: buildIntervenants(m, p.specialties_list || []),
+        ...(actives ? { trancheId: trancheDeMission(m as { tranche_id?: string }, liste).id } : {}),
       }));
+      if (actives) {
+        tranches = liste.map(t => ({ id: t.id, label: t.label, type: t.type, condition: t.condition ?? '' }));
+        const t = totauxParTranche(feeData);
+        totauxTranches = { ferme: t.ferme, conditionnel: t.conditionnel, global: t.global };
+      }
     }
   } catch {
     // fee_distribution absent or malformed — sections relying on it render empty, not broken
@@ -475,6 +573,7 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
 
   const amount = p.amount || 0;
   const vatRate = p.vat_rate ?? 20;
+  const remise = Math.max(0, Math.round(((p.fee_gross ?? amount) - amount) * 100) / 100);
 
   return {
     reference: p.reference || p.project_code || 'N/A',
@@ -526,13 +625,17 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
     tauxComplexite: p.complexity_rate || 1,
     ratioRehab: p.ratio_rehab || 0,
     ratioExtension: p.ratio_extension || 0,
+    ratioCommentaire: p.ratio_comment || '',
     pctHonorairesBase: p.base_fee_percent || 0,
     pctAvecExe: p.exe_fee_percent || 0,
     pctMissionsComp: p.comp_fee_percent || 0,
     montantHonorairesHT: amount,
+    montantHonorairesBrut: remise > 0 ? amount + remise : amount,
+    remiseHonoraires: remise,
+    partPcSeul: p.mission_scope === 'pc' ? scopeShare('pc', p.scope_share_pct) : null,
     tauxTVA: vatRate,
-    montantTVA: amount * (vatRate / 100),
-    montantTTC: amount * (1 + vatRate / 100),
+    montantTVA: Math.round(amount * vatRate) / 100,
+    montantTTC: Math.round(amount * (100 + vatRate)) / 100,
 
     cotraitants: (p.specialties_list || []).map(s => ({
       specialite: s.specialty_name,
@@ -541,7 +644,9 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
       contactId: s.contact_id || undefined,
     })),
     missions,
-    calendrier: planifierCalendrier(missions),
+    tranches,
+    totauxTranches,
+    calendrier: planifierCalendrierParTranches(missions, tranches, DUREE_MISSION_PAR_DEFAUT_JOURS, parsePlanning(p.planning).items),
     notes: p.notes || '',
 
     agenceNom: settings.agencyName || '',
@@ -628,7 +733,9 @@ export async function exportProposalPdf(
   try {
     paginateFlow(flow);
     const { default: jsPDF } = await import('jspdf');
-    const pdf = new jsPDF('p', 'mm', 'a4');
+    // Compression du devis : flux PDF compressé et pages capturées en JPEG (qualité 0,8) au lieu de
+    // PNG, ce qui divise le poids par 3 à 5 sans perte visible à la lecture.
+    const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
     await pdf.html(flow, {
       x: 0,
       y: 0,
@@ -636,6 +743,7 @@ export async function exportProposalPdf(
       windowWidth: flow.scrollWidth,
       margin: [0, 0, 0, 0],
       autoPaging: 'slice',
+      image: { type: 'jpeg', quality: 0.8 },
     });
 
     const clientLabel = (data.entreprise ? data.nomSociete : data.clientNom) || 'Client';

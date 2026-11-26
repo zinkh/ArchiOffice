@@ -266,6 +266,50 @@ describe('Zoho Invoice', () => {
     expect(pushedLineItems[0].item_id).toBe('item-new');
   });
 
+  it('rapatrie le numéro attribué par Zoho sur une facture sans numéro, et laisse intact celui d\'une facture déjà numérotée', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'inv-nonum', tenant_id: tenantId, description: 'Sans numéro', amount: 100, invoice_number: null, zoho_invoice_id: null },
+      { id: 'inv-num', tenant_id: tenantId, description: 'Numérotée', amount: 200, invoice_number: 'FAC-2026-007', zoho_invoice_id: null },
+    ]);
+
+    const payloads: any[] = [];
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string, body: any) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) return { data: { contact: { contact_id: 'cust-1' } } } as any;
+      if (url.endsWith('/items')) return { data: { item: { item_id: 'item-1' } } } as any;
+      if (url.endsWith('/invoices')) {
+        payloads.push(body);
+        // Zoho répond avec SON numéro : seul celui d'une facture sans numéro local doit être retenu.
+        return { data: { invoice: { invoice_id: `zoho-${payloads.length}`, invoice_number: `ZOHO-${payloads.length}` } } } as any;
+      }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/contacts')) return { data: { contacts: [] } } as any;
+      if (url.endsWith('/items')) return { data: { items: [] } } as any;
+      if (url.endsWith('/invoices')) return { data: { invoices: [] } } as any;
+      return { data: {} } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(2);
+
+    // Aucun numéro n'est envoyé pour la facture sans numéro, celui de l'autre l'est.
+    expect(payloads.filter((p) => p.invoice_number === undefined)).toHaveLength(1);
+    expect(payloads.filter((p) => p.invoice_number === 'FAC-2026-007')).toHaveLength(1);
+
+    const rows = fakeSupabaseAdmin.getTable('invoices');
+    const nonum = rows.find((r: any) => r.id === 'inv-nonum');
+    const num = rows.find((r: any) => r.id === 'inv-num');
+    expect(nonum?.invoice_number).toMatch(/^ZOHO-\d$/);
+    expect(nonum?.zoho_invoice_id).toBeTruthy();
+    expect(num?.invoice_number).toBe('FAC-2026-007');
+    expect(num?.zoho_invoice_id).toBeTruthy();
+  });
+
   it('réutilise un article Zoho déjà existant au lieu d\'en créer un doublon quand le nom correspond exactement', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId, 'admin');

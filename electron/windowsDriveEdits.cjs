@@ -12,7 +12,7 @@ function createWindowsEdits({manifest,agent,vault,changes,lock,noLinks,now=Date.
   if(stopped||busy)return;busy=true;
   try {
    await authorized();const keys=await changes();await authorized();
-   if(!Array.isArray(keys)||keys.length>100||new Set(keys).size!==keys.length||keys.some(k=>!entries.has(k)))throw new Error('Invalid changes');
+   if(!Array.isArray(keys)||keys.length>entries.size||new Set(keys).size!==keys.length||keys.some(k=>!entries.has(k)))throw new Error('Invalid changes');
    const dirty=new Set(keys);for(const key of observed.keys())if(!dirty.has(key))observed.delete(key);
    const candidates=keys.length?[...keys.slice(cursor%keys.length),...keys.slice(0,cursor%keys.length)].slice(0,8):[];cursor+=candidates.length;
    for(const key of candidates) {

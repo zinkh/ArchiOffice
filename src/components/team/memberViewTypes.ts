@@ -13,4 +13,6 @@ export interface MemberViewProps {
   memberRefs: MutableRefObject<Record<string, HTMLElement | null>>;
   onRoleChange: (id: string, role: SystemRole) => void;
   onManagerChange: (id: string, managerId: string) => void;
+  onRevoke: (id: string) => void;
+  onResetPassword: (id: string) => void;
 }

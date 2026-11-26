@@ -123,7 +123,7 @@ export default function DepotSettingsDialog({ projectId, onClose, onSaved }: Pro
 
             <fieldset>
               <legend className="text-[0.6875rem] font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Pièces du dossier proposées au téléchargement</legend>
-              <p className="text-[0.6875rem] mb-2" style={{ color: 'var(--tblr-muted)' }}>Seules les pièces cochées sont visibles depuis le lien. Elles viennent des documents de l’opération.</p>
+              <p className="text-[0.6875rem] mb-2" style={{ color: 'var(--tblr-muted)' }}>Documents complémentaires, visibles par toutes les entreprises depuis leur lien. Les pièces du DCE (onglet Critères) rattachées aux lots d’une entreprise lui sont proposées d’office, sans rien cocher ici.</p>
               {pieces.length === 0 ? (
                 <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Aucun document dans l’opération.</p>
               ) : (

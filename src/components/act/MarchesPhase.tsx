@@ -32,6 +32,8 @@ interface ConsultationLue extends DonneesNegociation {
 interface Props {
   projectId: string;
   projectName: string;
+  /** Photo du projet, pour la page de garde des pièces. */
+  projectImageUrl?: string;
   lots: ProjectLot[];
   contacts: Contact[];
   consultation: ConsultationLue;
@@ -58,7 +60,7 @@ function collecteur(): { sortie: Sortie; fichiers: FichierExporte[] } {
   return { fichiers, sortie: (nom, blob) => { fichiers.push({ nom, blob }); } };
 }
 
-export default function MarchesPhase({ projectId, projectName, lots, contacts, consultation, operation }: Props) {
+export default function MarchesPhase({ projectId, projectName, projectImageUrl, lots, contacts, consultation, operation }: Props) {
   const [marches, setMarches] = useState<MarcheActLu[]>([]);
   const [dpgf, setDpgf] = useState<DPGF | null>(null);
   const [offres, setOffres] = useState<OffreDocument[]>([]);
@@ -170,18 +172,19 @@ export default function MarchesPhase({ projectId, projectName, lots, contacts, c
 
     if (!dpgf) throw new Error('Aucun DPGF dans l\'onglet PRO de l\'affaire : le CCTP et le DPGF du lot n\'ont pas de source.');
     const { sortie, fichiers } = collecteur();
+    const couverture = { imageUrl: projectImageUrl, adresse: operation.adresse, maitreOuvrage: operation.maitreOuvrage, reference: operation.code };
 
     if (piece === 'cctp') {
       const source = filtrerPourExport(dpgf, { lotNumeros: [l.lot.lot_number], batimentCodes: null, phaseCodes: null }, { cctp: true });
       if (source.lots.length === 0) throw new Error(`Le lot ${l.lot.lot_number} est introuvable dans le CCTP.`);
       await exportCctpPdf(source, {
-        projectName: `${projectName} - Lot ${l.lot.lot_number}`, settings, sortie,
+        projectName: `${projectName} - Lot ${l.lot.lot_number}`, settings, sortie, couverture,
         contexte: { operation: projectName, agence: settings.agencyName, adresse: operation.adresse, maitreOuvrage: operation.maitreOuvrage, reference: operation.code },
       });
     } else {
       const { dpgf: doc } = dpgfDuMarche(dpgf, l.lot.lot_number, marche.offre_snapshot);
       if (doc.lots.length === 0) throw new Error(`Le lot ${l.lot.lot_number} est introuvable dans le DPGF.`);
-      await exportDPGFtoPDF(doc, `${projectName} - Lot ${l.lot.lot_number} - ${marche.entreprise_nom}`, 'lot', settings, { avecPrix: true, sortie });
+      await exportDPGFtoPDF(doc, `${projectName} - Lot ${l.lot.lot_number} - ${marche.entreprise_nom}`, 'lot', settings, { avecPrix: true, sortie, couverture });
     }
     if (!fichiers[0]) throw new Error('La pièce n\'a pas pu être produite.');
     return { nom: nom(piece === 'cctp' ? 'CCTP' : 'DPGF'), blob: fichiers[0].blob };

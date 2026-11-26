@@ -6,7 +6,7 @@ import { Toast } from './ui/Toast';
 import { PillTabs } from './ui/PillTabs';
 import { BottomSheet, SheetOption } from './ui/BottomSheet';
 import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
-import { buildDiffusionRecipients } from '../lib/crDiffusion';
+import { buildDiffusionRecipients, type LotIntervenantInput } from '../lib/crDiffusion';
 import { apiFetch, baseFetchJson, SERVER_UNAVAILABLE_CODE } from '../lib/api';
 import { checkAttachment, MAX_ATTACHMENTS } from '../lib/pdfAttachments';
 import { getAccessToken } from '../lib/authToken';
@@ -15,9 +15,10 @@ import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
   IconBuilding, IconTools, IconFileDiff, IconPhoto, IconClipboardList, IconAlertTriangle,
-  IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX, IconChartBar,
+  IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX, IconChartBar, IconPencil,
 } from '@tabler/icons-react';
 import PlanningChantierTab from './chantier/PlanningChantierTab';
+import EntreprisesTab from './chantier/EntreprisesTab';
 import { Project, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
 import ObservationsTable from './ObservationsTable';
 import { SignedImage } from './SignedImage';
@@ -35,6 +36,8 @@ import { cn } from '../lib/utils';
 import type { AgencySettings } from '../lib/proposalExport';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Section } from './chantier/Section';
+import CroquisPanel from './croquis/CroquisPanel';
+import MeetingRecordingPanel from './MeetingRecordingPanel';
 import { DraftInput, parseDays } from './chantier/fields';
 import { upsertById } from '../lib/observationsLocal';
 import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
@@ -111,7 +114,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   const [reviewOpenOnly, setReviewOpenOnly] = useState(false);
   // Lot des observations saisies depuis le compte-rendu (vide = sans lot).
   const [newObsLotId, setNewObsLotId] = useState('');
-  // Option d'export et de diffusion, propre au poste : joindre les anciennes observations restées non levées.
+  // Bâtiment et phase de la prochaine observation : sans choix, ceux du compte-rendu.
+  const [newObsDecoupage, setNewObsDecoupage] = useState<{ batiment_id?: string | null; phase_id?: string | null }>({});  // Option d'export et de diffusion, propre au poste : joindre les anciennes observations restées non levées.
   const [includePrevious, setIncludePrevious] = useState(() => {
     try { return localStorage.getItem('chantier:pdf:previousOpen') === '1'; } catch { return false; }
   });
@@ -121,9 +125,23 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   };
   // Création d'un intervenant depuis le champ « Société » d'une rubrique.
   const [newIntervenant, setNewIntervenant] = useState<{ query: string; noteId: string } | null>(null);
+  // Classement de la présence des intervenants : ordre de la fiche, par entité (groupé), par rôle ou par nom.
+  const [intervenantSort, setIntervenantSort] = useState<'liste' | 'entite' | 'role' | 'nom'>(() => {
+    try {
+      const v = localStorage.getItem('chantier.intervenantSort');
+      return v === 'entite' || v === 'role' || v === 'nom' ? v : 'liste';
+    } catch { return 'liste'; }
+  });
+  const changeIntervenantSort = (v: 'liste' | 'entite' | 'role' | 'nom') => {
+    setIntervenantSort(v);
+    try { localStorage.setItem('chantier.intervenantSort', v); } catch { /* préférence non conservée */ }
+  };
 
   const [reports, setReports] = useState<SiteReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  useEffect(() => { setNewObsDecoupage({}); }, [selectedReportId]);
+  const selectedReportIdRef = useRef(selectedReportId);
+  selectedReportIdRef.current = selectedReportId;
   const [reportObservations, setReportObservations] = useState<Observation[]>([]);
   const [allObservations, setAllObservations] = useState<Observation[]>([]);
   const [reportNotes, setReportNotes] = useState<SiteReportNote[]>([]);
@@ -434,6 +452,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   }, [allObservations, reportObservations]);
   const previousOpenByLot = useMemo(() => groupObservationsByLot(previousOpenObservations, lots_list), [previousOpenObservations, lots_list]);
 
+  // Intervenants des entreprises (onglet Entreprises) : relus à chaque ouverture de la fenêtre, pour
+  // ne jamais proposer une personne retirée ou une adresse corrigée depuis.
+  const [lotIntervenants, setLotIntervenants] = useState<LotIntervenantInput[]>([]);
+
   const diffusionRecipients = useMemo(
     () => buildDiffusionRecipients({
       lots: lots_list,
@@ -441,11 +463,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       contacts,
       observations: reportObservations,
       previousObservations: includePrevious ? previousOpenObservations : [],
+      intervenants: lotIntervenants,
     }),
-    [lots_list, project.stakeholders_list, contacts, reportObservations, includePrevious, previousOpenObservations],
+    [lots_list, project.stakeholders_list, contacts, reportObservations, includePrevious, previousOpenObservations, lotIntervenants],
   );
 
-  const openDiffusion = () => {
+  const openDiffusion = async () => {
     if (!selectedReport) return;
     if (!navigator.onLine) { showToast('La diffusion nécessite une connexion : reconnectez-vous puis réessayez.', 'error'); return; }
     // Une saisie encore en attente de synchronisation n'est pas sur le serveur : le message partirait sans elle.
@@ -455,6 +478,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     }
     setDiffusionResult(null);
     setDiffusionError(null);
+    // Lecture avant l'ouverture : la fenêtre coche tous les destinataires à l'ouverture, une liste qui arrive
+    // après réinitialiserait la sélection de la personne. Table absente ou lecture en échec : liste vide.
+    const lus = await apiFetch<LotIntervenantInput[]>(`/api/projects/${project.id}/lot-intervenants`).catch(() => []);
+    setLotIntervenants(Array.isArray(lus) ? lus : []);
     setDiffusionOpen(true);
   };
 
@@ -469,6 +496,13 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       if (serveur?.statut === 'diffuse') return serveur;
     }
     return undefined;
+  };
+
+  /** Les croquis du compte-rendu, prêts à entrer dans le PDF (une lecture qui échoue n'empêche jamais l'export). */
+  const loadCroquisForExport = async () => {
+    if (!selectedReport) return [];
+    const { loadCroquisExportItems } = await import('../lib/croquisExport');
+    return loadCroquisExportItems({ kind: 'siteReport', id: selectedReport.id, projectId: project.id, pending: selectedReport.pendingSync });
   };
 
   const sendDiffusion = async (contactIds: string[]) => {
@@ -487,7 +521,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined, croquis: await loadCroquisForExport() },
       );
       if (blob.size > MAX_DIFFUSION_PDF_BYTES) {
         setDiffusionError(`Le PDF fait ${(blob.size / 1024 / 1024).toFixed(1)} Mo, la limite d'envoi est de 20 Mo : retirez un document joint ou décochez les photos des rubriques.`);
@@ -807,8 +841,9 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     const body = {
       id, texte: '', statut: 'À faire' as const, type, created_report_id: selectedReportId,
       lot_id: lot?.id || undefined,
-      // Une observation relevée dans un compte-rendu hérite de son bâtiment et de sa phase.
-      batiment_id: selectedReport?.batiment_id || null, phase_id: selectedReport?.phase_id || null,
+      // Bâtiment et phase choisis avant l'ajout, à défaut ceux du compte-rendu.
+      batiment_id: ('batiment_id' in newObsDecoupage ? newObsDecoupage.batiment_id : selectedReport?.batiment_id) || null,
+      phase_id: ('phase_id' in newObsDecoupage ? newObsDecoupage.phase_id : selectedReport?.phase_id) || null,
     };
     // La création ne renvoie pas la jointure du lot : sans elle, l'observation tomberait sous « Sans lot ».
     const lotJoin = lot ? { lot: { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } } : {};
@@ -968,7 +1003,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined, croquis: await loadCroquisForExport() },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -1342,7 +1377,24 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   </div>
 
                   {/* Présence des intervenants (page de garde du CR) */}
-                  <Section id="intervenants" title="Présence des intervenants" icon={IconUsers}>
+                  <Section id="intervenants" title="Présence des intervenants" icon={IconUsers}
+                    action={(project.stakeholders_list || []).length > 1 ? (
+                      <label className="flex items-center gap-2 text-xs text-[var(--tblr-muted)]">
+                        <span className="font-bold uppercase tracking-wider text-[0.6875rem]">Classer par</span>
+                        <select
+                          aria-label="Classement des intervenants"
+                          className="p-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent text-xs text-[var(--tblr-text)]"
+                          value={intervenantSort}
+                          onChange={e => changeIntervenantSort(e.target.value as 'liste' | 'entite' | 'role' | 'nom')}
+                        >
+                          <option value="liste">Ordre de la fiche</option>
+                          <option value="entite">Entité (regroupé)</option>
+                          <option value="role">Rôle</option>
+                          <option value="nom">Nom</option>
+                        </select>
+                      </label>
+                    ) : undefined}
+                  >
                     {(project.stakeholders_list || []).length === 0 && (
                       <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">
                         Aucun intervenant renseigné — ajoutez le groupement (MOA, AMO, MOE, CT, CSPS...) depuis l'onglet Infos de l'affaire.
@@ -1351,13 +1403,38 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-sm">
                         <tbody>
-                          {(project.stakeholders_list || []).map(s => {
+                          {(() => {
+                            // Entité : société du contact, à défaut la mention entre parenthèses du rôle.
+                            const entiteDe = (s: ProjectStakeholder) => {
+                              const contact = s.contact_id ? contacts.find(c => c.id === s.contact_id) : undefined;
+                              return (contact?.company_name || s.role.match(/\(([^)]+)\)\s*$/)?.[1] || '').trim();
+                            };
+                            const cmp = (a: string, b: string) => a.localeCompare(b, 'fr', { sensitivity: 'base' });
+                            const base = (project.stakeholders_list || []).map(s => ({ s, entite: entiteDe(s) }));
+                            const tries = intervenantSort === 'liste' ? base : [...base].sort((x, y) => {
+                              if (intervenantSort === 'nom') return cmp(x.s.name, y.s.name);
+                              if (intervenantSort === 'role') return cmp(x.s.role, y.s.role) || cmp(x.s.name, y.s.name);
+                              // Entité : les sans entité en dernier, puis rôle et nom à l'intérieur du groupe.
+                              if (!x.entite !== !y.entite) return x.entite ? -1 : 1;
+                              return cmp(x.entite, y.entite) || cmp(x.s.role, y.s.role) || cmp(x.s.name, y.s.name);
+                            });
+                            return tries.map(({ s, entite }, i) => {
                             const idx = stakeholderAttendanceIndex(s);
                             const row = idx >= 0 ? selectedReport.attendance![idx] : undefined;
                             const contact = s.contact_id ? contacts.find(c => c.id === s.contact_id) : undefined;
+                            const nouveauGroupe = intervenantSort === 'entite' && (i === 0 || tries[i - 1].entite !== entite);
+                            const taille = nouveauGroupe ? tries.filter(t => t.entite === entite).length : 0;
                             const status: PresenceStatus = row ? (row.status || (row.present ? 'P' : row.excused ? 'AE' : 'ANE')) : 'P';
                             return (
-                              <tr key={s.id} className="border-b border-[var(--tblr-border)] last:border-0">
+                              <React.Fragment key={s.id}>
+                              {nouveauGroupe && (
+                                <tr>
+                                  <th colSpan={2} className="pt-4 pb-1 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] border-b border-[var(--tblr-border)]">
+                                    {entite || 'Sans entité'} <span className="font-normal normal-case tracking-normal">({taille})</span>
+                                  </th>
+                                </tr>
+                              )}
+                              <tr className="border-b border-[var(--tblr-border)] last:border-0">
                                 <td className="py-2 pr-2">
                                   <div className="font-semibold text-[var(--tblr-text)]">{s.role}</div>
                                   <div className="text-xs text-[var(--tblr-muted)]">
@@ -1388,8 +1465,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                   </label>
                                 </td>
                               </tr>
+                              </React.Fragment>
                             );
-                          })}
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>
@@ -1572,6 +1651,19 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   )}
 
                   {/* Rubriques personnalisées (corps administratif du CR) */}
+                  <MeetingRecordingPanel kind="siteReport" parentId={selectedReport.id} onInsert={async (text, id) => {
+                    const report = selectedReport;
+                    const body = {
+                      id, category: 'Notes de réunion', text, note_number: reportNotes.length + 1,
+                      issue_date: report.date, status: 'open' as const,
+                    };
+                    const { queued, data } = await queuedJsonRequest<SiteReportNote>({
+                      entity: 'siteReportNote', id, method: 'POST', url: `/api/reports/${report.id}/notes`, body,
+                    });
+                    const created: SiteReportNote = queued || !data ? { ...body, report_id: report.id } : data;
+                    if (selectedReportIdRef.current === report.id) setReportNotes(prev => [...prev.filter(n => n.id !== id), created]);
+                    db.siteReportNotesCache.put(created).catch(() => {});
+                  }} />
                   <Section id="rubriques"
                     title="Rubriques"
                     icon={IconListDetails}
@@ -1630,6 +1722,13 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           <option value="">Sans lot</option>
                           {lots_list.map(l => <option key={l.id} value={l.id}>{l.lot_number} · {l.lot_title}</option>)}
                         </select>
+                        {/* Invisibles tant que l'affaire n'a ni bâtiment ni phase. */}
+                        <DecoupageSelects
+                          decoupage={decoupage}
+                          batimentId={'batiment_id' in newObsDecoupage ? newObsDecoupage.batiment_id : selectedReport.batiment_id}
+                          phaseId={'phase_id' in newObsDecoupage ? newObsDecoupage.phase_id : selectedReport.phase_id}
+                          onChange={patch => setNewObsDecoupage(prev => ({ ...prev, ...patch }))}
+                          className="contents" />
                         <button type="button" onClick={() => addObservation('observation')}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-xs font-bold transition">
                           <IconPlus size={14} /> Ajouter une observation
@@ -1693,6 +1792,14 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         <DecisionRow key={i} decision={d} onChange={patch => updateDecision(i, patch)} onRemove={() => removeDecision(i)} />
                       ))}
                     </div>
+                  </Section>
+
+                  {/* Croquis : schéma rapide, sur feuille blanche ou par-dessus un plan ou une photo */}
+                  <Section id="croquis" title="Croquis" icon={IconPencil}>
+                    <CroquisPanel
+                      parent={{ kind: 'siteReport', id: selectedReport.id, projectId: project.id, pending: selectedReport.pendingSync }}
+                      readOnly={Boolean(project.archived_at)}
+                    />
                   </Section>
 
                   {/* Reportage photo */}
@@ -1824,94 +1931,6 @@ function MiniStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg bg-[var(--tblr-surface-2)] p-2.5 text-center">
       <p className="text-lg font-bold text-[var(--tblr-text)]">{value}</p>
       <p className="text-[0.6875rem] uppercase tracking-wider text-[var(--tblr-muted)]">{label}</p>
-    </div>
-  );
-}
-
-interface MarcheLu { id: string; lot_numero?: string | null; act_lot_id?: string | null; entreprise_nom?: string | null; type_marche?: string | null; statut?: string | null }
-interface SousTraitantLu { id: string; marche_id: string; nom: string; objet?: string | null }
-
-const normaliserNumeroLot = (v: unknown) => String(v ?? '').trim().toUpperCase().replace(/^0+(?=\d)/, '');
-
-/**
- * Entreprise de chaque lot : la fiche du lot, à défaut l'attribution de l'ACT,
- * à défaut le marché de travaux du lot. Les sous-traitants viennent des marchés (onglet RDT).
- */
-function EntreprisesTab({ projectId, lots_list, observations }: { projectId: string; lots_list: ProjectLot[]; observations: Observation[] }) {
-  const [marches, setMarches] = useState<MarcheLu[]>([]);
-  const [sousTraitants, setSousTraitants] = useState<SousTraitantLu[]>([]);
-  const [attributions, setAttributions] = useState<{ lot_id: string; entreprise_id: string }[]>([]);
-  const [entreprisesAct, setEntreprisesAct] = useState<{ id: string; nom?: string }[]>([]);
-
-  useEffect(() => {
-    let vivant = true;
-    Promise.all([
-      apiFetch<MarcheLu[]>(`/api/marches-entreprises/${projectId}`).catch(() => []),
-      apiFetch<SousTraitantLu[]>(`/api/projects/${projectId}/sous-traitants`).catch(() => []),
-      apiFetch<any>(`/api/projects/${projectId}/act`).catch(() => null),
-    ]).then(([m, st, act]) => {
-      if (!vivant) return;
-      setMarches(Array.isArray(m) ? m : []);
-      setSousTraitants(Array.isArray(st) ? st : []);
-      setAttributions(Array.isArray(act?.consultation?.attributions) ? act.consultation.attributions : []);
-      setEntreprisesAct(Array.isArray(act?.consultation?.entreprises) ? act.consultation.entreprises : []);
-    });
-    return () => { vivant = false; };
-  }, [projectId]);
-
-  const marchesExecutables = marches.filter(m => m.type_marche !== 'accord_cadre' && m.statut !== 'resilie');
-
-  return (
-    <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-      <div className="overflow-x-auto">
-      <table className="min-w-full text-sm">
-        <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
-          <tr>
-            <th className="px-4 py-3 text-left">Lot</th>
-            <th className="px-4 py-3 text-left">Entreprise</th>
-            <th className="px-4 py-3 text-left">Sous-traitants</th>
-            <th className="px-4 py-3 text-center">Observations (total)</th>
-            <th className="px-4 py-3 text-center">À lever (ouvertes)</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[var(--tblr-border)]">
-          {lots_list.map(lot => {
-            const lotObs = observations.filter(o => o.lot_id === lot.id);
-            const openReserves = lotObs.filter(o => o.type === 'reserve' && o.statut !== 'Levée').length;
-            const marchesLot = marchesExecutables.filter(m =>
-              m.act_lot_id === lot.id
-              || (!m.act_lot_id && normaliserNumeroLot(m.lot_numero) !== '' && normaliserNumeroLot(m.lot_numero) === normaliserNumeroLot(lot.lot_number)));
-            const attribution = attributions.find(a => a.lot_id === lot.id);
-            const nomAct = attribution ? entreprisesAct.find(e => e.id === attribution.entreprise_id)?.nom : undefined;
-            const entreprises = [...new Set([
-              lot.contact_name || nomAct || '',
-              ...marchesLot.map(m => m.entreprise_nom || ''),
-            ].map(n => n.trim()).filter(Boolean))];
-            const st = sousTraitants.filter(x => marchesLot.some(m => m.id === x.marche_id));
-            return (
-              <tr key={lot.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors align-top">
-                <td className="px-4 py-3 font-semibold text-[var(--tblr-text)]">{lot.lot_number} — {lot.lot_title}</td>
-                <td className="px-4 py-3 text-[var(--tblr-text)]">
-                  {entreprises.length > 0 ? entreprises.map(n => <div key={n}>{n}</div>) : <span className="text-[var(--tblr-muted)]">—</span>}
-                </td>
-                <td className="px-4 py-3 text-[var(--tblr-muted)]">
-                  {st.length > 0
-                    ? st.map(x => <div key={x.id}>{x.nom}{x.objet ? <span className="text-[0.6875rem]"> · {x.objet}</span> : null}</div>)
-                    : '—'}
-                </td>
-                <td className="px-4 py-3 text-center">{lotObs.length}</td>
-                <td className="px-4 py-3 text-center">
-                  {openReserves > 0 ? <span className="text-red-600 dark:text-red-400 font-bold">{openReserves}</span> : '—'}
-                </td>
-              </tr>
-            );
-          })}
-          {lots_list.length === 0 && (
-            <tr><td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun lot renseigné pour ce projet.</td></tr>
-          )}
-        </tbody>
-      </table>
-      </div>
     </div>
   );
 }

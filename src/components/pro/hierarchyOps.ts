@@ -1,5 +1,6 @@
 import type { Lot, Ligne } from '../../types/dpgf';
 import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
+import { adapterLiensCopie, type ModeLiens } from '../../lib/quantitesLiees';
 import { MAX_ARTICLE_DEPTH, type ParsedRowKey, moveLigneSibling, renumeroterLignes, takeLigneAtPath, insertLigneAtPath, mutateLigneAtPath, recomputeLot } from './treeOps';
 
 export type HierarchySelection = NonNullable<ParsedRowKey>;
@@ -178,15 +179,34 @@ export function promoteHierarchy<L extends Lot>(lots: L[], s: HierarchySelection
   return { lots: lots.map((l, i) => i === s.lotIdx ? renumber({ ...lot, chapitres: chapters }) : l), selection };
 }
 
-/** Copie profonde : aucun identifiant ni référence d'offre ne doit être partagé. */
-export function duplicateHierarchy<L extends Lot>(lots: L[], s: HierarchySelection, newId: () => string): { lots: L[]; selection: HierarchySelection } {
+/** L'élément (lot, chapitre ou article) que désigne une sélection, ou `undefined`. */
+export function noeudSelectionne(lots: readonly Lot[], s: HierarchySelection): unknown {
+  const lot = lots[s.lotIdx];
+  if (!lot) return undefined;
+  if (s.kind === 'lot') return lot;
+  const chapitre = lot.chapitres[s.chapIdx];
+  if (!chapitre) return undefined;
+  return s.kind === 'chapitre' ? chapitre : ligneAtPath(chapitre.lignes, s.lignePath);
+}
+
+/**
+ * Copie profonde : aucun identifiant ni référence d'offre ne doit être partagé. Les liens de quantité des copies
+ * suivent `liens` (voir `ModeLiens`) : par défaut, un lien vers un article copié aussi suit la copie et un lien
+ * vers un article resté en place est gardé.
+ */
+export function duplicateHierarchy<L extends Lot>(lots: L[], s: HierarchySelection, newId: () => string, liens: ModeLiens = 'tout'): { lots: L[]; selection: HierarchySelection } {
   function cloneNode<T extends { id: string }>(node: T): T {
     const copy = JSON.parse(JSON.stringify(node));
+    const correspondance = new Map<string, string>();
     const visit = (n: any) => {
+      const ancien = n.id;
       n.id = newId(); delete n.refBpu;
+      correspondance.set(ancien, n.id);
       for (const key of ['chapitres', 'lignes', 'children']) n[key]?.forEach(visit);
     };
-    visit(copy); return copy;
+    visit(copy);
+    adapterLiensCopie([copy], correspondance, liens);
+    return copy;
   }
   const lot = lots[s.lotIdx];
   if (!lot) return { lots, selection: s };

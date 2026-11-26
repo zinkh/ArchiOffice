@@ -187,7 +187,10 @@ export function SituationDialog({
     enregistre.current = signature(form, lignes);
     await onDownload(saved);
   });
-  const changerEtat = (etat: 'Brouillon' | 'Payée') => action(etat, async () => { await onSave(situation.id, { etat }); });
+  const [datePaiement, setDatePaiement] = useState(() => s(situation.date_paiement).slice(0, 10) || today());
+  const changerEtat = (etat: 'Brouillon' | 'Payée') => action(etat, async () => {
+    await onSave(situation.id, etat === 'Payée' ? { etat, date_paiement: datePaiement || today() } : { etat });
+  });
   const supprimer = () => action('delete', async () => { if (await onDelete(situation)) onClose(); });
 
   const id = (k: string) => `${uid}-${k}`;
@@ -232,9 +235,18 @@ export function SituationDialog({
                 <IconArrowBackUp size={14} /> {t('situations_travaux_reopen')}
               </button>
               {situation.etat !== 'Payée' && (
-                <button type="button" className={boutonSecondaire} onClick={() => changerEtat('Payée')} disabled={!!busy}>
-                  <IconCash size={14} /> {t('situations_travaux_mark_paid')}
-                </button>
+                <>
+                  <label className="inline-flex items-center gap-1.5 text-xs">
+                    <span>Payée le</span>
+                    <input type="date" className={inputClass + ' !w-auto'} value={datePaiement} onChange={(e) => setDatePaiement(e.target.value)} aria-label="Date de paiement" />
+                  </label>
+                  <button type="button" className={boutonSecondaire} onClick={() => changerEtat('Payée')} disabled={!!busy}>
+                    <IconCash size={14} /> {t('situations_travaux_mark_paid')}
+                  </button>
+                </>
+              )}
+              {situation.etat === 'Payée' && situation.date_paiement && (
+                <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Payée le {String(situation.date_paiement).slice(0, 10).split('-').reverse().join('/')}</span>
               )}
               <button type="button" className={boutonPrincipal} onClick={() => action('dl', () => onDownload(situation))} disabled={!!busy}>
                 <IconDownload size={14} /> {t('situations_travaux_download_certificate')}

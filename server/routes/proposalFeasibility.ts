@@ -17,7 +17,8 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { fetchWithTimeout } from '../fetchWithTimeout';
-import { mapTileLimiter } from '../rateLimit';
+import { mapTileLimiter, photoUrlLimiter } from '../rateLimit';
+import { resolvePublicUrl } from '../ssrfGuard';
 import { sanitizeIllustrations } from '../../src/lib/feasibilityBlocks';
 import { FEASIBILITY_MAP_LAYERS, type FeasibilityMapLayerId } from '../../src/lib/feasibilityMap';
 import type { FeasibilitySiteData } from '../../src/lib/feasibilityBlocks';
@@ -33,6 +34,51 @@ const MAX_TITLE = 200;
 const MAX_CONTENT = 50_000;
 const MAX_INSTRUCTIONS = 2_000;
 const TILE_TIMEOUT_MS = 10_000;
+const PHOTO_URL_TIMEOUT_MS = 15_000;
+const PHOTO_URL_MAX_BYTES = 25 * 1024 * 1024;
+const PHOTO_URL_MAX_REDIRECTS = 3;
+
+class PhotoUrlError extends Error {
+  constructor(public status: number, message: string) { super(message); }
+}
+
+/**
+ * Télécharge une image publique par son lien. Chaque adresse (y compris celles des
+ * redirections, suivies à la main) est validée par le garde SSRF : jamais de réseau
+ * interne. Taille plafonnée, type image/* exigé.
+ */
+export async function downloadPublicImage(rawUrl: string): Promise<{ buffer: Buffer; contentType: string; name: string }> {
+  let current = rawUrl;
+  for (let hop = 0; hop <= PHOTO_URL_MAX_REDIRECTS; hop++) {
+    const { url } = await resolvePublicUrl(current);
+    const upstream = await fetchWithTimeout(url.toString(), { redirect: 'manual', headers: { Accept: 'image/*' } }, PHOTO_URL_TIMEOUT_MS);
+    if (upstream.status >= 300 && upstream.status < 400) {
+      const location = upstream.headers.get('location');
+      if (!location) throw new PhotoUrlError(502, 'Redirection invalide.');
+      current = new URL(location, url).toString();
+      continue;
+    }
+    if (!upstream.ok) throw new PhotoUrlError(502, `Le site a répondu ${upstream.status}.`);
+    const contentType = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    if (!contentType.startsWith('image/')) throw new PhotoUrlError(415, "Ce lien ne pointe pas vers une image.");
+    const declared = Number(upstream.headers.get('content-length') || 0);
+    if (declared > PHOTO_URL_MAX_BYTES) throw new PhotoUrlError(413, 'Image trop volumineuse.');
+    const reader = upstream.body?.getReader();
+    if (!reader) throw new PhotoUrlError(502, 'Réponse vide.');
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > PHOTO_URL_MAX_BYTES) { await reader.cancel(); throw new PhotoUrlError(413, 'Image trop volumineuse.'); }
+      chunks.push(Buffer.from(value));
+    }
+    const last = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || '');
+    return { buffer: Buffer.concat(chunks), contentType, name: last.slice(0, 120) || 'photo' };
+  }
+  throw new PhotoUrlError(502, 'Trop de redirections.');
+}
 
 /** Adresse du terrain d'une proposition, telle qu'on la géocode. */
 export function proposalTerrainAddress(p: any): string {
@@ -172,7 +218,24 @@ export function registerProposalFeasibilityRoutes(app: Express, { supabaseAdmin,
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Échec de la lecture des données du site." }); }
   });
 
-  app.get("/api/feasibility/map-tile", mapTileLimiter, async (req: any, res: any) => {
+  // Photo par lien : l'image est relayée au navigateur (aucune garantie CORS côté site
+  // d'origine), qui la réduit en JPEG puis la dépose comme n'importe quelle photo.
+  app.get("/api/feasibility/photo-from-url", photoUrlLimiter, async (req: any, res: any) => {
+    try {
+      const raw = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+      if (!raw || raw.length > 2000) return res.status(400).json({ error: 'Lien requis.' });
+      const { buffer, contentType, name } = await downloadPublicImage(raw);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('X-Photo-Name', encodeURIComponent(name));
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.send(buffer);
+    } catch (e: any) {
+      const status = e?.name === 'AbortError' ? 504 : (Number.isInteger(e?.status) ? e.status : 502);
+      res.status(status).json({ error: status === 504 ? 'Le site ne répond pas.' : (e?.message || "Image impossible à récupérer.") });
+    }
+  });
+
+  app.get("/api/feasibility/map-tile",mapTileLimiter, async (req: any, res: any) => {
     try {
       const layerId = String(req.query.layer || '') as FeasibilityMapLayerId;
       const layer = FEASIBILITY_MAP_LAYERS[layerId];

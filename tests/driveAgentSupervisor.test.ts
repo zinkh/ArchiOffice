@@ -65,3 +65,11 @@ it('correlates batched state replies and rejects excessive or duplicate requests
   worker.emit('message',{type:'drive:document-statuses-result',requestId:req.requestId,result:{documents:[{nodeId:'doc:one',state:'retry'}]}});
   expect(await waiting).toEqual({documents:[{nodeId:'doc:one',state:'retry'}]});agent.stop();worker.emit('exit',0);
 });
+it.each(['shellVersions','shellActions'])('cancels twelve %s requests without consuming the shared agent slots',async(action)=>{
+ const worker=child();const agent=createDriveAgent({spawn:()=>worker,executable:'electron',entry:'agent',root:'/cache',origin:'https://www.archioffice.fr',getServer:()=>null});agent.start();
+ for(let i=0;i<12;i++){
+  const controller=new AbortController();const waiting=agent.windowsPreview(action,{nodeId:'doc:'+i},controller.signal);const rejected=expect(waiting).rejects.toMatchObject({code:'ABORT_ERR'});controller.abort();await rejected;
+ }
+ expect(worker.send.mock.calls.filter(([m]:any)=>m.type==='drive:cancel-windows-preview')).toHaveLength(12);
+ const final=agent.windowsPreview(action,{nodeId:'doc:latest'});const request=worker.send.mock.calls.at(-1)[0];worker.emit('message',{type:'drive:working-result',requestId:request.requestId,result:{versions:[]}});expect(await final).toEqual({versions:[]});agent.stop();worker.emit('exit',0);
+});

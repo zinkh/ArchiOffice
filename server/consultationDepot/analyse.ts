@@ -8,7 +8,7 @@
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import { extensionDe } from '../../src/lib/consultationDepot';
-import { parseMontantFr } from '../../src/lib/depotMontants';
+import { extraireMontants, parseMontantFr, type MontantCandidat } from '../../src/lib/depotMontants';
 import { lireEntreeZip } from './fileRules';
 
 const MOTS_MONTANT = /total|montant|prix|forfait|\bh\.?t\b|\bttc\b/i;
@@ -41,6 +41,25 @@ export function texteDeOdt(buffer: Buffer): string | null {
     .replace(/<[^>]+>/g, '')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)));
+}
+
+export const DELAI_LECTURE_MS = 45_000;
+
+export interface ResultatAnalyse { texte_lu: boolean; candidats: MontantCandidat[]; note: string | null }
+
+/**
+ * Lecture complète d'un fichier : texte puis montants probables, avec un délai maximal. Commune aux remises du
+ * portail et aux pièces reçues hors plateforme, pour qu'elles se comportent à l'identique.
+ */
+export async function analyserFichier(nomFichier: string, buffer: Buffer): Promise<ResultatAnalyse> {
+  const texte = await Promise.race([
+    lireTexteDepot(nomFichier, buffer),
+    new Promise<never>((_, rejeter) => setTimeout(() => rejeter(new Error('La lecture du document a dépassé le délai imparti.')), DELAI_LECTURE_MS)),
+  ]);
+  if (!texte) {
+    return { texte_lu: false, candidats: [], note: 'Aucun texte exploitable : le document est peut-être scanné. Ouvrez-le pour lire le montant.' };
+  }
+  return { texte_lu: true, candidats: extraireMontants(texte), note: null };
 }
 
 /** Le texte d'un fichier déposé, ou null s'il n'y en a aucun d'exploitable. */

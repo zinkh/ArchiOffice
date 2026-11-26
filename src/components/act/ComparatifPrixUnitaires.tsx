@@ -3,13 +3,16 @@
 // Une entreprise saisie au total seul reste dans le tableau (colonne hachurée) et
 // dans le classement du lot, sans détail par article. Sous 768 px, une carte par article.
 import React, { useMemo, useState } from 'react';
-import { IconScale, IconDownload } from '@tabler/icons-react';
+import { IconScale, IconDownload, IconAlertTriangle } from '@tabler/icons-react';
 import type { ProjectLot } from '../../types';
 import type { Lot, OffreDocument } from '../../types/dpgf';
 import {
-  construireLot, ecartPct, eur0, eur2, ligneEnEcart, niveauEcart, pctFr,
+  ecartPct, eur0, eur2, ligneEnEcart, niveauEcart, pctFr,
   type EntrepriseComparee, type LigneComparee,
 } from '../../lib/comparatifPrix';
+import { LIBELLE_BASE, construireLotQuantites, syntheseEcarts, type BaseQuantites } from '../../lib/quantitesEntreprise';
+import { LIBELLE_CHOIX, reponseAppliquee, type ReponseQuantite } from '../../lib/quantitesConfirmation';
+import { suggererRattachement } from '../../lib/postesAjoutes';
 import { cn } from '../../lib/utils';
 
 interface Props {
@@ -20,7 +23,26 @@ interface Props {
   entreprisesDuLot: (projectLotId: string) => EntrepriseComparee[];
   documentLabel: string;
   onExport?: () => void;
+  /** Base du classement : quantités du maître d'œuvre (sauf acceptées) ou quantités de chaque entreprise. */
+  base?: BaseQuantites;
+  onChangeBase?: (base: BaseQuantites) => void;
+  /** Accepte (ou retire l'acceptation de) la quantité d'une entreprise sur un poste : elle ne modifie que son offre. */
+  onAccepterQuantite?: (lotId: string, entrepriseId: string, ligneId: string, accepte: boolean) => void;
+  /** Réponses des entreprises à la demande « quantités à confirmer » (page de dépôt). */
+  reponses?: Array<ReponseQuantite & { entrepriseId: string }>;
+  /** Applique à l'offre de l'entreprise les réponses qu'elle a données sur ce lot : jamais automatique. */
+  onAppliquerReponses?: (lotId: string, entrepriseId: string) => void;
+  /** Entreprises à qui demander une confirmation, et ouverture de la fenêtre d'envoi. */
+  nbADemander?: number;
+  onDemanderConfirmation?: () => void;
+  /**
+   * Rattache (`ligneId`) ou détache (`null`) des postes ajoutés par une entreprise à un article du document : sa
+   * proposition compte alors sur la ligne de cet article. Ne modifie que l'offre de l'entreprise, jamais le document.
+   */
+  onRattacher?: (lotId: string, changements: ChangementRattachement[]) => Promise<void> | void;
 }
+
+export interface ChangementRattachement { entrepriseId: string; posteId: string; ligneId: string | null }
 
 const HACHURE = { background: 'repeating-linear-gradient(135deg, var(--tblr-surface-2) 0 6px, transparent 6px 12px)' } as const;
 
@@ -36,7 +58,7 @@ function SousPrix({ ligne, pu, montrer }: { ligne: LigneComparee; pu: number; mo
   );
 }
 
-export default function ComparatifPrixUnitaires({ lots, documentLots, offres, entreprisesDuLot, documentLabel, onExport }: Props) {
+export default function ComparatifPrixUnitaires({ lots, documentLots, offres, entreprisesDuLot, documentLabel, onExport, base = 'moe', onChangeBase, onAccepterQuantite, reponses = [], onAppliquerReponses, nbADemander = 0, onDemanderConfirmation, onRattacher }: Props) {
   const lotsComparables = useMemo(
     () => lots.filter(l => documentLots.some(d => d.projectLotId === l.id)),
     [lots, documentLots],
@@ -44,11 +66,12 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
   const [lotChoisi, setLotChoisi] = useState<string | null>(null);
   const [montrer, setMontrer] = useState<'ecart' | 'total'>('ecart');
   const [filtre, setFiltre] = useState(false);
+  const [rattachement, setRattachement] = useState<{ enCours: boolean; erreur: string | null }>({ enCours: false, erreur: null });
 
   const lotId = lotChoisi && lotsComparables.some(l => l.id === lotChoisi) ? lotChoisi : lotsComparables[0]?.id ?? null;
   const lotDoc = documentLots.find(d => d.projectLotId === lotId);
   const entreprises = useMemo(() => (lotId ? entreprisesDuLot(lotId) : []), [lotId, entreprisesDuLot]);
-  const data = useMemo(() => (lotDoc ? construireLot(lotDoc, offres, entreprises) : null), [lotDoc, offres, entreprises]);
+  const data = useMemo(() => (lotDoc ? construireLotQuantites(lotDoc, offres, entreprises, base) : null), [lotDoc, offres, entreprises, base]);
 
   if (lotsComparables.length === 0 || !lotDoc || !data) {
     return (
@@ -67,6 +90,44 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
   const nbLignes = chapitres.reduce((s, c) => s + c.lignes.length, 0);
   const classes = [...entreprises].filter(e => data.rangs[e.id] != null).sort((a, b) => (data.rangs[a.id]! - data.rangs[b.id]!));
 
+  // Postes ajoutés : ceux qui ne sont rattachés à aucun article restent dans leur section, les autres sont sous la
+  // ligne du document qu'ils chiffrent. Le rattachement proposé vient du texte du poste (« poste 3.2 du DPGF »).
+  const lignesLot = data.chapitres.flatMap(c => c.lignes);
+  const libres = data.ajouts.filter(a => !a.articleId);
+  const articlesPourSuggestion = lignesLot.map(l => ({ id: l.id, numero: l.code }));
+  const suggestions: ChangementRattachement[] = libres.flatMap(a => {
+    const ligneId = suggererRattachement(a.titre, articlesPourSuggestion);
+    return ligneId ? [{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId }] : [];
+  });
+  const rattacher = async (changements: ChangementRattachement[]) => {
+    if (!lotId || !onRattacher || changements.length === 0) return;
+    setRattachement({ enCours: true, erreur: null });
+    try {
+      await onRattacher(lotId, changements);
+      setRattachement({ enCours: false, erreur: null });
+    } catch (e: any) {
+      setRattachement({ enCours: false, erreur: e?.message || 'Le rattachement n’a pas pu être enregistré.' });
+    }
+  };
+
+  /** Propositions rattachées à un article, dans la colonne de l'entreprise qui les a faites. */
+  const propositionsCellule = (l: LigneComparee, entrepriseId: string) => {
+    const liste = (l.propositions ?? []).filter(a => a.entrepriseId === entrepriseId);
+    if (liste.length === 0) return null;
+    return liste.map(a => (
+      <span key={a.id} className="mt-1 block rounded px-1.5 py-1 text-left text-[0.6875rem] bg-violet-50 dark:bg-violet-900/20 text-violet-900 dark:text-violet-100"
+        title={`Proposition de l'entreprise rattachée à ce poste : ${a.titre}`}>
+        <span className="block font-semibold">Proposition{a.prixUnitaire != null ? ` : ${eur2(a.montant)} €` : ' (pour mémoire)'}</span>
+        <span className="block line-clamp-2">{a.titre}</span>
+        {onRattacher && (
+          <button type="button" disabled={rattachement.enCours}
+            onClick={() => void rattacher([{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId: null }])}
+            className="mt-0.5 underline font-semibold disabled:opacity-50">Détacher</button>
+        )}
+      </span>
+    ));
+  };
+
   const bouton = 'px-3 py-1.5 text-xs font-bold';
   return (
     <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
@@ -80,6 +141,17 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
             <button type="button" aria-pressed={montrer === 'ecart'} onClick={() => setMontrer('ecart')} className={cn(bouton, montrer === 'ecart' ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]' : 'bg-[var(--tblr-surface)]')}>Écart / estimation</button>
             <button type="button" aria-pressed={montrer === 'total'} onClick={() => setMontrer('total')} className={cn(bouton, 'border-l border-[var(--tblr-border)]', montrer === 'total' ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]' : 'bg-[var(--tblr-surface)]')}>Total ligne</button>
           </div>
+          {onChangeBase && (
+            <div className="inline-flex rounded-lg overflow-hidden border border-[var(--tblr-border)]" role="group" aria-label="Base de comparaison des quantités">
+              {(['moe', 'entreprise'] as const).map((b, i) => (
+                <button key={b} type="button" aria-pressed={base === b} onClick={() => onChangeBase(b)}
+                  title={b === 'moe' ? 'Total et classement sur les quantités du maître d\'œuvre, sauf les quantités que vous avez acceptées' : 'Total et classement sur les quantités remises par chaque entreprise'}
+                  className={cn(bouton, i > 0 && 'border-l border-[var(--tblr-border)]', base === b ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]' : 'bg-[var(--tblr-surface)]')}>
+                  {LIBELLE_BASE[b]}
+                </button>
+              ))}
+            </div>
+          )}
           <label className="inline-flex items-center gap-1.5 text-xs">
             <input type="checkbox" checked={filtre} onChange={e => setFiltre(e.target.checked)} /> Écarts supérieurs à 10 % seulement
           </label>
@@ -145,13 +217,21 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                         {entreprises.map(e => {
                           if (e.mode === 'total') return <td key={e.id} className="border-l border-[var(--tblr-border)]" style={HACHURE} aria-hidden="true" />;
                           const pu = l.prix[e.id];
-                          if (pu === null) return <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] italic text-[var(--tblr-muted)]">p.m.<span className="block text-[0.6875rem] not-italic">pour mémoire</span></td>;
-                          if (typeof pu !== 'number') return <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] text-[var(--tblr-muted)]">·</td>;
+                          if (pu === null) return <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] italic text-[var(--tblr-muted)]">p.m.<span className="block text-[0.6875rem] not-italic">pour mémoire</span>{propositionsCellule(l, e.id)}</td>;
+                          if (typeof pu !== 'number') return <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] text-[var(--tblr-muted)]">·{propositionsCellule(l, e.id)}</td>;
                           const meilleur = l.meilleur != null && pu === l.meilleur;
                           return (
                             <td key={e.id} className={cn('px-3 py-2 text-right border-l border-[var(--tblr-border)]', meilleur && 'bg-green-100 dark:bg-green-900/30')}>
                               <span className={cn('font-semibold tabular-nums', meilleur && 'text-green-800 dark:text-green-300')}>{eur2(pu)}</span>
                               <SousPrix ligne={l} pu={pu} montrer={montrer} />
+                              {data.quantitesParLigne[l.id]?.[e.id] != null && (
+                                <span className="block text-[0.6875rem] font-semibold tabular-nums text-amber-700 dark:text-amber-400"
+                                  title={`Quantité de l'entreprise : ${data.quantitesParLigne[l.id][e.id]} au lieu de ${l.quantite} ${l.unite}`}>
+                                  Qté {data.quantitesParLigne[l.id][e.id].toLocaleString('fr-FR')}
+                                  {data.ecarts[e.id]?.find(x => x.ligneId === l.id)?.acceptee ? ' (acceptée)' : ''}
+                                </span>
+                              )}
+                              {propositionsCellule(l, e.id)}
                             </td>
                           );
                         })}
@@ -163,13 +243,49 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                 {nbLignes === 0 && (
                   <tr><td colSpan={nbColonnes} className="px-4 py-6 text-center italic text-[var(--tblr-muted)]">Aucun article avec un écart supérieur à 10 %.</td></tr>
                 )}
-                {data.ajouts.length > 0 && (
+                {libres.length > 0 && (
                   <>
-                    <tr className="bg-violet-50 dark:bg-violet-900/20"><td colSpan={nbColonnes} className="px-3 py-1.5 text-[0.6875rem] font-bold uppercase tracking-wider text-violet-800 dark:text-violet-200">Postes ajoutés par les entreprises</td></tr>
-                    {data.ajouts.map(a => (
+                    <tr className="bg-violet-50 dark:bg-violet-900/20">
+                      <td colSpan={nbColonnes} className="px-3 py-1.5 text-[0.6875rem] font-bold uppercase tracking-wider text-violet-800 dark:text-violet-200">
+                        <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+                          Postes ajoutés par les entreprises
+                          {onRattacher && suggestions.length > 0 && (
+                            <button type="button" disabled={rattachement.enCours} onClick={() => void rattacher(suggestions)}
+                              title={`Rattache les postes qui citent un poste du ${documentLabel} (« poste 3.2 du ${documentLabel} » par exemple)`}
+                              className="normal-case tracking-normal text-xs font-semibold px-2 py-0.5 rounded border border-violet-300 dark:border-violet-700 bg-white dark:bg-zinc-900 disabled:opacity-50">
+                              Rattacher les {suggestions.length} suggestion{suggestions.length > 1 ? 's' : ''}
+                            </button>
+                          )}
+                          {rattachement.erreur && <span role="alert" className="normal-case tracking-normal font-semibold text-red-600 dark:text-red-400">{rattachement.erreur}</span>}
+                        </span>
+                      </td>
+                    </tr>
+                    {libres.map(a => {
+                      const suggeree = suggestions.find(s => s.posteId === a.id)?.ligneId;
+                      const ligneSuggeree = suggeree ? lignesLot.find(l => l.id === suggeree) : undefined;
+                      return (
                       <tr key={a.id}>
                         <td className="px-3 py-2 text-[var(--tblr-muted)] sticky left-0 bg-[var(--tblr-surface)]">{a.code}</td>
-                        <td className="px-3 py-2">{a.titre}<br /><span className="inline-block mt-0.5 text-[0.6875rem] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200">Ajouté par {a.entrepriseNom}</span></td>
+                        <td className="px-3 py-2">{a.titre}<br /><span className="inline-block mt-0.5 text-[0.6875rem] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200">Ajouté par {a.entrepriseNom}</span>
+                          {onRattacher && (
+                            <span className="mt-1 flex flex-wrap items-center gap-2">
+                              <select value="" disabled={rattachement.enCours}
+                                aria-label={`Rattacher « ${a.titre} » à un poste du ${documentLabel}`}
+                                onChange={ev => { if (ev.target.value) void rattacher([{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId: ev.target.value }]); }}
+                                className="max-w-[260px] text-[0.6875rem] rounded border border-[var(--tblr-border)] bg-white dark:bg-zinc-900 px-1 py-0.5 disabled:opacity-50">
+                                <option value="">Rattacher à un poste du {documentLabel}…</option>
+                                {lignesLot.map(l => <option key={l.id} value={l.id}>{l.code} {l.titre.length > 60 ? `${l.titre.slice(0, 60)}…` : l.titre}</option>)}
+                              </select>
+                              {ligneSuggeree && (
+                                <button type="button" disabled={rattachement.enCours}
+                                  onClick={() => void rattacher([{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId: ligneSuggeree.id }])}
+                                  className="text-[0.6875rem] font-semibold underline disabled:opacity-50">
+                                  Rattacher au poste {ligneSuggeree.code}
+                                </button>
+                              )}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-center text-[var(--tblr-muted)]">{a.unite}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{a.quantite}</td>
                         <td className="px-3 py-2 text-right text-[var(--tblr-muted)] bg-[var(--tblr-surface-2)]">·</td>
@@ -182,7 +298,8 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                         ))}
                         <td className="border-l border-[var(--tblr-border)]" />
                       </tr>
-                    ))}
+                      );
+                    })}
                   </>
                 )}
                 <tr className="font-bold border-t-2 border-[var(--tblr-border)]">
@@ -190,7 +307,14 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                   <td className="px-3 py-2">Total du lot HT</td><td /><td />
                   <td className="px-3 py-2 text-right tabular-nums bg-[var(--tblr-surface-2)]">{eur0(data.estimationTotale)}</td>
                   {entreprises.map(e => (
-                    <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] tabular-nums">{data.totaux[e.id] != null ? eur0(data.totaux[e.id]!) : <span className="font-normal text-[var(--tblr-muted)]">·</span>}</td>
+                    <td key={e.id} className="px-3 py-2 text-right border-l border-[var(--tblr-border)] tabular-nums">
+                      {data.totaux[e.id] != null ? eur0(data.totaux[e.id]!) : <span className="font-normal text-[var(--tblr-muted)]">·</span>}
+                      {data.totauxMoe[e.id] != null && data.totauxEntreprise[e.id] != null && Math.abs(data.totauxMoe[e.id]! - data.totauxEntreprise[e.id]!) > 0.005 && (
+                        <span className="block text-[0.6875rem] font-normal text-[var(--tblr-muted)]">
+                          {base === 'moe' ? `sur ses quantités : ${eur0(data.totauxEntreprise[e.id]!)}` : `sur vos quantités : ${eur0(data.totauxMoe[e.id]!)}`}
+                        </span>
+                      )}
+                    </td>
                   ))}
                   <td className="border-l border-[var(--tblr-border)]" />
                 </tr>
@@ -238,6 +362,7 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                       <span className="tabular-nums whitespace-nowrap">
                         <b>{pu === null ? 'p.m.' : typeof pu === 'number' ? eur2(pu) : '·'}</b>
                         {typeof pu === 'number' && ecartPct(pu, l.estimation) != null && <span className="ml-1.5 text-[0.6875rem] text-[var(--tblr-muted)]">{pctFr(ecartPct(pu, l.estimation)!)}</span>}
+                        {data.quantitesParLigne[l.id]?.[e.id] != null && <span className="ml-1.5 text-[0.6875rem] font-semibold text-amber-700 dark:text-amber-400">Qté {data.quantitesParLigne[l.id][e.id].toLocaleString('fr-FR')}</span>}
                       </span>
                     </div>
                   );
@@ -255,7 +380,88 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
             </div>
           </div>
 
+          {enPostes.some(e => (data.ecarts[e.id]?.length ?? 0) > 0) && (
+            <section aria-label="Quantités modifiées par les entreprises" className="px-5 py-4 border-t border-[var(--tblr-border)] space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                <IconAlertTriangle size={14} aria-hidden /> Quantités modifiées par les entreprises
+              </h4>
+              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">
+                Toute différence est signalée, à la virgule près. Le {documentLabel} n'est jamais modifié : accepter une quantité ne change que l'offre de l'entreprise (elle compte alors dans la base « {LIBELLE_BASE.moe} »).
+              </p>
+              {onDemanderConfirmation && nbADemander > 0 && (
+                <button type="button" onClick={onDemanderConfirmation}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-[var(--tblr-border)] hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                  Demander confirmation aux entreprises ({nbADemander})
+                </button>
+              )}
+              {enPostes.filter(e => (data.ecarts[e.id]?.length ?? 0) > 0).map(e => {
+                const liste = data.ecarts[e.id];
+                const synth = syntheseEcarts(liste);
+                const reponsesE = new Map(reponses.filter(r => r.entrepriseId === e.id).map(r => [r.ligneId, r]));
+                const aAppliquer = liste.filter(ec => { const r = reponsesE.get(ec.ligneId); return r && !reponseAppliquee(r, ec.quantiteEntreprise, ec.quantiteMoe); }).length;
+                return (
+                  <details key={e.id} className="rounded-lg border border-[var(--tblr-border)]" open={liste.length <= 6}>
+                    <summary className="cursor-pointer px-3 py-2 text-sm font-semibold flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {e.nom}
+                      <span className="text-xs font-normal text-[var(--tblr-muted)]">
+                        {synth.nombre} quantité{synth.nombre > 1 ? 's' : ''} modifiée{synth.nombre > 1 ? 's' : ''}
+                        {synth.acceptees > 0 ? ` dont ${synth.acceptees} acceptée${synth.acceptees > 1 ? 's' : ''}` : ''}
+                        {' · '}effet sur le lot {synth.impactTotal > 0 ? '+' : ''}{eur0(synth.impactTotal)}
+                        {synth.sansPrix > 0 ? ` (${synth.sansPrix} sans prix)` : ''}
+                      </span>
+                    </summary>
+                    {reponsesE.size > 0 && (
+                      <div className="px-3 py-2 flex flex-wrap items-center gap-3 text-xs border-t border-[var(--tblr-border)]">
+                        <span>{reponsesE.size} réponse{reponsesE.size > 1 ? 's' : ''} de l'entreprise depuis sa page de dépôt{aAppliquer > 0 ? `, ${aAppliquer} à appliquer à son offre` : ', toutes appliquées'}.</span>
+                        {aAppliquer > 0 && lotId && onAppliquerReponses && (
+                          <button type="button" onClick={() => onAppliquerReponses(lotId, e.id)}
+                            className="font-semibold px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Appliquer les réponses</button>
+                        )}
+                      </div>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-[var(--tblr-surface-2)] text-[0.6875rem] uppercase tracking-wider text-[var(--tblr-muted)]">
+                          <tr>
+                            <th className="px-3 py-1.5 text-left">Poste</th>
+                            <th className="px-3 py-1.5 text-right">Qté {documentLabel}</th>
+                            <th className="px-3 py-1.5 text-right">Qté entreprise</th>
+                            <th className="px-3 py-1.5 text-right">Écart</th>
+                            <th className="px-3 py-1.5 text-right">Effet</th>
+                            {reponsesE.size > 0 && <th className="px-3 py-1.5 text-left">Réponse</th>}
+                            <th className="px-3 py-1.5 text-center">Accepter</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[var(--tblr-border)]">
+                          {liste.map(ec => (
+                            <tr key={ec.ligneId}>
+                              <td className="px-3 py-1.5"><span className="text-[var(--tblr-muted)]">{ec.code}</span> {ec.titre}{ec.horsBase && <span className="ml-1.5 text-[0.6875rem] font-bold px-1 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">Hors base</span>}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{ec.quantiteMoe.toLocaleString('fr-FR')} {ec.unite}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{ec.quantiteEntreprise.toLocaleString('fr-FR')} {ec.unite}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{ec.ecart > 0 ? '+' : ''}{ec.ecart.toLocaleString('fr-FR')}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{ec.impact != null ? `${ec.impact > 0 ? '+' : ''}${eur2(ec.impact)} €` : <span className="text-[var(--tblr-muted)]">{ec.horsBase ? 'option' : 'sans prix'}</span>}</td>
+                              {reponsesE.size > 0 && (() => {
+                                const r = reponsesE.get(ec.ligneId);
+                                return <td className="px-3 py-1.5">{r ? `${LIBELLE_CHOIX[r.choix]}${r.choix === 'autre' && typeof r.quantite === 'number' ? ` : ${r.quantite.toLocaleString('fr-FR')} ${ec.unite}` : ''}` : <span className="text-[var(--tblr-muted)]">Sans réponse</span>}</td>;
+                              })()}
+                              <td className="px-3 py-1.5 text-center">
+                                <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={ec.acceptee} disabled={!onAccepterQuantite}
+                                  aria-label={`Accepter la quantité de ${e.nom} pour ${ec.code} ${ec.titre}`}
+                                  onChange={ev => lotId && onAccepterQuantite?.(lotId, e.id, ec.ligneId, ev.target.checked)} />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                );
+              })}
+            </section>
+          )}
+
           <div className="px-5 py-3 border-t border-[var(--tblr-border)] flex flex-wrap gap-x-4 gap-y-1 text-[0.6875rem] text-[var(--tblr-muted)]">
+            <span className="text-amber-700 dark:text-amber-400 font-bold">Qté 80</span><span>quantité différente de celle du {documentLabel}</span>
             <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-100 border border-green-700 mr-1 align-[-1px]" />Prix unitaire le plus bas</span>
             <span><span className="text-red-600 dark:text-red-400 font-bold">+15 %</span> au-dessus de l’estimation</span>
             <span><span className="text-amber-700 dark:text-amber-400 font-bold">-15 %</span> en dessous (offre à vérifier)</span>

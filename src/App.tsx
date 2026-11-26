@@ -16,6 +16,7 @@ import {
 import { GlobalSearch } from './components/GlobalSearch';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { PendingWritesIndicator } from './components/PendingWritesIndicator';
+import { OfflineQueueToast } from './components/OfflineQueueToast';
 import { UpdateBanner } from './components/UpdateBanner';
 import { LocalPhotoCopyBanner } from './components/LocalPhotoCopyBanner';
 import { TenantSuspendedGate } from './components/TenantSuspendedGate';
@@ -29,6 +30,7 @@ import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
 import { Sidebar, SidebarNav, NAV_ITEMS } from './components/Sidebar';
 import { MobileShortcutBar } from './components/MobileShortcutBar';
+import BackgroundSendTray from './components/BackgroundSendTray';
 import { MobileNavDrawer } from './components/MobileNavDrawer';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
@@ -51,6 +53,7 @@ const Team = lazy(() => import('./pages/Team'));
 const Gantt = lazy(() => import('./pages/Gantt'));
 const CalendarPage = lazy(() => import('./pages/Calendar'));
 const Kanban = lazy(() => import('./pages/Kanban'));
+const SharedProjects = lazy(() => import('./pages/SharedProjects'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const Mailbox = lazy(() => import('./pages/Mailbox'));
 const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
@@ -317,6 +320,7 @@ function Header() {
               tous les écrans, y compris téléphone : c'est là qu'elle sert. */}
           <div className="flex mr-2">
             <PendingWritesIndicator />
+            <OfflineQueueToast />
           </div>
 
           {/* Search: state is scoped to the selected practice and user. */}
@@ -581,6 +585,14 @@ function ProtectedLayout() {
     return <Navigate to="/agency-setup" replace />;
   }
 
+  // Confrère invité sur une affaire, sans cabinet à lui : son espace se limite
+  // aux affaires partagées (le serveur refuse tout le reste, voir
+  // server/guestAccessGuard.ts) ; on l'y ramène plutôt que de lui montrer des
+  // écrans qui répondraient tous 403.
+  if (currentUser.system_role === 'guest' && !location.pathname.startsWith('/partages') && !location.pathname.startsWith('/profile')) {
+    return <Navigate to="/partages" replace />;
+  }
+
   // First login for a freshly-created cabinet: send its admin through the
   // Onboarding wizard (company profile, numbering, default templates, team
   // invites) until they finish or skip it — `settings` is null while still
@@ -600,18 +612,47 @@ function ProtectedLayout() {
   // normal, page-level scrolling like every other route.
   const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname) || /^\/agents\/[^/]+\/chat$/.test(location.pathname);
 
+  // Le cadre et <main> sont en `overflow: hidden` sur ces routes : personne ne doit les faire défiler. Mais un
+  // `scrollIntoView` (clic sur un onglet, recherche, repère) remonte jusqu'à eux et les décale, ce qui cache
+  // l'en-tête et laisse un vide en bas jusqu'au rechargement. On les ramène à zéro dès qu'ils bougent.
+  const resetStrayScroll = (e: React.UIEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    if (e.target === el && (el.scrollTop !== 0 || el.scrollLeft !== 0)) { el.scrollTop = 0; el.scrollLeft = 0; }
+  };
+
+  // Même garde-fou pour TOUS les conteneurs `overflow: hidden` en dessous (panneau de la fiche affaire, onglet PRO,
+  // éditeurs) : un `scrollIntoView` les décale aussi, le contenu « monte » sous la barre d'outils et laisse un vide en
+  // bas. Les événements de défilement ne remontent pas : on les écoute en phase de capture. Seuls les conteneurs
+  // réellement `hidden` sont ramenés à zéro ; un conteneur `auto` ou `scroll` défile normalement.
+  const resetHiddenOverflowScroll = (e: React.UIEvent<HTMLElement>) => {
+    const el = e.target;
+    if (!(el instanceof HTMLElement) || el === e.currentTarget) return;
+    if (el.scrollTop === 0 && el.scrollLeft === 0) return;
+    const { overflowX, overflowY } = window.getComputedStyle(el);
+    const masque = (v: string) => v === 'hidden' || v === 'clip';
+    if (masque(overflowX) && masque(overflowY)) { el.scrollTop = 0; el.scrollLeft = 0; }
+  };
+
   return (
     <AgentChatProvider>
     <div
-      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-dvh lg:h-dvh lg:overflow-hidden' : 'min-h-dvh')}
+      // `overflow-x-clip` et non `hidden` : `hidden` fait de cette racine un conteneur de défilement
+      // (l'autre axe passe à `auto`), et tout `position: sticky` de l'application s'y accroche au lieu
+      // de la fenêtre, donc ne colle plus (aperçu de la veille des appels d'offres).
+      className={cn('flex font-sans overflow-x-clip', isFullBleedRoute ? 'min-h-dvh lg:h-dvh lg:overflow-hidden' : 'min-h-dvh')}
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
+      onScroll={isFullBleedRoute ? resetStrayScroll : undefined}
+      onScrollCapture={isFullBleedRoute ? resetHiddenOverflowScroll : undefined}
     >
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 lg:min-h-0">
         <Header />
         <div className="md:hidden"><ProjectTabsBar variant="strip" /></div>
 
-        <main className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 max-w-[1400px] w-full mx-auto'}>
+        <main
+          className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 max-w-[1400px] w-full mx-auto'}
+          onScroll={isFullBleedRoute ? resetStrayScroll : undefined}
+        >
           <Outlet />
         </main>
 
@@ -634,6 +675,9 @@ function ProtectedLayout() {
       {/* Menu de raccourcis mobile — masqué sur les routes plein écran
           (fiche projet, chat d'agent) qui gèrent déjà tout leur espace. */}
       {!isFullBleedRoute && <MobileShortcutBar />}
+
+      {/* Progression des messages envoyés en arrière-plan (fenêtre de message refermée). */}
+      <BackgroundSendTray />
     </div>
     </AgentChatProvider>
   );
@@ -696,6 +740,7 @@ export default function App() {
               <Route path="/gantt" element={<Gantt />} />
               <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/kanban" element={<Kanban />} />
+              <Route path="/partages" element={<SharedProjects />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/mailbox" element={<Mailbox />} />
               <Route path="/templates" element={<ProjectTemplates />} />

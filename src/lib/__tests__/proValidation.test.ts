@@ -26,4 +26,46 @@ describe('validateProDocument', () => {
     expect(codes).toContain('cctp_absent');
     expect(codes).toContain('numero_duplique');
   });
+
+  const codes = (d: DPGF) => validateProDocument(d).filter(i => i.code === 'batiment_absent');
+  const doc2 = (): DPGF => {
+    const d = document();
+    d.batiments = [{ id: 'b1', code: 'A', libelle: 'A', ordre: 1 }, { id: 'b2', code: 'B', libelle: 'B', ordre: 2 }];
+    delete d.lots[0].batimentId;
+    d.lots[0].chapitres[0].lignes[0].quantiteDetails = undefined;
+    return d;
+  };
+
+  it('ne signale pas un article réparti par bâtiment (quantitesBatiments)', () => {
+    const d = doc2();
+    Object.assign(d.lots[0].chapitres[0].lignes[0], { quantitesBatiments: { b1: 4, b2: 6 } });
+    expect(codes(d)).toEqual([]);
+  });
+
+  it('ne signale pas un article qui hérite du bâtiment de son parent ou du chapitre', () => {
+    const d = doc2();
+    d.lots[0].chapitres[0].batimentId = 'b2';
+    expect(codes(d)).toEqual([]);
+    d.lots[0].chapitres[0].batimentId = undefined;
+    const parent = d.lots[0].chapitres[0].lignes[0];
+    parent.batimentId = 'b1';
+    parent.children = [{ ...parent, id: 'enfant', numero: '01.1.1.1', children: undefined, batimentId: undefined }];
+    expect(codes(d)).toEqual([]);
+  });
+
+  it('ne signale pas un chapitre ou un lot qui porte une liste de bâtiments', () => {
+    const d = doc2();
+    d.lots[0].batimentsIds = ['b1', 'b2'];
+    expect(codes(d)).toEqual([]);
+  });
+
+  it('signale un article réellement sans bâtiment, sauf s\'il est réservé au CCTP', () => {
+    const d = doc2();
+    expect(codes(d)).toHaveLength(1);
+    d.lots[0].chapitres[0].cctpOnly = true;
+    const issues = validateProDocument(d).map(i => i.code);
+    expect(issues).not.toContain('batiment_absent');
+    expect(issues).not.toContain('unite_absente');
+    expect(issues).not.toContain('quantite_nulle');
+  });
 });

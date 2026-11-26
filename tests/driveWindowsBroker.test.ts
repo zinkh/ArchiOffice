@@ -35,3 +35,21 @@ it('does not spawn or create a mount when disabled or the initial authorization 
  config.vault.mockRejectedValue(new Error('expired'));const denied=createWindowsPreview(config);await expect(denied.start('p')).rejects.toThrow();expect(config.spawn).not.toHaveBeenCalled();
  await expect(fs.stat(config.root)).rejects.toMatchObject({code:'ENOENT'});
 });
+it('reads native availability by opaque key without requesting file content and rechecks the vault',async()=>{
+ child.stdin.on('data',(data:Buffer)=>{for(const line of data.toString().trim().split('\n')){const msg=JSON.parse(line);if(msg.type==='availability')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'availability',requestId:msg.requestId,files:[{key:'a'.repeat(64),available:true}]})+'\n'));}});
+ const preview=createWindowsPreview(config);try{
+  await preview.start('p');expect(await preview.availability()).toEqual([{key:'a'.repeat(64),available:true}]);
+  expect(config.agent.windowsPreview.mock.calls.map((args:any)=>args[0])).toEqual(['catalog']);
+  config.vault.mockRejectedValue(new Error('revoked'));await expect(preview.availability()).rejects.toThrow('revoked');
+ }finally{preview.stop();}
+});
+it('rejects a malformed native availability result without presenting it as offline-ready',async()=>{
+ child.stdin.on('data',(data:Buffer)=>{for(const line of data.toString().trim().split('\n')){const msg=JSON.parse(line);if(msg.type==='availability')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'availability',requestId:msg.requestId,files:[{key:'a'.repeat(64),available:'yes'}]})+'\n'));}});
+ const preview=createWindowsPreview(config);try{await preview.start('p');await expect(preview.availability()).rejects.toThrow();}finally{preview.stop();}
+});
+
+it('passes 1001 document identities to the native provider without a document-count ceiling',async()=>{
+ const entries=Array.from({length:1001},(_,i)=>({path:'_Projet\\_Plan'+i+'.pdf',key:hash('doc:'+i),folder:false,size:5,meta:{...meta,nodeId:'doc:d'+i}}));
+ config.agent.windowsPreview.mockResolvedValue({identity,entries:[{path:'_Projet',key:hash('folder'),folder:true,size:0},...entries]});
+ const preview=createWindowsPreview(config);try{await preview.start('p');expect(frames.find(f=>f.type==='init').entries).toHaveLength(1002);}finally{preview.stop();}
+});

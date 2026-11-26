@@ -166,3 +166,59 @@ describe('observations multi-lots, TCE et anciennes observations', () => {
     expect(r.previousObservations).toEqual([]);
   });
 });
+
+describe('buildDiffusionRecipients : intervenants des entreprises', () => {
+  const contacts = [contact('c1', { company_name: 'Maçonnerie Durand', email: 'durand@ent.test' })];
+  const lots = [lot('l1', '02', 'Gros œuvre', 'c1'), lot('l2', '03', 'Charpente')];
+  const iv = (id: string, lot_id: string, nom: string, email: string | null, role = 'Chef de chantier') =>
+    ({ id, lot_id, entreprise: 'HCT', nom, role, email });
+
+  it("ajoute chaque intervenant avec une adresse, avec les observations de SON lot", () => {
+    const recipients = buildDiffusionRecipients({
+      lots, stakeholders: [], contacts,
+      observations: [obs('o1', { lot_id: 'l1' }), obs('o2', { lot_id: 'l2' })],
+      intervenants: [iv('i1', 'l2', 'Léa Roux', 'lea@hct.test', 'Conducteur de travaux')],
+    });
+    const lea = recipients.find(r => r.contactId === 'intervenant:i1')!;
+    expect(lea).toMatchObject({ name: 'Léa Roux', email: 'lea@hct.test' });
+    expect(lea.roles).toEqual(['Conducteur de travaux', 'HCT', 'Lot 03 Charpente']);
+    expect(lea.observations.map(o => o.id)).toEqual(['o2']);
+    expect(recipients.find(r => r.contactId === 'c1')!.observations.map(o => o.id)).toEqual(['o1']);
+  });
+
+  it("n'écrit qu'un message à une personne présente sur plusieurs lots, avec les observations des deux", () => {
+    const recipients = buildDiffusionRecipients({
+      lots, stakeholders: [], contacts,
+      observations: [obs('o1', { lot_id: 'l1', number: 1 }), obs('o2', { lot_id: 'l2', number: 2 })],
+      intervenants: [iv('i1', 'l1', 'Léa Roux', 'Lea@HCT.test'), iv('i2', 'l2', 'Léa Roux', 'lea@hct.test')],
+    });
+    const personnes = recipients.filter(r => r.contactId.startsWith('intervenant:'));
+    expect(personnes).toHaveLength(1);
+    expect(personnes[0].observations.map(o => o.id)).toEqual(['o1', 'o2']);
+  });
+
+  it("ne double pas une adresse déjà celle d'un destinataire issu d'une fiche contact", () => {
+    const recipients = buildDiffusionRecipients({
+      lots, stakeholders: [], contacts, observations: [],
+      intervenants: [iv('i1', 'l1', 'Paul Durand', 'DURAND@ent.test')],
+    });
+    expect(recipients.map(r => r.contactId)).toEqual(['c1']);
+  });
+
+  it('liste une personne sans adresse valable comme non joignable, et ignore un lot disparu', () => {
+    const recipients = buildDiffusionRecipients({
+      lots, stakeholders: [], contacts, observations: [],
+      intervenants: [iv('i1', 'l1', 'Sans mail', null), iv('i2', 'l1', 'Mail piégé', 'a@b.fr\nBcc: x@y.fr'), iv('i3', 'l-supprime', 'Orphelin', 'o@hct.test')],
+    });
+    const personnes = recipients.filter(r => r.contactId.startsWith('intervenant:'));
+    expect(personnes.map(r => [r.name, r.email])).toEqual([['Sans mail', ''], ['Mail piégé', '']]);
+  });
+
+  it("une observation TCE atteint aussi les intervenants d'un lot", () => {
+    const recipients = buildDiffusionRecipients({
+      lots, stakeholders: [], contacts, observations: [obs('o1', { tce: true })],
+      intervenants: [iv('i1', 'l2', 'Léa Roux', 'lea@hct.test')],
+    });
+    expect(recipients.find(r => r.contactId === 'intervenant:i1')!.observations.map(o => o.id)).toEqual(['o1']);
+  });
+});

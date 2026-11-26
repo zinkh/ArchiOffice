@@ -19,7 +19,7 @@ export interface RouteDeps {
 // tenant member, not just admins, and these columns hold live SMTP/OAuth/API
 // credentials in plaintext.
 const SECRET_COLS = new Set([
-  'smtp_pass', 'zoho_client_secret', 'zoho_refresh_token', 'zoho_books_refresh_token', 'ragic_api_key',
+  'smtp_pass', 'zoho_client_secret', 'zoho_refresh_token', 'zoho_books_refresh_token', 'zoho_sign_refresh_token', 'docuseal_api_key', 'firma_workspace_api_key', 'ragic_api_key',
   'odoo_api_key', 'superpdp_client_secret', 'chorus_pro_piste_client_secret',
   'chorus_pro_technical_password',
 ]);
@@ -56,6 +56,7 @@ const toSnake: Record<string, string> = {
   architectName: 'architect_name', oaNumber: 'oa_number',
   notificationArchiveDays: 'notification_archive_days',
   googleContactsSyncCategories: 'google_contacts_sync_categories',
+  carddavSyncCategories: 'carddav_sync_categories',
   mailTriageAgentId: 'mail_triage_agent_id',
   mailInboxDomain: 'mail_inbox_domain',
 };
@@ -126,7 +127,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'architect_name', 'oa_number',
         'notification_archive_days',
         'tender_boamp_enabled', 'tender_ted_enabled',
-        'google_contacts_sync_categories',
+        'google_contacts_sync_categories', 'carddav_sync_categories',
         'mail_triage_agent_id', 'mail_inbox_domain',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits', 'invoice_payment_terms_days', 'archive_retention_years']);

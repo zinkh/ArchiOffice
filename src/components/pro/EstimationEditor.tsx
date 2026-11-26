@@ -8,6 +8,7 @@ import {
 } from '@tabler/icons-react';
 import { DPGF, NATURES_HORS_BASE } from '../../types/dpgf';
 import { evalFormula, parsePrixSaisi, estHorsBase, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling, recomputeLot } from './treeOps';
+import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { appliquerStatutLignes, totauxDocument } from './selectionOps';
 import { StatutBadges } from './StatutBadges';
 import { useProToolbar, type ToolbarMenuEntry } from './toolbar/toolbarState';
@@ -18,7 +19,11 @@ import { sansGlisserPendantSaisie } from './EditableCell';
 import { formatQuantite } from '../../lib/quantiteFormat';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
 import type { CibleRecherche } from '../../lib/proRecherche';
-import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
+import { MetreDialog } from './MetreDialog';
+import { quantitePatch, prixPatch, prixTotalPatch } from '../../lib/quantites';
+import { propagerLiens } from '../../lib/quantitesLiees';
+import { margePatch, vueMarge, tauxMargeDe } from '../../lib/marge';
+import { ligneAtPath } from './hierarchyOps';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,7 +61,7 @@ function destAppend(doc: DPGF, lotIdx: number, chapIdx: number, ligne: import('.
 // Les sous-articles comptent : un parent porte la somme de ses enfants
 // (recomputeLot descend dans l'arbre, la somme à plat les ignorait).
 function recomputeDPGF(dpgf: DPGF): DPGF {
-  const newLots = dpgf.lots.map(lot => recomputeLot(lot));
+  const newLots = propagerLiens(dpgf.lots.map(lot => recomputeLot(lot)));
   const totalHT = newLots.reduce((s, l) => s + l.sousTotal, 0);
   return { ...dpgf, lots: newLots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) };
 }
@@ -68,6 +73,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   showTree: showTreeProp, onToggleTree,
 }) => {
   const { t } = useTranslation();
+  const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
@@ -100,15 +106,23 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   const fmt2 = (n: number) =>
     new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
+  // Les prix enregistrés sont toujours HORS marge. « Avec marge » n'est qu'un affichage : `vue` est une copie
+  // de même structure (mêmes indices) dont les prix sont majorés du taux de chaque article.
+  const avecMarge = !!dpgf.estimationAvecMarge;
+  const vue = vueMarge(dpgf, avecMarge);
+
   // ── Lot-level editing (for Estimation, we mainly edit quantite + prixUnitaire) ──
   const mutateLigne = (lotIdx: number, chapIdx: number, lignePath: number[], patch: Partial<import('../../types/dpgf').Ligne>) => {
     const newDpgf = JSON.parse(JSON.stringify(dpgf)) as DPGF;
     const current = newDpgf.lots[lotIdx].chapitres[chapIdx].lignes;
-    const ligne = { ...current[lignePath[0]], ...patch };
-    if (('quantite' in patch || 'prixUnitaire' in patch) && !('prixTotal' in patch)) {
-      ligne.prixTotal = ligne.quantite * ligne.prixUnitaire;
-    }
-    newDpgf.lots[lotIdx].chapitres[chapIdx].lignes = mutateLigneAtPath(current, lignePath, () => ligne);
+    // On part de l'article visé (et non de celui de premier niveau) : un sous-article garde ses propres valeurs.
+    newDpgf.lots[lotIdx].chapitres[chapIdx].lignes = mutateLigneAtPath(current, lignePath, node => {
+      const ligne = { ...node, ...patch };
+      if (('quantite' in patch || 'prixUnitaire' in patch) && !('prixTotal' in patch)) {
+        ligne.prixTotal = ligne.quantite * ligne.prixUnitaire;
+      }
+      return ligne;
+    });
     onChange(recomputeDPGF(newDpgf));
   };
 
@@ -120,11 +134,21 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
       const li = Number(parts[1]);
       const ci = Number(parts[2]);
       const path = parts.slice(3).join('-').split('.').map(Number);
-      if (field === 'prixUnitaire' || field === 'prixTotal') {
-        // « PM » : l'article est décrit mais son prix n'est pas compté.
-        const saisi = parsePrixSaisi(rawValue);
-        if (saisi.pourMemoire) mutateLigne(li, ci, path, { pourMemoire: true, prixUnitaire: 0, prixTotal: 0 });
-        else mutateLigne(li, ci, path, { [field]: saisi.valeur, pourMemoire: undefined });
+      if (field === 'prixUnitaire' || field === 'prixTotal' || field === 'tauxMarge') {
+        // « PM » : l'article est décrit mais son prix n'est pas compté. Une saisie invalide ne change rien.
+        // Le prix total saisi redonne le prix unitaire (total / quantité) ; le taux de marge est en % du prix de base.
+        const courante = ligneAtPath(dpgf.lots[li]?.chapitres[ci]?.lignes ?? [], path);
+        const patch = !courante ? null
+          : field === 'prixUnitaire' ? prixPatch(courante, rawValue)
+          : field === 'prixTotal' ? prixTotalPatch(courante, rawValue)
+          : margePatch(courante, rawValue);
+        if (patch) mutateLigne(li, ci, path, patch);
+      } else if (field === 'quantite') {
+        // Comme dans le DPGF : un calcul est mémorisé, une saisie invalide ou une quantité qui vient d'un
+        // métré, de bâtiments ou de sous-articles ne change rien (au lieu de mettre 0 ou d'écraser le métré).
+        const courante = ligneAtPath(dpgf.lots[li]?.chapitres[ci]?.lignes ?? [], path);
+        const patch = courante ? quantitePatch(courante, rawValue) : null;
+        if (patch) mutateLigne(li, ci, path, patch);
       } else {
         mutateLigne(li, ci, path, { [field]: evalFormula(rawValue) });
       }
@@ -218,6 +242,14 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
       ],
     },
     {
+      kind: 'segmented', id: 'est-prix', label: t('pro_prices'), value: avecMarge ? 'final' : 'base',
+      onChange: v => onChange({ ...dpgf, estimationAvecMarge: v === 'final' }),
+      options: [
+        { id: 'base', label: t('pro_prices_base') },
+        { id: 'final', label: t('pro_prices_final') },
+      ],
+    },
+    {
       kind: 'menu', id: 'est-tva', label: t('pro_vat_rate', { rate: fmtTaux(dpgf.TVA) }), icon: <IconReceiptTax size={16} />,
       entries: [20, 10, 5.5, 2.1, 0].map(rate => ({
         id: `est-tva-${rate}`, label: `${fmtTaux(rate)} %`, checked: dpgf.TVA === rate, onClick: () => setTVA(rate),
@@ -265,8 +297,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   const showMarge = colSet === 'marge';
 
   // ── Editable number cell ──────────────────────────────────────────────────────
-  const EditNum = ({ rowId, field, value, pm = false }: { rowId: string; field: string; value: number; pm?: boolean }) => {
-    const affiche = field === 'quantite' ? formatQuantite : fmt2;
+  const EditNum = ({ rowId, field, value, pm = false, readOnly = false, hint }: { rowId: string; field: string; value: number; pm?: boolean; readOnly?: boolean; hint?: string }) => {
+    const affiche = field === 'quantite' ? formatQuantite : field === 'tauxMarge' ? fmtTaux : fmt2;
     const isEditing = editCell?.rowId === rowId && editCell?.field === field;
     if (isEditing) {
       return (
@@ -288,8 +320,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
     return (
       <div
         className="text-right font-mono text-sm px-1 cursor-text hover:bg-blue-50 rounded min-h-[22px]"
-        onDoubleClick={() => startEdit(rowId, field, pm ? 'PM' : value)}
-        title="Double-clic pour éditer"
+        onDoubleClick={readOnly ? undefined : () => startEdit(rowId, field, pm ? 'PM' : value)}
+        title={readOnly ? hint : 'Double-clic pour éditer'}
       >
         {pm ? 'PM' : value > 0 ? affiche(value) : ''}
       </div>
@@ -298,10 +330,12 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
 
   // ── Grand totals ──────────────────────────────────────────────────────────────
   // Recalculés depuis les articles, comme dans le DPGF.
-  const totaux = totauxDocument(dpgf.lots, dpgf.TVA);
+  const totaux = totauxDocument(vue.lots, dpgf.TVA);
+  const suffixeMarge = avecMarge ? ` (${t('pro_prices_final').toLowerCase()})` : '';
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
+      {confirmDialog}
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Left tree ──────────────────────────────────────────────────── */}
@@ -387,7 +421,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                 {showQtyPU && <th className="px-2 py-2 text-right w-28">P.U. HT (€)</th>}
                 <th className="px-2 py-2 text-right w-28">Total HT (€)</th>
                 <th className="px-2 py-2 text-right w-28">Total TTC (€)</th>
-                {showMarge && <th className="px-2 py-2 text-right w-24">Marge %</th>}
+                {showMarge && <th className="px-2 py-2 text-right w-24" title={t('pro_margin_hint')}>{t('pro_margin_col')}</th>}
                 <th className="w-8"></th>
               </tr>
             </thead>
@@ -448,9 +482,11 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                       {expandedChaps.has(chap.id) && flattenLignes(chap.lignes).map(({ ligne, path, depth }) => {
                         if (ligne.cctpOnly) return null;
                         const rowId = `ligne-${li}-${ci}-${path.join('.')}`;
-                        const ttc = ligne.prixTotal * (1 + dpgf.TVA / 100);
-                        const margeVal = ligne.prixUnitaire > 0
-                          ? ((ligne.prixUnitaire - (ligne.prixUnitaire * 0.7)) / ligne.prixUnitaire * 100) : 0;
+                        // Les montants affichés viennent de `vue` (marge comprise si demandé) ; les modifications
+                        // partent toujours de `dpgf`, hors marge, aux mêmes indices.
+                        const lv = avecMarge ? (ligneAtPath(vue.lots[li]?.chapitres[ci]?.lignes ?? [], path) ?? ligne) : ligne;
+                        const ttc = lv.prixTotal * (1 + dpgf.TVA / 100);
+                        const aSousArticles = !!ligne.children?.length;
                         return (
                           <tr
                             key={ligne.id}
@@ -478,29 +514,32 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                               <td className="px-1 py-0.5">
                                 {ligne.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{formatQuantite(ligne.quantite)}</span> : (<div className="flex items-center gap-1">
                                   <div className="flex-1"><EditNum rowId={rowId} field="quantite" value={ligne.quantite} /></div>
-                                  <button title="Ventiler par local" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}><IconMapPin size={13} /></button>
+                                  <button title="Détailler le métré" aria-label="Détailler le métré" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}><IconMapPin size={13} /></button>
                                 </div>)}
                               </td>
                             )}
                             {showQtyPU && (
                               <td className="px-1 py-0.5">
-                                <EditNum rowId={rowId} field="prixUnitaire" value={ligne.prixUnitaire} pm={!!ligne.pourMemoire} />
+                                <EditNum rowId={rowId} field="prixUnitaire" value={lv.prixUnitaire} pm={!!ligne.pourMemoire} readOnly={avecMarge} hint={t('pro_prices_final_readonly')} />
                               </td>
                             )}
                             <td className="px-1 py-0.5">
-                              {ligne.quantitesBatiments !== undefined && !ligne.pourMemoire ? <span>{fmt2(ligne.prixTotal)}</span> : <EditNum rowId={rowId} field="prixTotal" value={ligne.prixTotal} pm={!!ligne.pourMemoire} />}
+                              {ligne.quantitesBatiments !== undefined && !ligne.pourMemoire ? <span>{fmt2(lv.prixTotal)}</span> : <EditNum rowId={rowId} field="prixTotal" value={lv.prixTotal} pm={!!ligne.pourMemoire} readOnly={avecMarge} hint={t('pro_prices_final_readonly')} />}
                             </td>
                             <td className="px-2 py-0.5 text-right font-mono text-xs text-zinc-500">
                               {ligne.pourMemoire ? 'PM' : ttc > 0 ? fmt2(ttc) : ''}
                             </td>
                             {showMarge && (
-                              <td className="px-2 py-0.5 text-right text-xs text-zinc-400">
-                                {margeVal > 0 ? `${margeVal.toFixed(1)}%` : ''}
+                              <td className="px-1 py-0.5">
+                                {/* Un article à sous-articles n'a pas de taux propre : la marge se pose sur les sous-articles. */}
+                                <EditNum rowId={rowId} field="tauxMarge" value={tauxMargeDe(ligne)} readOnly={aSousArticles || !!ligne.pourMemoire} hint={t('pro_margin_hint')} />
                               </td>
                             )}
                             <td className="px-1 py-0.5">
                               <button
-                                onClick={() => {
+                                aria-label={t('pro_delete')}
+                                onClick={async () => {
+                                  if (!(await confirmerSuppression(dpgf.lots, [`ligne-${li}-${ci}-${path.join('-')}`]))) return;
                                   const newDpgf = JSON.parse(JSON.stringify(dpgf)) as DPGF;
                                   newDpgf.lots[li].chapitres[ci].lignes = deleteLigneAtPath(chap.lignes, path);
                                   onChange(recomputeDPGF(newDpgf));
@@ -520,7 +559,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
 
               {/* Totaux, recalculés depuis les articles */}
               <tr className="border-t-2" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                <th scope="row" colSpan={showQtyPU ? 5 : 3} className="px-4 py-2 text-left font-bold">{t('pro_total')}</th>
+                <th scope="row" colSpan={showQtyPU ? 5 : 3} className="px-4 py-2 text-left font-bold">{t('pro_total')}{suffixeMarge}</th>
                 <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
                 <td className="px-2 py-2 text-right font-mono font-bold tabular-nums">{formatCurrency(totaux.totalTTC)}</td>
                 {showMarge && <td />}
@@ -549,9 +588,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
       </div>
       {breakdown && (() => {
         const ligne = dpgf.lots[breakdown.lotIdx].chapitres[breakdown.chapIdx].lignes[breakdown.ligneIdx];
-        return <QuantityBreakdownDialog document={dpgf} ligne={ligne} onClose={() => setBreakdown(null)} onSave={details => {
-          const quantite = details.reduce((s, d) => s + Number(d.quantite || 0), 0);
-          mutateLigne(breakdown.lotIdx, breakdown.chapIdx, [breakdown.ligneIdx], { quantiteDetails: details, quantite });
+        return <MetreDialog key={ligne.id} ligne={ligne} onClose={() => setBreakdown(null)} onSave={patch => {
+          mutateLigne(breakdown.lotIdx, breakdown.chapIdx, [breakdown.ligneIdx], patch);
           setBreakdown(null);
         }} />;
       })()}

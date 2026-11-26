@@ -1,3 +1,5 @@
+import type { CroquisScene } from './types/croquis';
+
 export type DocumentPhase = 'ESQ' | 'APS' | 'APD' | 'PC' | 'PRO' | 'DCE' | 'ACT' | 'VISA' | 'DET' | 'AOR' | 'Général';
 
 export interface ProjectPhaseHistoryEntry {
@@ -412,6 +414,14 @@ export interface Project {
   maf_intercalaire?: MafIntercalaire;
   taux_mission?: number;
   part_interet?: number;
+  /** Proposition dont l'affaire est issue (archivée à la conversion) : honoraires, planning, faisabilité et pièces y restent lisibles. */
+  source_proposal_id?: string | null;
+  operation_nature?: string | null;
+  surface_existante?: string | null;
+  surface_rehabilitee?: string | null;
+  is_erp?: boolean | null;
+  parcelles_selection?: string | null;
+  illustrations?: string | null;
 
   // Context fields used by the ProjectDetail overview
   secteur_abf?: string;
@@ -552,7 +562,7 @@ export interface Reserve {
   title: string;
   batiment: string;
   local: string;
-  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE';
+  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE' | 'Pour mémoire';
   lots: string; // JSON stringified array
   entreprises: string; // JSON stringified array
   created_at: string;
@@ -614,7 +624,7 @@ export interface GpaReserve {
   title: string;
   batiment: string;
   local: string;
-  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE';
+  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE' | 'Pour mémoire';
   lots: string; // JSON stringified array
   entreprises: string; // JSON stringified array
   created_at: string;
@@ -698,7 +708,8 @@ export interface TeamMember {
   role: string;
   email: string;
   avatar?: string;
-  system_role: 'admin' | 'manager' | 'pm' | 'user';
+  // `guest` : confrère invité sur une affaire, sans cabinet à lui (server/guestAccessGuard.ts).
+  system_role: 'admin' | 'manager' | 'pm' | 'user' | 'guest';
   manager_id?: string | null;
   senderOption?: 'agency' | 'personal';
   defaultEmailTemplate?: string;
@@ -809,6 +820,10 @@ export interface Tender {
   evaluation_criteria_list?: TenderEvaluationCriterion[];
   archived?: boolean;
   ville_execution?: string;
+  // Adresse du site du chantier (carte, distance et isochrones de l'onglet Aperçu).
+  adresse_terrain?: string | null;
+  site_lat?: number | null;
+  site_lon?: number | null;
   // Enveloppe prévisionnelle des honoraires — saisie manuellement ou
   // recherchée par l'IA dans le DCE (plan Enterprise). Résultat de la
   // consultation, une fois connu : groupement retenu (plusieurs entreprises
@@ -1128,6 +1143,25 @@ export interface ProposalSpecialty {
 }
 
 export interface Proposal {
+  sent_at?: string | null;
+  archived_at?: string | null;
+  archive_reason?: string | null;
+  last_response_at?: string | null;
+  last_reminder_at?: string | null;
+  next_follow_up_at?: string | null;
+  reminder_count?: number;
+  /** Appel de relance téléphonique créé au bout d'un mois sans réponse (journal des appels). */
+  callback_call_id?: string | null;
+  callback_created_at?: string | null;
+  signature_provider?: 'firma' | 'docuseal' | 'zoho' | null;
+  signature_request_id?: string | null;
+  signature_status?: string | null;
+  signature_recipient_email?: string | null;
+  signature_recipient_name?: string | null;
+  signature_sent_at?: string | null;
+  signature_completed_at?: string | null;
+  signature_provider_region?: string | null;
+
   id: string;
   title: string;
   client_id: string;
@@ -1163,6 +1197,8 @@ export interface Proposal {
   surface_parcelle?: string;
   /** JSON (`StoredParcel[]`, voir lib/terrainParcelles) des parcelles cochées sur la carte. */
   parcelles_selection?: string | null;
+  /** Plan et photos insérés dans le document exporté : JSON de `ProposalIllustration[]` (src/lib/proposalIllustrations.ts). */
+  illustrations?: string | null;
   /** L'opération est un ERP. Absent : déduit des champs ERP déjà saisis (`isErpOperation`). */
   is_erp?: boolean | null;
   /** `neuf` ou `rehabilitation` ; absent : déduit (voir lib/proposalSurfaces). */
@@ -1278,12 +1314,24 @@ export interface Proposal {
   construction_cost?: number;
   ratio_rehab?: number;
   ratio_extension?: number;
+  /** Commentaire accompagnant les ratios (€/m²), imprimé dans l'export PDF. */
+  ratio_comment?: string | null;
   complexity_rate?: number;
   base_fee_percent?: number;
   exe_fee_percent?: number;
   comp_fee_percent?: number;
   vat_rate?: number;
   decimal_precision?: number;
+  /** Honoraires bruts avant remise (après périmètre et arrondi) ; `amount` reste le net HT. */
+  fee_gross?: number | null;
+  fee_rounding?: 'none' | 'euro' | 'ten' | 'hundred' | null;
+  discount_mode?: 'percent' | 'amount' | null;
+  discount_value?: number | null;
+  /** Mission complète ou PC seul (part `scope_share_pct` des honoraires de la mission complète). */
+  mission_scope?: 'complete' | 'pc' | null;
+  scope_share_pct?: number | null;
+  /** Planning réglé à la main (JSON, voir src/lib/proposalPlanning.ts). */
+  planning?: string | null;
   /** Créé hors ligne, pas encore parvenu au serveur (voir src/lib/offlineQueue.ts). */
   pendingSync?: boolean;
 }
@@ -1677,6 +1725,36 @@ export interface Meeting {
   pendingSync?: boolean;
 }
 
+// ── Croquis de réunion et de compte-rendu ───────────────────────────────────
+
+/**
+ * Croquis rattaché à une réunion OU à un compte-rendu de chantier (jamais les
+ * deux : contrainte `croquis_one_parent`). Table `croquis`,
+ * `supabase/migrate_croquis.sql`. Les éléments dessinés vivent dans `scene`.
+ */
+export interface Croquis {
+  id: string;
+  tenant_id?: string;
+  project_id?: string | null;
+  meeting_id?: string | null;
+  site_report_id?: string | null;
+  title: string;
+  scene: CroquisScene;
+  /** Référence du fond (plan ou photo) ; absent ou `null` = feuille blanche. */
+  bg_path?: string | null;
+  /** Opacité du fond, de 0,05 à 1. */
+  bg_opacity: number;
+  bg_width?: number | null;
+  bg_height?: number | null;
+  /** Aperçu PNG inséré dans les exports PDF et Word. */
+  preview_path?: string | null;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Posé côté client tant que l'écriture n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+}
+
 /**
  * Catégorie d'une mission du contrat, reprise de la répartition des
  * propositions (`FeeDistributionGrid`, `Proposals.tsx`) pour que les deux
@@ -1693,6 +1771,8 @@ export interface ContratMOEMission {
   pct?: number;
   incluse: boolean;
   category?: ContratMissionCategory;
+  /** Libellé de la tranche (ferme ou conditionnelle) reprise de la proposition, le cas échéant. */
+  tranche?: string;
 }
 
 /**
@@ -1714,6 +1794,12 @@ export interface ContratCotraitant extends ContratMembreTVA {
   specialty?: string;
   fee_pct?: number;
   montant_honoraires?: number;
+  /**
+   * Ce cotraitant est le mandataire du groupement : son logo et ses coordonnées
+   * tiennent l'en-tête principal des documents. Absent chez tous : le mandataire
+   * est le cabinet. Dans le jsonb `cotraitants`, donc sans migration.
+   */
+  mandataire?: boolean;
 }
 
 /**

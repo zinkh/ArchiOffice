@@ -79,6 +79,8 @@ export interface ArticleBibliotheque {
   dtu_code: string | null;
   corps_etat_code: string | null;
   naf_code: string | null;
+  /** Postes associés suggérés à l'insertion (`src/lib/postesAssocies.ts`). */
+  associes?: { articleId: string; coefficient?: number }[];
 }
 
 /** Prix constaté à une date, sans écraser le prix courant de l'article. */

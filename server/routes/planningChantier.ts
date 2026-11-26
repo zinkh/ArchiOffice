@@ -12,12 +12,16 @@
 //   Facturé aux crédits IA du cabinet (réserve → exécute → règle, comme le CCTP).
 import type { Express } from 'express';
 import * as Sentry from '@sentry/node';
+import multer from 'multer';
 import { randomUUID } from 'crypto';
 import { aiGenerationLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { lireTexteDepot } from '../consultationDepot/analyse';
 import {
-  PLANNING_VIDE, estDateIso, planningDepuisReponse, sanitizePlanning, type LotPlanifiable,
+  PLANNING_VIDE, cycleDependances, estDateIso, planningDepuisReponse, sanitizePlanning, type LotPlanifiable,
 } from '../../src/lib/planningChantier';
+import { MAX_FICHIER_PLANNING, SCHEMA_PLANNING_PDF, planningDepuisPdf } from '../../src/lib/planningChantierImport';
+import { construireLegende, couleursParCle } from '../../src/lib/reserveCouleurs';
 import { associerMarches, sourcesPourPlanning, texteSourceLot, type MarcheLigne } from '../planningSources';
 
 export interface RouteDeps {
@@ -83,6 +87,18 @@ const SYSTEM_PROMPT = `Tu es un maître d'œuvre d'exécution (OPC) qui établit
 - les semaines d'arrêt ou de congés ne sont comptées que si les pièces ou les consignes les mentionnent.
 Tu ne fournis que des semaines (1 = semaine de démarrage), jamais de dates. N'invente ni lot ni entreprise : utilise uniquement les numéros de lot fournis, plus « general » pour les tâches communes. Rédige en français.`;
 
+// Import d'un planning en PDF : le texte du document est lu localement, puis le modèle en tire des tâches datées.
+const IMPORT_MIN_CHARS = 40;
+const envoiPdf = multer({ storage: multer.memoryStorage(), defParamCharset: 'utf8', limits: { fileSize: MAX_FICHIER_PLANNING, files: 1 } });
+
+const SYSTEM_PROMPT_IMPORT = `Tu lis le texte extrait d'un planning de chantier en PDF (planning d'une entreprise, planning général de l'OPC, diagramme de Gantt exporté d'un logiciel) et tu en restitues les tâches.
+- Tu ne restitues que ce qui est écrit dans le document : intitulés, dates, avancement, liens entre tâches. Tu n'inventes aucune tâche ni aucune date.
+- Les dates sont rendues au format AAAA-MM-JJ. Si l'année est absente d'une date, utilise celle du document ou, à défaut, celle indiquée dans la consigne, et signale-le dans les remarques. Une date illisible ou ambiguë : n'écris pas la tâche et signale-le dans les remarques.
+- Une tâche sans durée (réception, hors d'eau, remise des clés) est un jalon.
+- Rattache chaque tâche à un lot en utilisant UNIQUEMENT les numéros de lot fournis, ou « general » pour une tâche commune au chantier ou dont le lot n'est pas reconnaissable. N'invente aucun lot.
+- Quand le document indique qu'une tâche suit une autre, renseigne ses prédécesseurs avec les ref des tâches concernées.
+- Les lignes de titre ou de regroupement (nom d'un lot, d'un bâtiment) ne sont pas des tâches. Rédige en français.`;
+
 function parseJsonObject(text: string): unknown {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return null;
@@ -112,7 +128,9 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
       try {
         for (const l of (await chargerLots(tenantId, req.params.projectId, null)).lots) if (l.contact_name) entreprises[l.id] = l.contact_name;
       } catch { /* complément : jamais une raison de refuser la lecture */ }
-      res.json({ available: true, planning: sanitizePlanning((data as any)?.data), updated_at: (data as any)?.updated_at ?? null, entreprises });
+      const { data: reserves } = await tenantScopedFrom(supabaseAdmin, tenantId, 'reserves').select('entreprises, lots').eq('project_id', req.params.projectId);
+      const couleursAor = Object.fromEntries(couleursParCle(construireLegende((reserves as any[]) ?? [])));
+      res.json({ available: true, couleursAor, planning: sanitizePlanning((data as any)?.data), updated_at: (data as any)?.updated_at ?? null, entreprises });
     } catch (error) {
       console.error('[GET /api/projects/:projectId/planning-chantier]', error);
       res.status(500).json({ error: 'Lecture impossible.' });
@@ -123,6 +141,11 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
     try {
       const tenantId = await getTenantId(req.user.id);
       if (!(await projectInTenant(tenantId, req.params.projectId))) return res.status(404).json({ error: 'Opération introuvable.' });
+      // Valider les liens avant assainissement : un cycle ne doit pas disparaître silencieusement.
+      const taches = Array.isArray(req.body?.taches) ? req.body.taches.slice(0, 400).filter((t: any) => t && typeof t.id === 'string').map((t: any) => ({
+        id: t.id, dependencies: Array.isArray(t.dependencies) ? t.dependencies.filter((d: unknown) => typeof d === 'string').slice(0, 400) : [],
+      })) : [];
+      if (cycleDependances(taches)) return res.status(400).json({ error: 'Une tâche ne peut pas dépendre d’elle-même ni former une dépendance circulaire.' });
       const planning = sanitizePlanning(req.body);
       const updatedAt = new Date().toISOString();
       // project_id est la clé primaire et vient d'être vérifié dans le cabinet : le conflit ne peut viser qu'une ligne du cabinet.
@@ -276,6 +299,76 @@ ${JSON.stringify(PLANNING_SCHEMA)}`;
       console.error('[POST /api/projects/:projectId/planning-chantier/generate]', e?.message);
       Sentry.captureException(e, { tags: { feature: 'planning-chantier' } });
       res.status(500).json({ error: 'Échec de la génération du planning : ' + e.message });
+    }
+  });
+
+  // Les fichiers XML (GanttProject, Microsoft Project) sont lus dans le navigateur : seul le PDF a besoin du serveur.
+  // Comme la génération, la route PROPOSE des tâches et n'écrit jamais ; l'architecte les applique à l'écran.
+  app.post('/api/projects/:projectId/planning-chantier/import-pdf', aiGenerationLimiter, (req: any, res: any, next: any) => {
+    envoiPdf.single('file')(req, res, (err: any) => {
+      if (!err) return next();
+      res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Le fichier dépasse 15 Mo.' : 'Fichier illisible.' });
+    });
+  }, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      const project = await projectInTenant(tenantId, projectId);
+      if (!project) return res.status(404).json({ error: 'Opération introuvable.' });
+
+      const fichier = req.file as { originalname: string; buffer: Buffer } | undefined;
+      if (!fichier?.buffer?.length) return res.status(400).json({ error: 'Choisissez un fichier PDF.' });
+      // Contrôle sur les octets : ni le nom ni le type annoncés par le navigateur ne font foi.
+      if (!/\.pdf$/i.test(fichier.originalname) || fichier.buffer.subarray(0, 1024).indexOf('%PDF-') === -1) {
+        return res.status(400).json({ error: 'Ce fichier n’est pas un PDF.' });
+      }
+
+      let texte: string | null = null;
+      try { texte = await lireTexteDepot(fichier.originalname, fichier.buffer); } catch { /* PDF protégé ou corrompu : même réponse qu'un PDF sans texte */ }
+      if (!texte || texte.trim().length < IMPORT_MIN_CHARS) {
+        return res.status(422).json({ error: 'Ce PDF ne contient pas de texte lisible (scan ou image). Exportez le planning au format XML depuis votre logiciel, ou utilisez un PDF généré directement par le logiciel.' });
+      }
+
+      const { lots } = await chargerLots(tenantId, projectId, null);
+      const planifiables: LotPlanifiable[] = lots.slice(0, MAX_LOTS).map(({ id, lot_number, lot_title, contact_name }) => ({ id, lot_number, lot_title, contact_name }));
+      const anneeRepere = typeof project.start_date === 'string' && estDateIso(project.start_date.slice(0, 10)) ? project.start_date.slice(0, 4) : null;
+      const prompt = `Opération : ${project.name || 'sans nom'}${anneeRepere ? ` (travaux prévus à partir de ${anneeRepere})` : ''}.
+Lots de l'opération (numéro : intitulé) :
+${planifiables.length ? planifiables.map(l => `${l.lot_number} : ${l.lot_title}`).join('\n') : 'aucun lot renseigné : tout est « general »'}
+
+Texte du planning (${fichier.originalname}) :
+${texte.slice(0, MAX_SOURCE_CHARS)}
+
+Réponds UNIQUEMENT avec un JSON valide (sans markdown) conforme à ce schéma :
+${JSON.stringify(SCHEMA_PLANNING_PDF)}`;
+
+      const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+      const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
+      const reservedCents = await estimateReserveCents(provider.id, provider.model, Math.ceil((prompt.length + SYSTEM_PROMPT_IMPORT.length) / 4));
+      if (!(await reserveAiCredit(tenantId, reservedCents))) {
+        return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
+      }
+      let result;
+      try {
+        result = await provider.chat({ system: SYSTEM_PROMPT_IMPORT, messages: [{ role: 'user', content: prompt }], timeoutMs: GENERATION_TIMEOUT_MS });
+      } catch (e) {
+        await refundAiCredit(tenantId, reservedCents).catch(() => {});
+        throw e;
+      }
+      await settleAiCredit({
+        tenantId, userId: req.user.id, agentId: null, conversationId: null, endpointType: 'planning_generation',
+        provider: provider.id, model: provider.model, reservedCents,
+        inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens,
+      });
+
+      const importe = planningDepuisPdf(parseJsonObject(result.text), planifiables, randomUUID);
+      if (!importe.taches.length) return res.status(422).json({ error: 'Aucune tâche datée n’a pu être lue dans ce PDF. Un planning au format XML (GanttProject, Microsoft Project) se lit sans approximation.' });
+      res.json(importe);
+    } catch (e: any) {
+      if (e?.code === 'LLM_NOT_CONFIGURED') return res.status(503).json({ error: e.message });
+      console.error('[POST /api/projects/:projectId/planning-chantier/import-pdf]', e?.message);
+      Sentry.captureException(e, { tags: { feature: 'planning-chantier-import' } });
+      res.status(500).json({ error: 'Échec de la lecture du planning : ' + e.message });
     }
   });
 }

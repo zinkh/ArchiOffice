@@ -82,7 +82,7 @@ export function computePartInteret(feeDistributionJson: string | null | undefine
     let sumAmount = 0;
     for (const m of missions) {
       const amt = m.amount ?? 0;
-      const pct = m.percentages?.['architect'] ?? 0;
+      const pct = m.percentages?.['architect'] ?? 100;
       sumWeighted += amt * pct;
       sumAmount += amt;
     }

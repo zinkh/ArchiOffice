@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  IconSearch, IconSend, IconLink, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus,
+  IconSearch, IconSend, IconLink, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus, IconCalendarEvent, IconPhone,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { groupByLot } from '../lib/actExport';
@@ -8,8 +8,7 @@ import {
   type EntrepriseSuivi, type StatutEntreprise, type FiltresEntreprises,
   STATUT_LABELS, STATUT_ORDER, SANS_LOT, MIN_ENTREPRISES_PAR_LOT, FILTRES_VIDES,
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  filtresActifs, nomContact, todayIso, listeAPlat, type Regroupement,
-} from '../lib/actEntreprises';
+  filtresActifs, nomContact, todayIso, listeAPlat, type Regroupement, destinatairesEntreprise, telephoneEntreprise } from '../lib/actEntreprises';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useMailAccounts } from '../hooks/useMailAccounts';
 import type { Contact, ProjectLot } from '../types';
@@ -18,33 +17,80 @@ import { MultiSelectDropdown, type MultiSelectOption } from './MultiSelectDropdo
 import { QualificationBadge } from './QualificationBadge';
 import { resumeQualifications, type Qualification } from '../lib/qualifications';
 import MailComposeModal from './MailComposeModal';
+import type { PieceMarcheGeneree } from '../lib/marchePieces';
+import type { DocumentDce } from '../lib/dceIndices';
+import { MODELE_CORPS, MODELE_SUJET, blocsMessageDce, remplirModele } from '../lib/dceEnvoiMessage';
+import { preparerEnvoiEntreprise, type ContexteEnvoiDce, type PreparationEntreprise } from '../lib/dceEnvoiPreparation';
+import { entreprisesAConvoquer, entreprisesDceAEnvoyer, marquageEnvoi, type ModeEnvoi } from '../lib/dceEnvoiGroupe';
+import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
+import DossierPartageDialog, { type NouveauPartage } from './act/DossierPartageDialog';
+import { ENTETE_DOSSIER_PARTAGE, ENTETE_DOSSIER_PARTAGE_LIENS, type ElementDossierPartage } from '../lib/dossierPartageMail';
+import { aRenotifier, bilanVisite, libelleVisite, visiteNotifiee, type CreneauVisite, type PresenceVisite, type VisiteSite } from '../lib/actVisites';
 
 export type EntrepriseRow = EntrepriseSuivi & { corps_etat_codes?: string[] };
 
 /** Une pièce du DCE, déjà libellée, avec les lots qu'elle concerne. */
 export interface PieceDce {
+  /** Identifiant dans consultation.dce_documents (nécessaire pour un additif). */
+  id?: string;
   libelle: string;
   tous_lots: boolean;
   lots_ids: string[];
+  document_ids?: string[];
+  type_doc?: string;
+}
+
+/** Dossier partagé (zip, document de l'affaire, lien externe) : une pièce du DCE qui ne part jamais en pièce jointe. */
+export interface PartageDce {
+  id: string;
+  libelle: string;
+  tous_lots: boolean;
+  lots_ids: string[];
+  document_ids?: string[];
+  liens_externes?: Array<{ libelle: string; url: string }>;
 }
 
 interface Props {
   projectName: string;
   lots: ProjectLot[];
+  /** Dossiers partagés de la consultation (hors pièces jointes), pour l'envoi du DCE. */
+  dcePartages?: PartageDce[];
+  /** Crée la pièce partagée pour ces lots (vide : tous les lots) et rend son identifiant. */
+  onAjouterPartage?: (partage: NouveauPartage, lotsIds: string[]) => string;
+  onRetirerPartage?: (id: string) => void;
+  /** Un fichier vient d'être déposé dans les documents de l'affaire : relire la liste. */
+  onDocumentDepose?: () => void;
   entreprises: EntrepriseRow[];
+  creneauxVisite?: CreneauVisite[];
+  onChangeCreneaux?: (next: CreneauVisite[]) => void;
+  /** Lieu et consignes de la visite, cités dans le mail d'envoi du DCE et dans la convocation. */
+  visiteSite?: VisiteSite;
+  onChangeVisiteSite?: (next: VisiteSite) => void;
   onChange: (next: EntrepriseRow[]) => void;
   dcePieces: PieceDce[];
+  /** Documents de l'affaire (fichiers et indices des pièces du DCE). */
+  documentsAffaire?: DocumentDce[];
   entrepriseContacts: Contact[];
+  contactsTelephone?: Parameters<typeof telephoneEntreprise>[1];
   corpsEtatOptions: MultiSelectOption[];
   lotOptions: MultiSelectOption[];
   onChangeCorpsEtat: (e: EntrepriseRow, next: string[]) => void;
   onSelectContact: (rowId: string, contact: Contact) => void;
   onCreateContact: (rowId: string, name: string) => void;
+  /** Appelé à la sortie des champs d'adresses : reporte les adresses saisies sur la fiche de l'entreprise. */
+  onSyncEmails?: (e: EntrepriseRow, avant: string[]) => void;
+  /** Appelé à la sortie du champ téléphone : reporte le numéro saisi sur la fiche de l'entreprise. */
+  onSyncTelephone?: (e: EntrepriseRow, numero: string) => void;
   corpsEtatCodesFromContact: (contact: Contact) => string[];
   /** Qualifications des fiches contacts, par identifiant de contact. */
   qualifications?: Record<string, Qualification[]>;
   /** Espace de dépôt des offres : actif (plan, marché privé, stockage externe) ou la raison de son indisponibilité. */
   depot?: { actif: boolean; indisponible?: string };
+  projectId?: string;
+  /** Date limite de remise des offres, rappelée dans le mail avec le lien de dépôt. */
+  depotDeadlineAt?: string | null;
+  /** Génère le RC, le CCAP et le formulaire d'acte d'engagement, joints d'office au mail d'invitation. */
+  genererPiecesMarche?: () => Promise<PieceMarcheGeneree[]>;
   /** Dernière remise à traiter, par identifiant d'entreprise (voir useConsultationDepot). */
   depotRecuLe?: Record<string, string>;
   onInviterDepot?: (entreprise: EntrepriseRow) => void;
@@ -77,56 +123,131 @@ function lireRegroupement(): Regroupement {
 
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('fr-FR') : '');
 
+/**
+ * Téléphone de l'entreprise : la valeur vient de la fiche contact et la saisie y est reportée
+ * à la sortie du champ (jamais à chaque frappe). Sans fiche liée, le champ est grisé.
+ */
+function ChampTelephone({ valeur, nom, disabled, onCommit }: {
+  valeur: string; nom: string; disabled: boolean; onCommit: (numero: string) => void;
+}) {
+  const [saisie, setSaisie] = useState(valeur);
+  return (
+    <label className="mt-1 flex items-center gap-1 px-2 text-[var(--tblr-muted)]">
+      <IconPhone size={12} aria-hidden="true" className="shrink-0" />
+      <input
+        className="min-w-0 flex-1 text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-1.5 py-1 bg-transparent outline-none disabled:opacity-50"
+        type="tel" inputMode="tel" aria-label={`Téléphone de ${nom || "l'entreprise"}`}
+        placeholder={disabled ? 'Choisir une entreprise' : 'Téléphone'}
+        title={disabled ? "Sélectionnez ou créez la fiche de l'entreprise pour saisir son numéro" : 'Enregistré sur la fiche contact'}
+        value={saisie} disabled={disabled}
+        onChange={ev => setSaisie(ev.target.value)}
+        onBlur={() => { if (saisie.trim() && saisie.trim() !== valeur) onCommit(saisie); }}
+      />
+    </label>
+  );
+}
+
 // ── Envoi du DCE par mail ────────────────────────────────────────────────────
 // Les comptes mail ne sont lus qu'à l'ouverture, pas à chaque affichage du tableau.
 
-function DceMailDialog({ projectName, entreprise, lots, pieces, onSent, onClose }: {
+function DceMailDialog({ visite, projectId, depotActif, depotIndisponible, genererPiecesMarche, deadlineAt, projectName, entreprise, lots, pieces, documents, partages, onAjouterPartage, onRetirerPartage, onDocumentDepose, onSent, onClose }: {
+  projectId?: string;
+  visite?: ContexteEnvoiDce['visite'];
+  partages: PartageDce[];
+  onAjouterPartage?: (partage: NouveauPartage, lotsIds: string[]) => string;
+  onRetirerPartage?: (id: string) => void;
+  onDocumentDepose?: () => void;
+  /** Espace de dépôt utilisable : un lien personnel est alors créé et cité dans le message. */
+  depotActif: boolean;
+  depotIndisponible?: string;
+  genererPiecesMarche?: () => Promise<PieceMarcheGeneree[]>;
+  deadlineAt: string | null;
   projectName: string;
   entreprise: EntrepriseRow;
   lots: ProjectLot[];
   pieces: PieceDce[];
-  onSent: () => void;
+  documents: DocumentDce[];
+  onSent: (visiteCitee: boolean) => void;
   onClose: () => void;
 }) {
   const { accounts, loading } = useMailAccounts();
-  if (loading) return null;
 
-  const lotsEntreprise = lots.filter(l => entreprise.lots_ids.includes(l.id));
-  const piecesEntreprise = pieces.filter(p => p.tous_lots || p.lots_ids.some(id => entreprise.lots_ids.includes(id)));
-  const libelleLots = lotsEntreprise.map(l => `Lot ${l.lot_number} — ${l.lot_title}`);
-  const body = [
-    'Bonjour,',
-    '',
-    `Dans le cadre de la consultation des entreprises pour l'opération « ${projectName} », nous vous transmettons le dossier de consultation (DCE)${libelleLots.length ? ` relatif à :\n${libelleLots.map(l => `- ${l}`).join('\n')}` : '.'}`,
-    ...(piecesEntreprise.length ? ['', 'Pièces du dossier :', ...piecesEntreprise.map(p => `- ${p.libelle}`)] : []),
-    '',
-    'Nous restons à votre disposition pour toute précision.',
-    '',
-    'Cordialement,',
-  ].join('\n');
-  const lotsCourts = lotsEntreprise.map(l => `Lot ${l.lot_number}`).join(', ');
+  // Dossier partagé : seuls les éléments ajoutés pendant CE message sont cités et retirables ici ;
+  // les dossiers partagés plus tôt restent visibles sur la page de dépôt sans être redits.
+  const [ajoutes, setAjoutes] = useState<string[]>([]);
+  const [dialogueDossier, setDialogueDossier] = useState(false);
+  const elementsPartages: ElementDossierPartage[] = partages
+    .filter(p => ajoutes.includes(p.id))
+    .map(p => ({ id: p.id, libelle: p.libelle, url: p.liens_externes?.[0]?.url }));
 
+  // Les fichiers du DCE et le tableau d'indices sont joints d'office ; la personne
+  // peut en retirer. Un document illisible n'empêche pas le message : il est signalé.
+  const [prep, setPrep] = useState<PreparationEntreprise | null>(null);
+  useEffect(() => {
+    let vivant = true;
+    const contexte: ContexteEnvoiDce = { projectId, projectName, lots, pieces, documents, genererPiecesMarche, depotActif, depotIndisponible, deadlineAt, visite };
+    preparerEnvoiEntreprise(contexte, entreprise).then(p => { if (vivant) setPrep(p); });
+    return () => { vivant = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  if (loading || !prep) return null;
+
+  // Même modèle que l'envoi groupé (src/lib/dceEnvoiMessage.ts) : le texte ne se tient qu'à un endroit.
+  const blocs = blocsMessageDce(prep.donnees);
+  const body = remplirModele(MODELE_CORPS, blocs);
+  const depotDisponible = !!prep.donnees.lienDepot;
+  const ajouterPartage = (p: NouveauPartage) => {
+    if (!onAjouterPartage) return;
+    const id = onAjouterPartage(p, entreprise.lots_ids);
+    setAjoutes(prev => [...prev, id]);
+    setDialogueDossier(false);
+  };
   return (
-    <MailComposeModal
-      accounts={accounts}
-      initial={{
-        to: entreprise.email || '',
-        subject: `Consultation des entreprises — ${projectName}${lotsCourts ? ` — ${lotsCourts}` : ''}`,
-        body,
-      }}
-      onSent={onSent}
-      onClose={onClose}
-    />
+    <>
+      <MailComposeModal
+        accounts={accounts}
+        initialFiles={prep.fichiers}
+        initial={{
+          to: destinatairesEntreprise(entreprise).join(', '),
+          subject: remplirModele(MODELE_SUJET, blocs),
+          body,
+        }}
+        dossierPartage={onAjouterPartage && projectId ? {
+          elements: elementsPartages,
+          entete: depotDisponible ? ENTETE_DOSSIER_PARTAGE : ENTETE_DOSSIER_PARTAGE_LIENS,
+          ancre: 'Nous restons à votre disposition',
+          avertissement: depotDisponible ? undefined
+            : `L'espace de dépôt n'est pas disponible${depotIndisponible ? ` (${depotIndisponible})` : ''} : seuls les liens externes seront accessibles à l'entreprise. Un fichier ajouté reste dans les documents de l'affaire sans être accessible depuis ce message.`,
+          onOuvrir: () => setDialogueDossier(true),
+          onRetirer: (id: string) => { onRetirerPartage?.(id); setAjoutes(prev => prev.filter(x => x !== id)); },
+        } : undefined}
+        onSent={() => onSent(!!prep.donnees.visite?.assigne)}
+        onClose={onClose}
+      />
+      {dialogueDossier && projectId && (
+        <DossierPartageDialog
+          projectId={projectId}
+          documents={documents}
+          dejaPartages={partages.filter(p => ajoutes.includes(p.id)).flatMap(p => p.document_ids ?? [])}
+          onAjouter={ajouterPartage}
+          onDocumentDepose={() => onDocumentDepose?.()}
+          onClose={() => setDialogueDossier(false)}
+        />
+      )}
+    </>
   );
 }
 
 // ── Tableau ──────────────────────────────────────────────────────────────────
 
 export default function ACTEntreprisesTable({
-  projectName, lots, entreprises, onChange, dcePieces, entrepriseContacts,
-  corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact,
+  projectName, lots, entreprises, onChange, dcePieces, documentsAffaire = [], entrepriseContacts,
+  corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact, onSyncEmails, onSyncTelephone,
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
-  depot, depotRecuLe, onInviterDepot,
+  depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null, genererPiecesMarche,
+  dcePartages = [], onAjouterPartage, onRetirerPartage, onDocumentDepose,
+  creneauxVisite = [], onChangeCreneaux, visiteSite, onChangeVisiteSite,
+  contactsTelephone = entrepriseContacts,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -135,6 +256,12 @@ export default function ACTEntreprisesTable({
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [suggestLotId, setSuggestLotId] = useState<string | null>(null);
   const [mailPour, setMailPour] = useState<string | null>(null);
+  const [groupe, setGroupe] = useState<{ titre: string; mode: ModeEnvoi; ids: string[] } | null>(null);
+  const [visitePour, setVisitePour] = useState<string | null>(null);
+  const boutonVisiteActif = useRef<HTMLButtonElement | null>(null);
+  const fermerVisite = () => { setVisitePour(null); requestAnimationFrame(() => boutonVisiteActif.current?.focus()); };
+  const [nouveauCreneau, setNouveauCreneau] = useState('');
+  const [erreurCreneau, setErreurCreneau] = useState('');
 
   const [clignote, setClignote] = useState<string | null>(null);
   useEffect(() => {
@@ -151,10 +278,35 @@ export default function ACTEntreprisesTable({
     return () => { cancelAnimationFrame(raf); clearTimeout(fin); };
   }, [miseEnAvant]);
 
+  // Adresses de la ligne au moment où l'on entre dans un champ d'adresse : une adresse
+  // corrigée remplace l'ancienne sur la fiche contact (voir completerEmailsContact).
+  const adressesAvant = useRef<Record<string, string[]>>({});
+  const entrerAdresses = (e: EntrepriseRow) => {
+    if (!adressesAvant.current[e.id]) adressesAvant.current[e.id] = destinatairesEntreprise(e);
+  };
+  const quitterAdresses = (e: EntrepriseRow) => {
+    const avant = adressesAvant.current[e.id] ?? [];
+    delete adressesAvant.current[e.id];
+    onSyncEmails?.(e, avant);
+  };
+
   const patch = (id: string, p: Partial<EntrepriseRow>) =>
     onChange(entreprises.map(e => (e.id === id ? { ...e, ...p } : e)));
   const patchMany = (ids: Set<string>, p: (e: EntrepriseRow) => Partial<EntrepriseRow>) =>
     onChange(entreprises.map(e => (ids.has(e.id) ? { ...e, ...p(e) } : e)));
+
+  // L'envoi groupé marque chaque entreprise au fil des envois, depuis une fenêtre qui reste
+  // ouverte pendant plusieurs rendus : on repart toujours de la dernière liste connue.
+  const derniereListe = useRef(entreprises);
+  derniereListe.current = entreprises;
+  const marquerEnvoye = (id: string, mode: ModeEnvoi, creneauCite: boolean) => {
+    const suite = derniereListe.current.map(e => (e.id === id ? { ...e, ...marquageEnvoi(e, mode, today, creneauCite) } : e));
+    derniereListe.current = suite;
+    onChange(suite);
+  };
+  const dceAEnvoyer = useMemo(() => entreprisesDceAEnvoyer(entreprises), [entreprises]);
+  const aConvoquer = useMemo(() => entreprisesAConvoquer(entreprises), [entreprises]);
+  const contexteVisite = useMemo(() => ({ creneaux: creneauxVisite, site: visiteSite }), [creneauxVisite, visiteSite]);
 
   // Lecture seule : la date d'une remise à traiter nourrit le statut affiché,
   // mais `patch` et `onChange` repartent de `entreprises`, jamais de cette vue,
@@ -234,23 +386,44 @@ export default function ACTEntreprisesTable({
         fallbackName={e.nom}
         onSelect={c => onSelectContact(e.id, c)}
         onCreate={name => onCreateContact(e.id, name)}
+        onEditContact={c => window.open(`/contacts?open=${encodeURIComponent(c.id)}`, '_blank', 'noopener,noreferrer')}
       />
+      <div className="flex flex-wrap items-center gap-x-2">
       <input
-        className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
+        className="mt-1 min-w-[9rem] flex-1 text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
         type="email" aria-label="Email de l'entreprise"
         placeholder="email@entreprise.fr" value={e.email || ''}
         onChange={ev => patch(e.id, { email: ev.target.value })}
+        onFocus={() => entrerAdresses(e)}
+        onBlur={() => quitterAdresses(e)}
       />
-      {e.contact_id && (
-        <div className="mt-1 px-1">
-          <QualificationBadge
-            resume={resumeQualifications(qualifications[e.contact_id] || [], today)}
-            liste={qualifications[e.contact_id] || []}
-          />
-        </div>
-      )}
+      </div>
+      <input
+        className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
+        type="text" aria-label="Autres adresses e-mail de l'entreprise"
+        placeholder="Autres adresses (séparées par une virgule)" value={e.emails_supplementaires || ''}
+        onChange={ev => patch(e.id, { emails_supplementaires: ev.target.value })}
+        onFocus={() => entrerAdresses(e)}
+        onBlur={() => quitterAdresses(e)}
+      />
+      <ChampTelephone
+        key={`${e.id}:${telephoneEntreprise(e, contactsTelephone)}`}
+        valeur={telephoneEntreprise(e, contactsTelephone)}
+        nom={e.nom}
+        disabled={!e.contact_id}
+        onCommit={numero => onSyncTelephone?.(e, numero)}
+      />
     </>
   );
+
+  const champQualification = (e: EntrepriseRow) => e.contact_id
+    ? (
+      <QualificationBadge
+        resume={resumeQualifications(qualifications[e.contact_id] || [], today)}
+        liste={qualifications[e.contact_id] || []}
+      />
+    )
+    : <span className="text-[0.6875rem] text-[var(--tblr-muted)]">Aucune fiche</span>;
 
   const champCorps = (e: EntrepriseRow) => (
     <MultiSelectDropdown
@@ -288,6 +461,38 @@ export default function ACTEntreprisesTable({
     );
   };
 
+  const champVisite = (e: EntrepriseRow) => (
+    <div className="space-y-1.5">
+      <select className={cn(FIELD, 'w-full')} aria-label={`Rendez-vous de visite de ${e.nom || "l'entreprise"}`}
+        value={e.visite_creneau_id || ''}
+        onChange={event => patch(e.id, { visite_creneau_id: event.target.value || undefined, visite_presence: event.target.value ? 'prevue' : undefined })}>
+        <option value="">Aucun rendez-vous</option>
+        {e.visite_creneau_id && !creneauxVisite.some(c => c.id === e.visite_creneau_id) && <option value={e.visite_creneau_id}>Créneau indisponible</option>}
+        {[...creneauxVisite].sort((a, b) => a.date_heure.localeCompare(b.date_heure)).map(c => <option key={c.id} value={c.id}>{libelleVisite(c.date_heure)}</option>)}
+      </select>
+      {e.visite_creneau_id && <select className={cn(FIELD, 'w-full')} aria-label={`Présence à la visite de ${e.nom || "l'entreprise"}`}
+        value={e.visite_presence || 'prevue'} onChange={event => patch(e.id, { visite_presence: event.target.value as PresenceVisite })}>
+        <option value="prevue">Prévue</option><option value="confirmee">Confirmée</option><option value="presente">Présente</option><option value="absente">Absente</option>
+      </select>}
+      {e.visite_creneau_id && (aRenotifier(e)
+        ? <p className="text-[0.6875rem] font-semibold text-amber-700 dark:text-amber-300">Créneau modifié : à renotifier</p>
+        : visiteNotifiee(e) && <p className="text-[0.6875rem] text-[var(--tblr-muted)]">Convoquée le {fmtDate(e.visite_convoquee_le)}</p>)}
+    </div>
+  );
+
+  const boutonVisite = (e: EntrepriseRow) => {
+    const creneau = creneauxVisite.find(c => c.id === e.visite_creneau_id);
+    const description = creneau ? libelleVisite(creneau.date_heure) : e.visite_creneau_id ? 'Créneau indisponible' : 'Aucun rendez-vous';
+    const statut = ({ prevue: 'Prévue', confirmee: 'Confirmée', presente: 'Présente', absente: 'Absente' } as const)[e.visite_presence || 'prevue'];
+    return <button type="button" onClick={event => { boutonVisiteActif.current = event.currentTarget; setVisitePour(e.id); }} aria-label={`Gérer la visite de ${e.nom || "l'entreprise"} : ${description}${e.visite_creneau_id ? `, ${statut}` : ''}`}
+      title={`${description}${e.visite_creneau_id ? ` · ${statut}` : ''}`} className={cn('inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--tblr-border)] hover:bg-blue-50 dark:hover:bg-blue-900/20', e.visite_creneau_id ? 'text-blue-700 bg-blue-50 dark:bg-blue-900/20' : 'text-[var(--tblr-muted)]')}>
+      <IconCalendarEvent size={17} aria-hidden="true" /><span className="sr-only">{description}</span>
+    </button>;
+  };
+  const champObservation = (e: EntrepriseRow) => <textarea aria-label={`Observation pour ${e.nom || "l'entreprise"}`} rows={2}
+    className={cn(FIELD, 'w-full min-w-0 resize-y')} placeholder="Ajouter une observation…" value={e.observation || ''}
+    onChange={event => patch(e.id, { observation: event.target.value })} />;
+
   const champStatut = (e: EntrepriseRow) => {
     const statut = statutEntreprise(e, today);
     const coches = [e.envoyer_dce && 'envoyer_dce', e.ne_repond_pas && 'ne_repond_pas'].filter((x): x is string => !!x);
@@ -317,8 +522,8 @@ export default function ACTEntreprisesTable({
         ><IconLink size={14} /></button>
       )}
       <button
-        type="button" onClick={() => setMailPour(e.id)} disabled={!(e.email || '').trim()}
-        title={(e.email || '').trim() ? 'Envoyer le DCE par mail' : "Renseignez l'email pour envoyer le DCE"}
+        type="button" onClick={() => setMailPour(e.id)} disabled={destinatairesEntreprise(e).length === 0}
+        title={destinatairesEntreprise(e).length > 0 ? 'Envoyer le DCE par mail' : "Renseignez l'email pour envoyer le DCE"}
         aria-label={`Envoyer le DCE à ${e.nom || "l'entreprise"}`}
         className="p-1.5 rounded-md text-zinc-400 hover:text-blue-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:text-zinc-400 disabled:hover:bg-transparent"
       ><IconSend size={14} /></button>
@@ -340,12 +545,69 @@ export default function ACTEntreprisesTable({
 
   // ── Rendu ──────────────────────────────────────────────────────────────────
 
-  const nbCols = 7;
+  const nbCols = 9;
   const aucuneEntreprise = entreprises.length === 0;
   const pctOffres = resume.total ? Math.round((resume.parStatut.offre_recue / resume.total) * 100) : 0;
 
   return (
     <div>
+      <section className="px-5 py-4 border-b border-[var(--tblr-border)] space-y-3" aria-label="Créneaux de visites">
+        <div><h3 className="font-semibold text-sm">Créneaux de visites</h3>
+          <p className="text-xs text-[var(--tblr-muted)] mt-1">Créez les rendez-vous, puis affectez les entreprises dans le tableau. Les présences sont comptées après pointage.</p></div>
+        <form className="flex flex-wrap items-end gap-2" onSubmit={event => {
+          event.preventDefault();
+          if (!nouveauCreneau || Number.isNaN(new Date(nouveauCreneau).getTime())) { setErreurCreneau('Indiquez une date et une heure valides.'); return; }
+          if (creneauxVisite.some(c => c.date_heure === nouveauCreneau)) { setErreurCreneau('Ce créneau existe déjà.'); return; }
+          onChangeCreneaux?.([...creneauxVisite, { id: crypto.randomUUID(), date_heure: nouveauCreneau }]);
+          setNouveauCreneau(''); setErreurCreneau('');
+        }}>
+          <label className="text-xs font-medium">Date et heure de visite
+            <input className={cn(FIELD, 'block mt-1 min-h-10')} type="datetime-local" required value={nouveauCreneau} onChange={e => setNouveauCreneau(e.target.value)} />
+          </label>
+          <button type="submit" disabled={!onChangeCreneaux} className="min-h-10 px-3 rounded-lg border border-[var(--tblr-border)] text-sm font-medium">Ajouter le créneau</button>
+        </form>
+        {erreurCreneau && <p role="alert" className="text-sm text-red-600">{erreurCreneau}</p>}
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="text-xs font-medium">Lieu de rendez-vous
+            <input className={cn(FIELD, 'block mt-1 w-full min-h-10')} type="text" placeholder="Adresse, point de rendez-vous"
+              value={visiteSite?.lieu || ''} disabled={!onChangeVisiteSite}
+              onChange={ev => onChangeVisiteSite?.({ ...visiteSite, lieu: ev.target.value })} />
+          </label>
+          <label className="text-xs font-medium">Consignes
+            <input className={cn(FIELD, 'block mt-1 w-full min-h-10')} type="text" placeholder="Équipements de protection, accès, durée…"
+              value={visiteSite?.consignes || ''} disabled={!onChangeVisiteSite}
+              onChange={ev => onChangeVisiteSite?.({ ...visiteSite, consignes: ev.target.value })} />
+          </label>
+        </div>
+        <p className="text-xs text-[var(--tblr-muted)]">Le créneau de chaque entreprise (ou les créneaux proposés), le lieu et les consignes sont cités dans le mail d'envoi du DCE.</p>
+        {entreprises.some(e => e.visite_creneau_id) && (
+          <div className="flex items-center gap-3 flex-wrap">
+            <button type="button" disabled={aConvoquer.length === 0}
+              onClick={() => setGroupe({ titre: 'Convoquer les entreprises à la visite de site', mode: 'visite', ids: entreprises.filter(e => e.visite_creneau_id).map(e => e.id) })}
+              className="inline-flex items-center gap-1 min-h-10 px-3 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+              <IconSend size={14} /> Convoquer à la visite
+            </button>
+            <span className="text-xs text-[var(--tblr-muted)]">
+              {aConvoquer.length === 0 ? 'Toutes les entreprises ont reçu leur créneau.'
+                : `${aConvoquer.length} entreprise${aConvoquer.length > 1 ? 's' : ''} à prévenir (nouveau créneau ou jamais convoquée).`}
+            </span>
+          </div>
+        )}
+        {creneauxVisite.length === 0 ? <p className="text-xs text-[var(--tblr-muted)]">Aucun créneau défini.</p> :
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{[...creneauxVisite].sort((a,b) => a.date_heure.localeCompare(b.date_heure)).map(c => {
+            const bilan = bilanVisite(c.id, entreprises, lots);
+            return <div key={c.id} className="rounded-lg border border-[var(--tblr-border)] p-3 text-xs space-y-1.5">
+              <div className="flex items-start justify-between gap-2"><strong>{libelleVisite(c.date_heure)}</strong>
+                <button type="button" className="text-red-600 underline" onClick={() => {
+                  if (bilan.inscrites) { setErreurCreneau('Réaffectez ou retirez les entreprises inscrites avant de supprimer ce créneau.'); return; }
+                  onChangeCreneaux?.(creneauxVisite.filter(x => x.id !== c.id)); setErreurCreneau('');
+                }} aria-label={`Supprimer le créneau du ${libelleVisite(c.date_heure)}`}>Supprimer</button></div>
+              <p>{bilan.inscrites} entreprise{bilan.inscrites > 1 ? 's' : ''} inscrite{bilan.inscrites > 1 ? 's' : ''} · {bilan.presentes} présente{bilan.presentes > 1 ? 's' : ''}</p>
+              {bilan.lots.map(({ lot, inscrites, presentes }) => <p key={lot.id}>Lot {lot.lot_number} — {lot.lot_title} : {presentes} présente{presentes > 1 ? 's' : ''} / {inscrites} inscrite{inscrites > 1 ? 's' : ''}</p>)}
+              {bilan.sansLot > 0 && <p>{bilan.sansLot} sans lot assigné</p>}
+            </div>;
+          })}</div>}
+      </section>
       {/* Synthèse du suivi */}
       {!aucuneEntreprise && (
         <div className="px-5 py-3 border-b border-[var(--tblr-border)] space-y-2">
@@ -459,6 +721,20 @@ export default function ACTEntreprisesTable({
         </div>
       )}
 
+      {/* DCE à envoyer : un seul geste pour toutes les entreprises dont la case « DCE à envoyer » est cochée */}
+      {dceAEnvoyer.length > 0 && (
+        <div className="px-5 py-2.5 border-b border-[var(--tblr-border)] flex items-center gap-3 flex-wrap">
+          <p className="text-xs text-[var(--tblr-text)]">
+            <span className="font-bold">{dceAEnvoyer.length} entreprise{dceAEnvoyer.length > 1 ? 's' : ''}</span>
+            {' '}{dceAEnvoyer.length > 1 ? 'attendent' : 'attend'} le DCE.
+          </p>
+          <button type="button" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700"
+            onClick={() => setGroupe({ titre: 'Envoyer le DCE aux entreprises « DCE à envoyer »', mode: 'dce', ids: dceAEnvoyer.map(e => e.id) })}>
+            <IconSend size={12} /> Envoyer le DCE aux entreprises « DCE à envoyer »
+          </button>
+        </div>
+      )}
+
       {/* Filtres */}
       {!aucuneEntreprise && (
         <div className="px-5 py-3 border-b border-[var(--tblr-border)] flex items-center gap-2 flex-wrap">
@@ -516,6 +792,10 @@ export default function ACTEntreprisesTable({
             onClick={() => patchMany(selectionActive, e => ({ dce_transmis_le: e.dce_transmis_le || today, envoyer_dce: true, ne_repond_pas: false }))}>
             DCE transmis aujourd'hui
           </button>
+          <button type="button" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700"
+            onClick={() => setGroupe({ titre: 'Envoyer le DCE aux entreprises sélectionnées', mode: 'dce', ids: [...selectionActive] })}>
+            <IconSend size={12} /> Envoyer le DCE…
+          </button>
           <label className="flex items-center gap-1.5 text-xs font-bold text-blue-800 dark:text-blue-200">
             Relance le
             <input type="date" aria-label="Date de relance de la sélection" value="" className={cn(FIELD, 'py-1')}
@@ -536,7 +816,7 @@ export default function ACTEntreprisesTable({
       {/* Liste */}
       {isDesktop ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[1060px]">
+          <table className="w-full text-sm min-w-[1200px]">
             <thead className="bg-[var(--tblr-surface-2)]">
               <tr>
                 <th className={cn(TH, 'sticky left-0 z-[2] bg-[var(--tblr-surface-2)] min-w-[280px] w-[280px]')}>
@@ -546,9 +826,12 @@ export default function ACTEntreprisesTable({
                     Entreprise
                   </div>
                 </th>
+                <th className={cn(TH, 'min-w-[140px]')}>Qualification</th>
                 <th className={cn(TH, 'min-w-[200px]')}>Corps d'état</th>
                 <th className={cn(TH, 'min-w-[200px]')}>Lots assignés</th>
                 <th className={cn(TH, 'min-w-[220px]')}>Suivi</th>
+                <th className={cn(TH, 'w-16')} title="Rendez-vous de visite">Visite</th>
+                <th className={cn(TH, 'min-w-[180px]')}>Observation</th>
                 <th className={cn(TH, 'min-w-[130px]')}>Statut</th>
                 <th className="w-20"></th>
               </tr>
@@ -558,7 +841,7 @@ export default function ACTEntreprisesTable({
                 <React.Fragment key={groupe.key}>
                   {!plat && (
                     <tr className="bg-zinc-100 dark:bg-zinc-800">
-                      <td colSpan={nbCols - 1} className="px-4 py-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                      <td colSpan={nbCols} className="px-4 py-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
                         {groupe.libelle} <span className="font-bold text-[var(--tblr-muted)]">· {groupe.entreprises.length}</span>
                       </td>
                     </tr>
@@ -571,9 +854,12 @@ export default function ACTEntreprisesTable({
                           <div className="flex-1 min-w-0">{champNom(e)}</div>
                         </div>
                       </td>
+                      <td className="px-3 py-2.5 pt-3.5">{champQualification(e)}</td>
                       <td className="px-3 py-2.5">{champCorps(e)}</td>
                       <td className="px-3 py-2.5">{champLots(e)}</td>
                       <td className="px-3 py-2.5">{champDates(e)}</td>
+                      <td className="px-3 py-2.5">{boutonVisite(e)}</td>
+                      <td className="px-3 py-2.5">{champObservation(e)}</td>
                       <td className="px-3 py-2.5 pt-3.5">{champStatut(e)}</td>
                       <td className="px-3 py-2.5 text-right">{boutonsLigne(e)}</td>
                     </tr>
@@ -581,7 +867,7 @@ export default function ACTEntreprisesTable({
                 </React.Fragment>
               ))}
               {groupes.length === 0 && (
-                <tr><td colSpan={nbCols - 1} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">
+                <tr><td colSpan={nbCols} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">
                   {aucuneEntreprise ? 'Aucune entreprise consultée.' : 'Aucune entreprise ne correspond aux filtres.'}
                 </td></tr>
               )}
@@ -606,12 +892,14 @@ export default function ACTEntreprisesTable({
                       <div className="flex-1 min-w-0">{champNom(e)}</div>
                       {boutonsLigne(e)}
                     </div>
-                    <div className="flex items-center justify-between gap-2">{champStatut(e)}</div>
+                    <div className="flex items-center justify-between gap-2">{champStatut(e)}{champQualification(e)}</div>
                     <div className="grid grid-cols-1 gap-2">
                       {champCorps(e)}
                       {champLots(e)}
                     </div>
                     {champDates(e)}
+                    <div className="flex items-center gap-2"><span className="text-xs font-semibold">Rendez-vous de visite</span>{boutonVisite(e)}</div>
+                    <label className="block text-xs font-semibold">Observation{champObservation(e)}</label>
                   </li>
                 ))}
               </ul>
@@ -625,13 +913,44 @@ export default function ACTEntreprisesTable({
         </div>
       )}
 
+      {visitePour && entreprises.find(e => e.id === visitePour) && (() => {
+        const e = entreprises.find(row => row.id === visitePour)!;
+        return <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={fermerVisite}>
+          <div role="dialog" aria-modal="true" aria-labelledby="visite-dialog-title" className="w-full max-w-sm rounded-xl bg-[var(--tblr-surface)] p-5 shadow-xl space-y-4" onClick={event => event.stopPropagation()} onKeyDown={event => {
+            if (event.key === 'Escape') { event.preventDefault(); fermerVisite(); }
+            if (event.key === 'Tab') {
+              const fields = [...event.currentTarget.querySelectorAll<HTMLElement>('button:not([disabled]), select:not([disabled])')];
+              if (event.shiftKey && document.activeElement === fields[0]) { event.preventDefault(); fields.at(-1)?.focus(); }
+              else if (!event.shiftKey && document.activeElement === fields.at(-1)) { event.preventDefault(); fields[0]?.focus(); }
+            }
+          }}>
+            <div className="flex justify-between gap-3"><h3 id="visite-dialog-title" className="font-semibold">Rendez-vous de visite — {e.nom || 'Entreprise'}</h3><button type="button" autoFocus onClick={fermerVisite} aria-label="Fermer la visite"><IconX size={18} /></button></div>
+            <p className="text-xs text-[var(--tblr-muted)]">Sélectionnez un créneau puis indiquez la présence de l’entreprise.</p>
+            {champVisite(e)}
+            <button type="button" onClick={fermerVisite} className="rounded-lg bg-blue-600 text-white px-4 py-2 text-sm">Terminer</button>
+          </div>
+        </div>;
+      })()}
+      {groupe && (
+        <DceEnvoiGroupeDialog
+          titre={groupe.titre}
+          mode={groupe.mode}
+          entreprises={entreprises.filter(e => groupe.ids.includes(e.id))}
+          contexte={{
+            projectId, projectName, lots, pieces: dcePieces, documents: documentsAffaire, genererPiecesMarche,
+            depotActif: !!depot?.actif, depotIndisponible: depot?.indisponible, deadlineAt: depotDeadlineAt, visite: contexteVisite,
+          }}
+          onEnvoye={(id, creneauCite) => marquerEnvoye(id, groupe.mode, creneauCite)}
+          onClose={() => setGroupe(null)}
+        />
+      )}
       {entrepriseMail && (
         <DceMailDialog
-          projectName={projectName} entreprise={entrepriseMail} lots={lots} pieces={dcePieces}
+          projectId={projectId} depotActif={!!depot?.actif} depotIndisponible={depot?.indisponible} genererPiecesMarche={genererPiecesMarche} deadlineAt={depotDeadlineAt} visite={contexteVisite}
+          projectName={projectName} entreprise={entrepriseMail} lots={lots} pieces={dcePieces} documents={documentsAffaire}
+          partages={dcePartages} onAjouterPartage={onAjouterPartage} onRetirerPartage={onRetirerPartage} onDocumentDepose={onDocumentDepose}
           onClose={() => setMailPour(null)}
-          onSent={() => patch(entrepriseMail.id, {
-            dce_transmis_le: entrepriseMail.dce_transmis_le || today, envoyer_dce: true, ne_repond_pas: false,
-          })}
+          onSent={visiteCitee => patch(entrepriseMail.id, marquageEnvoi(entrepriseMail, 'dce', today, visiteCitee))}
         />
       )}
     </div>

@@ -6,7 +6,8 @@
 import type { Lot, Ligne } from '../../types/dpgf';
 import { ajouterClause } from '../../lib/bibliothequeClauses';
 import { basculerBatimentEnMasse } from '../../lib/batimentsArticles';
-import { duplicateHierarchy, ligneAtPath, type HierarchySelection } from './hierarchyOps';
+import type { ModeLiens } from '../../lib/quantitesLiees';
+import { duplicateHierarchy, ligneAtPath, noeudSelectionne, type HierarchySelection } from './hierarchyOps';
 import { parseSelection } from './selectionOps';
 
 const tuple = (s: HierarchySelection): number[] =>
@@ -28,11 +29,16 @@ export function racinesDeSelection(keys: Iterable<string>): HierarchySelection[]
  * au premier pour qu'aucune copie ne décale un élément restant à traiter.
  * `copies` est le nombre d'éléments dupliqués.
  */
-export function dupliquerSelection<L extends Lot>(lots: L[], keys: Iterable<string>, newId: () => string): { lots: L[]; copies: number } {
+export function dupliquerSelection<L extends Lot>(lots: L[], keys: Iterable<string>, newId: () => string, liens: ModeLiens = 'tout'): { lots: L[]; copies: number } {
   const racines = racinesDeSelection(keys).reverse();
   let courant = lots;
-  for (const s of racines) courant = duplicateHierarchy(courant, s, newId).lots;
+  for (const s of racines) courant = duplicateHierarchy(courant, s, newId, liens).lots;
   return { lots: courant, copies: racines.length };
+}
+
+/** Les éléments qu'une duplication copierait (un par racine de la sélection), pour en lire les liens de quantité. */
+export function noeudsRacines(lots: readonly Lot[], keys: Iterable<string>): unknown[] {
+  return racinesDeSelection(keys).map(s => noeudSelectionne(lots, s)).filter(n => n !== undefined);
 }
 
 // ── Modification en masse ────────────────────────────────────────────────────

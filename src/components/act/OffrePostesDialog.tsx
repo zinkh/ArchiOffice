@@ -7,6 +7,7 @@ import { IconPlus, IconTrash, IconX, IconLoader2 } from '@tabler/icons-react';
 import type { Lot, PosteAjoute } from '../../types/dpgf';
 import { chapitresDuLot, ecartPct, estHorsBase, niveauEcart, eur0, eur2, pctFr as pct, type PrixSaisi } from '../../lib/comparatifPrix';
 import { montantPoste } from '../../lib/postesAjoutes';
+import { quantitesDifferent, quantitesUtiles } from '../../lib/quantitesEntreprise';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface Props {
@@ -14,12 +15,17 @@ interface Props {
   entreprise: { id: string; nom: string };
   prixInitial: Record<string, PrixSaisi>;
   ajoutsInitiaux: PosteAjoute[];
-  onSave: (prix: Record<string, PrixSaisi>, ajouts: PosteAjoute[]) => Promise<void>;
+  /** Quantités déjà remises par l'entreprise (seulement celles qui diffèrent du document) et articles acceptés. */
+  quantitesInitiales?: Record<string, number>;
+  accepteesInitiales?: ReadonlySet<string>;
+  onSave: (prix: Record<string, PrixSaisi>, ajouts: PosteAjoute[], quantites: Record<string, number>, acceptees: ReadonlySet<string>) => Promise<void>;
   onClose: () => void;
 }
 
 interface AjoutBrouillon {
   id: string; numero: string; designation: string; unite: string; quantite: string; prixUnitaire: string;
+  /** Article du document que ce poste chiffre (rattachement), conservé tel quel à l'enregistrement. */
+  articleId?: string;
 }
 
 /** « 1 234,50 € » ou « 1234.5 » : nombre positif, ou null si le texte n'en est pas un. */
@@ -34,7 +40,7 @@ const CHAMP = 'w-full text-right px-2 py-1 text-sm border border-[var(--tblr-bor
 const BOUTON = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50';
 const BOUTON_PRIMAIRE = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--tblr-primary)] text-white hover:opacity-90 disabled:opacity-50';
 
-export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajoutsInitiaux, onSave, onClose }: Props) {
+export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajoutsInitiaux, quantitesInitiales = {}, accepteesInitiales, onSave, onClose }: Props) {
   const chapitres = useMemo(() => chapitresDuLot(lot), [lot]);
   const lignes = useMemo(() => chapitres.flatMap(c => c.lignes), [chapitres]);
 
@@ -42,6 +48,17 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
     const v: Record<string, string> = {};
     for (const l of lignes) { const pu = prixInitial[l.id]; if (typeof pu === 'number') v[l.id] = String(pu).replace('.', ','); }
     return v;
+  });
+  // Quantité remise par l'entreprise : vide = elle reprend celle du document. « Retenir » l'accepte dans son offre.
+  const [qtes, setQtes] = useState<Record<string, string>>(() => {
+    const q: Record<string, string> = {};
+    for (const l of lignes) { const v = quantitesInitiales[l.id]; if (typeof v === 'number') q[l.id] = String(v).replace('.', ','); }
+    return q;
+  });
+  const [retenues, setRetenues] = useState<Record<string, boolean>>(() => {
+    const r: Record<string, boolean> = {};
+    for (const l of lignes) if (accepteesInitiales?.has(l.id)) r[l.id] = true;
+    return r;
   });
   const [pm, setPm] = useState<Record<string, boolean>>(() => {
     const p: Record<string, boolean> = {};
@@ -51,6 +68,7 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
   const [ajouts, setAjouts] = useState<AjoutBrouillon[]>(() => ajoutsInitiaux.map(p => ({
     id: p.id, numero: p.numero, designation: p.designation, unite: p.unite,
     quantite: p.quantite != null ? String(p.quantite) : '', prixUnitaire: p.prixUnitaire != null ? String(p.prixUnitaire).replace('.', ',') : '',
+    ...(p.articleId ? { articleId: p.articleId } : {}),
   })));
   const [modifie, setModifie] = useState(false);
   const [abandon, setAbandon] = useState(false);
@@ -65,16 +83,19 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
     let t = 0;
     for (const l of lignes) {
       const pu = lireNombre(valeurs[l.id] ?? '');
-      if (!pm[l.id] && pu != null && !estHorsBase(l)) t += pu * l.quantite;
+      const qe = lireNombre(qtes[l.id] ?? '');
+      const q = retenues[l.id] && qe != null && l.quantite > 0 ? qe : l.quantite;
+      if (!pm[l.id] && pu != null && !estHorsBase(l)) t += pu * q;
     }
     for (const a of ajouts) {
       const pu = lireNombre(a.prixUnitaire);
       if (pu != null) t += pu * (lireNombre(a.quantite) ?? 1);
     }
     return t;
-  }, [lignes, valeurs, pm, ajouts]);
+  }, [lignes, valeurs, pm, ajouts, qtes, retenues]);
 
   const saisir = (id: string, texte: string) => { setValeurs(v => ({ ...v, [id]: texte })); setModifie(true); };
+  const saisirQuantite = (id: string, texte: string) => { setQtes(q => ({ ...q, [id]: texte })); setModifie(true); };
   const basculerPm = (id: string, actif: boolean) => {
     setPm(p => ({ ...p, [id]: actif }));
     if (actif) setValeurs(v => { const { [id]: _retire, ...reste } = v; return reste; });
@@ -124,8 +145,15 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
         .map(a => ({
           id: a.id, numero: a.numero.trim(), designation: a.designation.trim(), unite: a.unite.trim() || 'u',
           quantite: lireNombre(a.quantite), prixUnitaire: lireNombre(a.prixUnitaire), lotId: lot.id,
+          ...(a.articleId && lignes.some(l => l.id === a.articleId) ? { articleId: a.articleId } : {}),
         }));
-      await onSave(prix, postes);
+      // Seules les quantités qui diffèrent du document sont gardées ; une acceptation n'a de sens que pour elles.
+      const quantites = quantitesUtiles(
+        Object.fromEntries(lignes.map(l => [l.id, lireNombre(qtes[l.id] ?? '')])),
+        new Map(lignes.map(l => [l.id, l.quantite || 0])),
+      );
+      const acceptees = new Set(Object.keys(quantites).filter(id => retenues[id]));
+      await onSave(prix, postes, quantites, acceptees);
       onClose();
     } catch (e: any) {
       setErreur(e?.message || 'L’offre n’a pas pu être enregistrée.');
@@ -155,13 +183,14 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
         </div>
 
         <div className="overflow-auto flex-1">
-          <table className="w-full text-sm min-w-[720px]">
+          <table className="w-full text-sm min-w-[820px]">
             <thead className="bg-[var(--tblr-surface-2)] sticky top-0 z-10">
               <tr className="text-[0.6875rem] uppercase tracking-wider text-[var(--tblr-muted)]">
                 <th className="px-3 py-2 text-left">Code</th>
                 <th className="px-3 py-2 text-left">Désignation</th>
                 <th className="px-3 py-2 text-center">U</th>
                 <th className="px-3 py-2 text-right">Qté</th>
+                <th className="px-3 py-2 text-right w-28" title="Quantité remise par l'entreprise si elle diffère de celle du document : laissez vide pour la reprendre">Qté entreprise</th>
                 <th className="px-3 py-2 text-right">Estimation</th>
                 <th className="px-3 py-2 text-right w-36">P.U. HT remis</th>
                 <th className="px-3 py-2 text-center" title="Pour mémoire : compris dans un autre poste, non compté">P.m.</th>
@@ -172,7 +201,7 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
               {chapitres.map(c => (
                 <React.Fragment key={c.id}>
                   <tr className="bg-[var(--tblr-surface-2)]">
-                    <td className="px-3 py-1.5 text-xs font-bold" colSpan={8}>{c.numero} {c.titre}</td>
+                    <td className="px-3 py-1.5 text-xs font-bold" colSpan={9}>{c.numero} {c.titre}</td>
                   </tr>
                   {c.lignes.map(l => {
                     index += 1;
@@ -190,6 +219,25 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
                         </td>
                         <td className="px-3 py-1.5 text-center text-[var(--tblr-muted)]">{l.unite}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{l.quantite.toLocaleString('fr-FR')}</td>
+                        <td className="px-3 py-1.5">
+                          {l.quantite > 0 ? (
+                            <>
+                              <input inputMode="decimal" className={CHAMP} value={qtes[l.id] ?? ''} placeholder={l.quantite.toLocaleString('fr-FR')}
+                                aria-label={`Quantité de l'entreprise : ${l.designation}`} onChange={e => saisirQuantite(l.id, e.target.value)} />
+                              {(() => {
+                                const qe = lireNombre(qtes[l.id] ?? '');
+                                if (qe == null || !quantitesDifferent(qe, l.quantite)) return null;
+                                return (
+                                  <label className="flex items-center justify-end gap-1 text-[0.6875rem] font-semibold text-amber-700 dark:text-amber-400">
+                                    <input type="checkbox" checked={!!retenues[l.id]} aria-label={`Retenir la quantité de l'entreprise : ${l.designation}`}
+                                      onChange={e => { setRetenues(r => ({ ...r, [l.id]: e.target.checked })); setModifie(true); }} />
+                                    Retenir ({(qe - l.quantite) > 0 ? '+' : ''}{(qe - l.quantite).toLocaleString('fr-FR')})
+                                  </label>
+                                );
+                              })()}
+                            </>
+                          ) : <span className="block text-right text-[var(--tblr-muted)]" title="Ce poste n'a pas de quantité au document">·</span>}
+                        </td>
                         <td className="px-3 py-1.5 text-right tabular-nums text-[var(--tblr-muted)]">{eur2(l.prixUnitaire)}</td>
                         <td className="px-3 py-1.5">
                           <input
@@ -217,15 +265,24 @@ export default function OffrePostesDialog({ lot, entreprise, prixInitial, ajouts
                 </React.Fragment>
               ))}
               {lignes.length === 0 && (
-                <tr><td colSpan={8} className="px-4 py-6 text-center italic text-[var(--tblr-muted)]">Ce lot ne contient aucun article chiffrable dans le document de référence.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-6 text-center italic text-[var(--tblr-muted)]">Ce lot ne contient aucun article chiffrable dans le document de référence.</td></tr>
               )}
               {ajouts.length > 0 && (
-                <tr className="bg-violet-50 dark:bg-violet-900/20"><td className="px-3 py-1.5 text-xs font-bold text-violet-800 dark:text-violet-200" colSpan={8}>Postes ajoutés par l’entreprise</td></tr>
+                <tr className="bg-violet-50 dark:bg-violet-900/20"><td className="px-3 py-1.5 text-xs font-bold text-violet-800 dark:text-violet-200" colSpan={9}>Postes ajoutés par l’entreprise</td></tr>
               )}
               {ajouts.map(a => (
                 <tr key={a.id} className="bg-violet-50/60 dark:bg-violet-900/10">
                   <td className="px-3 py-1.5"><input className={`${CHAMP} text-left`} value={a.numero} onChange={e => majAjout(a.id, { numero: e.target.value })} aria-label="Code du poste ajouté" /></td>
-                  <td className="px-3 py-1.5"><input className={`${CHAMP} text-left`} value={a.designation} onChange={e => majAjout(a.id, { designation: e.target.value })} aria-label="Désignation du poste ajouté" placeholder="Désignation" /></td>
+                  <td className="px-3 py-1.5">
+                    <input className={`${CHAMP} text-left`} value={a.designation} onChange={e => majAjout(a.id, { designation: e.target.value })} aria-label="Désignation du poste ajouté" placeholder="Désignation" />
+                    <select value={a.articleId && lignes.some(l => l.id === a.articleId) ? a.articleId : ''}
+                      onChange={e => majAjout(a.id, { articleId: e.target.value || undefined })}
+                      aria-label="Poste du document chiffré par ce poste ajouté"
+                      className="mt-1 w-full text-[0.6875rem] border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 px-1 py-0.5">
+                      <option value="">Hors marché (non rattaché à un poste)</option>
+                      {lignes.map(l => <option key={l.id} value={l.id}>Rattaché au poste {l.numero} {l.designation.length > 50 ? `${l.designation.slice(0, 50)}…` : l.designation}</option>)}
+                    </select>
+                  </td>
                   <td className="px-3 py-1.5"><input className={`${CHAMP} text-center`} value={a.unite} onChange={e => majAjout(a.id, { unite: e.target.value })} aria-label="Unité" placeholder="u" /></td>
                   <td className="px-3 py-1.5"><input inputMode="decimal" className={CHAMP} value={a.quantite} onChange={e => majAjout(a.id, { quantite: e.target.value })} aria-label="Quantité annoncée" placeholder="1" /></td>
                   <td className="px-3 py-1.5 text-right text-[var(--tblr-muted)]">·</td>

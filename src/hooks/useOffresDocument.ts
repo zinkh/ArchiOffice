@@ -24,6 +24,9 @@ export interface SaisieLot {
   idsLot: string[];
   prix: Record<string, PrixSaisi>;
   postesAjoutes: PosteAjoute[];
+  /** Quantités de l'entreprise sur ce lot (article -> quantité ; absent : même que le document) et articles acceptés. Omis : non touchées. */
+  quantites?: Record<string, number | undefined>;
+  acceptees?: ReadonlySet<string>;
 }
 
 export function useOffresDocument(projectId: string, cible: CibleDocument) {
@@ -98,12 +101,16 @@ export function useOffresDocument(projectId: string, cible: CibleDocument) {
   const ecrireSaisie = useCallback((saisie: SaisieLot) => enchainer(async () => {
     const miseAJour = repartirSaisie(
       offresRef.current, saisie.entreprise.id, saisie.lotId, saisie.idsLot, saisie.prix, saisie.postesAjoutes,
+      saisie.quantites, saisie.acceptees,
     );
     let courant = offresRef.current;
     for (const m of miseAJour) {
       if (m.id) {
         const saved = await apiFetch<OffreEnregistree>(`${base}/offres/${m.id}`, {
-          method: 'PUT', body: JSON.stringify({ prix: m.prix, postesAjoutes: m.postesAjoutes }),
+          method: 'PUT', body: JSON.stringify({
+            prix: m.prix, postesAjoutes: m.postesAjoutes,
+            ...(m.quantites ? { quantites: m.quantites, quantitesAcceptees: m.quantitesAcceptees ?? [] } : {}),
+          }),
         });
         courant = courant.map(o => (o.id === m.id ? { ...o, ...saved } : o));
       } else {
@@ -116,6 +123,7 @@ export function useOffresDocument(projectId: string, cible: CibleDocument) {
               dateReception: aujourdhui, fichierNom: FICHIER_SAISIE_MANUELLE,
               documentVersion: document?.version ?? '', prix: m.prix, anomalies: [],
               postesAjoutes: m.postesAjoutes, statut: 'validee',
+              ...(m.quantites ? { quantites: m.quantites, quantitesAcceptees: m.quantitesAcceptees ?? [] } : {}),
             },
           }),
         });

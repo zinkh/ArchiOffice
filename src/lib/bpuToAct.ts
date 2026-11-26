@@ -14,8 +14,9 @@
 // `projectLotId` vit maintenant sur Lot pour cette raison précise — la même
 // fonction sert donc les deux documents. `bpuVersComparatif` reste exporté
 // comme alias : c'est le nom que le code et les tests existants connaissent.
-import type { Lot, Ligne, OffreDocument } from '../types/dpgf';
-import { montantPoste } from './postesAjoutes';
+import type { Lot, Ligne, OffreDocument, PosteAjoute } from '../types/dpgf';
+import { articleRattache, montantPoste } from './postesAjoutes';
+import { quantiteRetenue, quantitesAcceptees, quantitesDifferent, quantitesEntreprise, type BaseQuantites } from './quantitesOffre';
 
 /** Forme des articles attendue par ACTModule (voir son ComparatifArticle). */
 export interface ComparatifArticle {
@@ -34,6 +35,16 @@ export interface ComparatifArticle {
    * signaler dans l'analyse des offres.
    */
   ajoute_par?: string;
+  /**
+   * Propositions que des entreprises ont rattachées à cet article du document (postes ajoutés rattachés) : leur
+   * montant est déjà compté dans `prix` de l'entreprise, la liste sert à le signaler.
+   */
+  propositions?: { entrepriseId: string; entrepriseNom: string; designation: string; montant: number }[];
+  /**
+   * Entreprises qui ont remis une quantité différente de celle du document (quantité, acceptée ou non, P.U.).
+   * Les montants de `prix` suivent la base de quantités demandée (voir `versComparatif`).
+   */
+  ecartsQuantites?: Record<string, { quantite: number; acceptee: boolean; prixUnitaire: number | null }>;
 }
 
 export interface ComparatifLot {
@@ -49,16 +60,20 @@ export interface VersementResultat {
 
 /**
  * Projette un document (DPGF ou BPU) et les offres retenues vers la structure
- * du comparatif.
+ * du comparatif. Les montants par article suivent la base de quantités : `moe` (défaut, les quantités du
+ * document, sauf celles que l'architecte a acceptées) ou `entreprise` (les quantités de chaque entreprise).
  *
  * ComparatifLot.lot_id désigne un project_lots.id, pas un lot interne au
  * document : un lot non rattaché ne peut pas être versé. Ils sont rapportés à
  * l'appelant plutôt que laissés tomber en silence.
  */
-export function versComparatif(lots: Lot[], offres: OffreDocument[]): VersementResultat {
+export function versComparatif(lots: Lot[], offres: OffreDocument[], base: BaseQuantites = 'moe'): VersementResultat {
   const comparatif: ComparatifLot[] = [];
   const lotsNonRattaches: { numero: string; titre: string }[] = [];
   const retenues = offres.filter(o => o.statut !== 'ecartee' && o.entrepriseId);
+  const quantitesParEntreprise = new Map(
+    [...new Set(retenues.map(o => o.entrepriseId!))].map(id => [id, { q: quantitesEntreprise(offres, id), ok: quantitesAcceptees(offres, id) }]),
+  );
 
   for (const lot of lots) {
     if (!lot.projectLotId) {
@@ -67,6 +82,21 @@ export function versComparatif(lots: Lot[], offres: OffreDocument[]): VersementR
     }
 
     const articles: ComparatifArticle[] = [];
+
+    // Postes ajoutés que l'entreprise a rattachés à un article du document : ils comptent sur la ligne de cet
+    // article (en plus de son P.U. éventuel) au lieu de figurer dans la section des postes ajoutés. Un rattachement
+    // vers un article qui n'existe plus est ignoré : le poste reste alors un poste ajouté ordinaire.
+    const idsFeuilles = new Set<string>();
+    const collecter = (ls: Ligne[]) => { for (const l of ls) { if (l.children?.length) collecter(l.children); else idsFeuilles.add(l.id); } };
+    for (const chap of lot.chapitres) collecter(chap.lignes);
+    const tous = retenues.flatMap(o => (o.postesAjoutes ?? []).filter(p => p.lotId === lot.id).map(p => ({ o, p })));
+    const rattaches = new Map<string, { o: OffreDocument; p: PosteAjoute }[]>();
+    const libres: { o: OffreDocument; p: PosteAjoute }[] = [];
+    for (const x of tous) {
+      const cible = articleRattache(x.p, idsFeuilles);
+      if (!cible) { libres.push(x); continue; }
+      rattaches.set(cible, [...(rattaches.get(cible) ?? []), x]);
+    }
 
     for (const chap of lot.chapitres) {
       articles.push({
@@ -80,15 +110,28 @@ export function versComparatif(lots: Lot[], offres: OffreDocument[]): VersementR
           // pas et n'a donc rien à faire dans un comparatif de prix.
           if (l.children?.length) { walk(l.children); continue; }
           const prix: Record<string, number> = {};
+          const ecarts: NonNullable<ComparatifArticle['ecartsQuantites']> = {};
           for (const o of retenues) {
             const pu = o.prix?.[l.id];
+            const { q, ok } = quantitesParEntreprise.get(o.entrepriseId!)!;
+            const moe = l.quantite || 0;
             // Un poste non chiffré reste absent : l'écrire à 0 fausserait le
             // classement des offres.
-            if (pu != null) prix[o.entrepriseId!] = pu * (l.quantite || 0);
+            if (pu != null) prix[o.entrepriseId!] = pu * quantiteRetenue(base, moe, l.id, q, ok);
+            if (typeof q[l.id] === 'number' && moe > 0 && quantitesDifferent(q[l.id], moe)) {
+              ecarts[o.entrepriseId!] = { quantite: q[l.id], acceptee: ok.has(l.id), prixUnitaire: typeof o.prix?.[l.id] === 'number' ? (o.prix[l.id] as number) : (typeof pu === 'number' ? pu : null) };
+            }
           }
+          const propositions = (rattaches.get(l.id) ?? []).map(({ o, p }) => {
+            const eid = o.entrepriseId!;
+            if (p.prixUnitaire != null) prix[eid] = (prix[eid] ?? 0) + montantPoste(p);
+            return { entrepriseId: eid, entrepriseNom: o.entrepriseNom, designation: p.designation, montant: montantPoste(p) };
+          });
           articles.push({
             id: l.id, code: l.numero, titre: l.designation, unite: l.unite,
             quantite: l.quantite, estimatif: l.prixTotal || undefined, prix,
+            ...(Object.keys(ecarts).length ? { ecartsQuantites: ecarts } : {}),
+            ...(propositions.length ? { propositions } : {}),
           });
         }
       };
@@ -97,9 +140,7 @@ export function versComparatif(lots: Lot[], offres: OffreDocument[]): VersementR
 
     // Postes que des entreprises ont ajoutés à leur offre : ils ne sont pas
     // dans le document, seule l'entreprise concernée les chiffre.
-    const ajouts = retenues.flatMap(o => (o.postesAjoutes ?? [])
-      .filter(p => p.lotId === lot.id)
-      .map(p => ({ o, p })));
+    const ajouts = libres;
     if (ajouts.length) {
       articles.push({
         id: `${lot.id}__ajouts`, code: '', titre: 'Postes ajoutés par les entreprises',

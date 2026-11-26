@@ -1,4 +1,5 @@
 import type { DPGF, Ligne } from '../types/dpgf';
+import { sumLigne } from '../components/pro/treeOps';
 
 export function buildingQuantities(ligne: Ligne, inherited?: string): Record<string, number> {
   if (ligne.quantitesBatiments !== undefined) return ligne.quantitesBatiments;
@@ -16,7 +17,8 @@ export function recomputeBuildings(doc: DPGF): DPGF {
   };
   const lots = doc.lots.map(lot => {
     const chapitres = lot.chapitres.map(c => ({ ...c, lignes: c.lignes.map(walk) }));
-    const sousTotal = chapitres.reduce((s, c) => s + (c.cctpOnly ? 0 : c.lignes.reduce((n, l) => n + (l.cctpOnly ? 0 : l.prixTotal), 0)), 0);
+    // Total de BASE : options, PSE, variantes et articles pour mémoire n'y entrent pas (comme à l'écran).
+    const sousTotal = chapitres.reduce((s, c) => s + (c.cctpOnly ? 0 : c.lignes.reduce((n, l) => n + (l.cctpOnly ? 0 : sumLigne(l)), 0)), 0);
     return { ...lot, chapitres, sousTotal };
   });
   const totalHT = lots.reduce((s, l) => s + l.sousTotal, 0);

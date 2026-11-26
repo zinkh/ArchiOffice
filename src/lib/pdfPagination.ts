@@ -88,7 +88,18 @@ const SPACER_ATTR = 'data-pdf-spacer';
  */
 const UNIT_SELECTOR = '[data-pdf-keep], [data-pdf-heading], [data-pdf-newpage], tbody > tr, tfoot > tr';
 
-const toMm = (px: number): number => px / PX_PER_MM;
+/**
+ * Échelle d'affichage du document (zoom de l'aperçu, `transform: scale`) : les mesures
+ * `getBoundingClientRect` la subissent, pas la mise en page. Sans cette correction,
+ * un aperçu zoomé ou réduit paginerait à de fausses hauteurs.
+ */
+function layoutScale(flow: HTMLElement): number {
+  const layoutWidth = flow.offsetWidth;
+  const scale = layoutWidth > 0 ? flow.getBoundingClientRect().width / layoutWidth : 1;
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+const mmOf = (px: number, scale: number): number => px / scale / PX_PER_MM;
 
 function removeSpacers(flow: HTMLElement): void {
   flow.querySelectorAll(`[${SPACER_ATTR}]`).forEach(node => node.remove());
@@ -131,9 +142,10 @@ function settleSpacer(
   block: HTMLElement,
   targetMm: number,
   setHeight: (px: number) => void,
+  scale: number,
 ): void {
   setHeight(1);
-  const currentMm = toMm(block.getBoundingClientRect().top - flow.getBoundingClientRect().top);
+  const currentMm = mmOf(block.getBoundingClientRect().top - flow.getBoundingClientRect().top, scale);
   setHeight(1 + Math.max(0, (targetMm - currentMm) * PX_PER_MM));
 }
 
@@ -149,6 +161,7 @@ function settleSpacer(
 export function paginateFlow(flow: HTMLElement, geometry: PageGeometry = DEFAULT_GEOMETRY): number {
   removeSpacers(flow);
   flow.style.height = '';
+  const scale = layoutScale(flow);
 
   // Seul le corps est paginé : la page de garde est une page entière à part.
   const body = flow.querySelector<HTMLElement>('[data-pdf-body]') ?? flow;
@@ -160,16 +173,16 @@ export function paginateFlow(flow: HTMLElement, geometry: PageGeometry = DEFAULT
     const rect = el.getBoundingClientRect();
     const isRow = el.tagName === 'TR';
     const marginTopPx = isRow ? 0 : parseFloat(getComputedStyle(el).marginTop) || 0;
-    const top = toMm(rect.top - flowTop - marginTopPx);
-    const height = toMm(rect.height + marginTopPx);
+    const top = mmOf(rect.top - flowTop, scale) - marginTopPx / PX_PER_MM;
+    const height = mmOf(rect.height, scale) + marginTopPx / PX_PER_MM;
 
     // Un titre ne reste jamais seul en bas de page : il suit le premier bloc de contenu
     // qui vient après lui (un sous-titre ne compte pas, il a besoin du même contenu).
     // Une ligne `data-pdf-keep-next` (titre de groupe dans un tableau) suit sa voisine.
-    let keepExtent = el.hasAttribute('data-pdf-heading') ? headingExtentMm(units, index, top, flowTop) : undefined;
+    let keepExtent = el.hasAttribute('data-pdf-heading') ? headingExtentMm(units, index, top, flowTop, scale) : undefined;
     if (el.hasAttribute('data-pdf-keep-next')) {
       const next = el.nextElementSibling;
-      keepExtent = height + (next ? toMm(next.getBoundingClientRect().height) : 0);
+      keepExtent = height + (next ? mmOf(next.getBoundingClientRect().height, scale) : 0);
     }
 
     const shift = pageShiftMm(top, height, {
@@ -185,7 +198,7 @@ export function paginateFlow(flow: HTMLElement, geometry: PageGeometry = DEFAULT
       const spacerRow = rowSpacer(table);
       const spacerCell = spacerRow.firstElementChild as HTMLElement;
       el.parentElement?.insertBefore(spacerRow, el);
-      settleSpacer(flow, el, targetMm, px => { spacerCell.style.height = `${px}px`; });
+      settleSpacer(flow, el, targetMm, px => { spacerCell.style.height = `${px}px`; }, scale);
 
       // Le tableau continue sur la page suivante : on y répète son en-tête.
       const head = table.tHead;
@@ -201,11 +214,11 @@ export function paginateFlow(flow: HTMLElement, geometry: PageGeometry = DEFAULT
     } else {
       const spacer = blockSpacer(marginTopPx);
       el.parentElement?.insertBefore(spacer, el);
-      settleSpacer(flow, el, targetMm, px => { spacer.style.height = `${px}px`; });
+      settleSpacer(flow, el, targetMm, px => { spacer.style.height = `${px}px`; }, scale);
     }
   }
 
-  const pages = pageCountForHeight(contentBottomMm(flow, body), geometry.pageHeight);
+  const pages = pageCountForHeight(contentBottomMm(flow, body, scale), geometry.pageHeight);
   flow.style.height = `${pages * geometry.pageHeight}mm`;
   return pages;
 }
@@ -215,13 +228,13 @@ export function paginateFlow(flow: HTMLElement, geometry: PageGeometry = DEFAULT
  * bloc de contenu qui le suit. Les autres titres et les blocs vides (un graphique
  * masqué à l'export) sont traversés.
  */
-function headingExtentMm(units: HTMLElement[], index: number, topMm: number, flowTop: number): number {
+function headingExtentMm(units: HTMLElement[], index: number, topMm: number, flowTop: number, scale: number): number {
   for (let next = index + 1; next < units.length; next++) {
     const unit = units[next];
     if (unit.hasAttribute('data-pdf-heading')) continue;
     const rect = unit.getBoundingClientRect();
     if (rect.height < 1) continue;
-    return toMm(rect.bottom - flowTop) - topMm;
+    return mmOf(rect.bottom - flowTop, scale) - topMm;
   }
   return HEADING_KEEP_MM;
 }
@@ -231,10 +244,10 @@ function headingExtentMm(units: HTMLElement[], index: number, topMm: number, flo
  * n'en fait pas partie : sans cela un contenu qui finit près du bas d'une page
  * ouvrait une page blanche de plus.
  */
-function contentBottomMm(flow: HTMLElement, body: HTMLElement): number {
+function contentBottomMm(flow: HTMLElement, body: HTMLElement, scale: number): number {
   const flowTop = flow.getBoundingClientRect().top;
   const last = body.lastElementChild;
   // Corps vide (page de garde seule) : le document s'arrête au haut du corps.
   const bottom = last ? last.getBoundingClientRect().bottom : body.getBoundingClientRect().top;
-  return toMm(bottom - flowTop);
+  return mmOf(bottom - flowTop, scale);
 }

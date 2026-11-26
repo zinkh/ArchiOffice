@@ -13,7 +13,7 @@ const errors = new Set(['windows_drive_letter_busy', 'windows_drive_snapshot_inv
 /** Native main owns the paths, project selection, identities and signed grants. */
 export function WindowsDrivePreview({ projectId }: { projectId: string | null }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ enabled: boolean; active: boolean; configured?: boolean; projectCount?: number; projectIds?: string[]; previousProjectIds?:string[];appVersion?:string;unavailableReason?:'platform'|'disabled'|'native_missing'|null;editReports?:WindowsDriveEditReport[] }>({ enabled: false, active: false });
+  const [state, setState] = useState<{ enabled: boolean; active: boolean; configured?: boolean; projectCount?: number; projectIds?: string[]; previousProjectIds?:string[];appVersion?:string;shellAvailable?:boolean;unavailableReason?:'platform'|'disabled'|'native_missing'|null;editReports?:WindowsDriveEditReport[] }>({ enabled: false, active: false });
   const {confirm,dialog}=useConfirmDialog();
   const [plan,setPlan]=useState<(DriveCatalogUpdate & {projectId:string})|null>(null);
   const [busyLabel,setBusyLabel]=useState('windows_drive_preparing');
@@ -43,12 +43,13 @@ export function WindowsDrivePreview({ projectId }: { projectId: string | null })
     void load(); const timer = setInterval(() => void load(), 5000);
     return () => { live.current = false; clearInterval(timer); };
   }, [load]);
-  const run = async (action: 'open' | 'disconnect' | 'remove' | 'check' | 'refresh' | 'previous' | 'edit' = 'open') => {
+  const run = async (action: 'open' | 'disconnect' | 'remove' | 'check' | 'refresh' | 'previous' | 'edit' | 'shell' = 'open') => {
     if (lock.current) return;
     lock.current = true; setBusy(true); setMessage(null);setBusyLabel(action==='check'?'windows_drive_checking':action==='refresh'?'windows_drive_refreshing':'windows_drive_preparing');
     try {
       const bridge = desktopBridge();
-      if(action==='edit'&&projectId) {
+      if(action==='shell'){const result=await bridge?.openWindowsDriveShell?.();setMessage(result?.status==='opened'?'windows_drive_shell_opened':'windows_drive_error');}
+      else if(action==='edit'&&projectId) {
         if(!await confirm({title:t('windows_drive_edit_title'),message:t('windows_drive_edit_confirm'),confirmLabel:t('windows_drive_edit_enable'),cancelLabel:t('cancel'),tone:'primary'}))return;
         if(!live.current||selectedProject.current!==projectId)return;
         setPlan(null);const result=await bridge?.enableWindowsDriveEditing?.(projectId);await load();setMessage(result?.status==='editing'?'windows_drive_edit_enabled':displayError(result?.code));
@@ -84,6 +85,7 @@ export function WindowsDrivePreview({ projectId }: { projectId: string | null })
     <p className="text-sm max-w-prose">{t('windows_drive_explanation')}</p>
     <div className="flex flex-wrap gap-2">
       <button type="button" className="btn btn-ghost min-h-11" disabled={busy || (!projectId && !state.active && !canActivate)} onClick={() => void run()}>{t(busy ? busyLabel : state.active ? projectId && !added ? 'windows_drive_add' : 'windows_drive_open_active' : !projectId&&canActivate ? 'windows_drive_activate' : 'windows_drive_open')}</button>
+      {state.shellAvailable&&<button type="button" className="btn btn-ghost min-h-11" disabled={busy} onClick={()=>void run('shell')}>{t('windows_drive_shell_open')}</button>}
       {added&&!editReport && <button type="button" className="btn btn-primary min-h-11" disabled={busy} onClick={()=>void run('edit')}>{t('windows_drive_edit_enable')}</button>}
       {added && <button type="button" className="btn btn-ghost min-h-11" disabled={busy} onClick={()=>void run('check')}>{t('windows_drive_check_catalog')}</button>}
       {projectId&&state.previousProjectIds?.includes(projectId)&&<button type="button" className="btn btn-ghost min-h-11" disabled={busy} onClick={()=>void run('previous')}>{t('windows_drive_previous')}</button>}

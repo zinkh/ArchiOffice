@@ -54,7 +54,78 @@ export interface QueuedResult<T = any> {
  * redémarre (502-504). Les traiter en erreur définitive faisait perdre la
  * saisie faite hors ligne pile au moment de la reconnexion.
  */
-const TRANSIENT_HTTP_STATUSES = new Set([401, 502, 503, 504]);
+const TRANSIENT_HTTP_STATUSES = new Set([401, 429, 502, 503, 504]);
+
+/**
+ * Plafond d'un passage de rejeu pour les photos : au plus 4 fichiers et 12 Mo. Le serveur décode chaque
+ * photo en JavaScript (CPU) : 16 photos d'affilée le saturaient jusqu'au 503. Le reste attend le passage
+ * suivant, lancé quelques secondes plus tard (`FOLLOW_UP_DELAY_MS`), avec une pause entre deux photos.
+ */
+const MAX_PHOTOS_PER_PASS = 4;
+const MAX_BYTES_PER_PASS = 12 * 1024 * 1024;
+const PAUSE_BETWEEN_PHOTOS_MS = 600;
+const FOLLOW_UP_DELAY_MS = 4_000;
+
+/** Reprise espacée d'une entrée en échec transitoire : 30 s, 1 min, 2 min... plafonnée à 10 min. */
+const BACKOFF_BASE_MS = 30_000;
+const BACKOFF_MAX_MS = 10 * 60_000;
+
+export function backoffDelayMs(attempts: number): number {
+  return Math.min(BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1), BACKOFF_MAX_MS);
+}
+
+/** Message d'alerte (toast) émis sur `window` quand un envoi pose problème : voir OfflineQueueToast.tsx. */
+export const OFFLINE_QUEUE_NOTICE_EVENT = 'archioffice:offline-queue-notice';
+
+function notify(message: string, type: 'error' | 'success' = 'error'): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(OFFLINE_QUEUE_NOTICE_EVENT, { detail: { message, type } }));
+}
+
+class ReplayCancelledError extends Error {
+  constructor() {
+    super('Envoi annulé');
+    this.name = 'ReplayCancelledError';
+  }
+}
+
+/** Envoi photo en cours (XMLHttpRequest), gardé pour pouvoir l'interrompre. */
+let currentXhr: XMLHttpRequest | null = null;
+let cancelRequested = false;
+/** Après « Annuler l'envoi » : plus aucun rejeu automatique tant que la personne n'a pas repris (« Reprendre »). */
+let paused = false;
+const pausedListeners = new Set<() => void>();
+
+export function isReplayPaused(): boolean {
+  return paused;
+}
+
+export function subscribeReplayPaused(listener: () => void): () => void {
+  pausedListeners.add(listener);
+  return () => { pausedListeners.delete(listener); };
+}
+
+function setPaused(value: boolean): void {
+  paused = value;
+  pausedListeners.forEach(listener => listener());
+}
+
+/**
+ * Annule l'envoi : interrompt la photo en cours et suspend tous les rejeux automatiques (sondage, retour
+ * du réseau, nouvelle photo). Rien n'est supprimé : les écritures restent en file, intactes, jusqu'à
+ * `resumeReplay()` ou `discardPendingWrite()`.
+ */
+export function cancelReplay(): void {
+  setPaused(true);
+  cancelRequested = true;
+  currentXhr?.abort();
+}
+
+/** Reprend les envois après une annulation, sans attendre les délais de reprise. */
+export async function resumeReplay(): Promise<ReplayProgress> {
+  setPaused(false);
+  return replayNow(true);
+}
 
 /**
  * Une requête de rejeu qui ne répond jamais (jeton en attente du verrou d'authentification,
@@ -249,6 +320,24 @@ export async function discardPendingWrite(id: string, entity: PendingWrite['enti
 }
 
 /**
+ * Met une écriture JSON en file SANS tenter l'envoi dans l'appel, puis lance le rejeu en arrière-plan.
+ * Sert quand l'écriture ne doit pas devancer une autre, encore en attente : l'enregistrement d'un
+ * croquis ne part jamais avant sa création. Le rejeu respecte l'ordre de mise en file.
+ */
+export async function enqueueJsonRequest(request: JsonWriteRequest): Promise<void> {
+  await enqueue({
+    id: request.id,
+    entity: request.entity,
+    method: request.method,
+    url: request.url,
+    kind: 'json',
+    jsonBody: request.body,
+  });
+  window.dispatchEvent(new CustomEvent(OFFLINE_QUEUE_CHANGED_EVENT, { detail: { id: request.id, entity: request.entity } }));
+  void replayNow();
+}
+
+/**
  * Met une photo en file SANS tenter l'envoi dans l'appel : l'écran n'attend jamais le réseau.
  * L'envoi part tout de suite en arrière-plan (`replayNow`), un fichier à la fois, avec reprise
  * automatique : la photo vit dans IndexedDB, donc elle survit à une fermeture de l'onglet et à
@@ -295,7 +384,7 @@ export interface ReplayProgress {
   startedAt: number | null;
   finishedAt: number | null;
   /** Pourquoi le passage s'est arrêté avant la fin, le cas échéant. */
-  stopReason: 'offline' | 'network' | null;
+  stopReason: 'offline' | 'network' | 'cancelled' | null;
 }
 
 const IDLE_PROGRESS: ReplayProgress = {
@@ -349,6 +438,8 @@ async function xhrMultipart(entry: PendingWrite, timeoutMs: number, onProgress: 
   ]);
   return new Promise<Response>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    if (cancelRequested) { reject(new ReplayCancelledError()); return; }
+    currentXhr = xhr;
     xhr.open(entry.method, entry.url);
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     if (entry.tenantId) xhr.setRequestHeader('X-Tenant-Id', entry.tenantId);
@@ -363,10 +454,10 @@ async function xhrMultipart(entry: PendingWrite, timeoutMs: number, onProgress: 
       }));
     };
     xhr.onerror = () => reject(new TypeError('réseau injoignable'));
-    xhr.onabort = () => reject(new TypeError('envoi annulé'));
+    xhr.onabort = () => reject(cancelRequested ? new ReplayCancelledError() : new TypeError('envoi annulé'));
     xhr.ontimeout = () => reject(new ReplayTimeoutError());
     xhr.send(buildFormData(entry));
-  });
+  }).finally(() => { currentXhr = null; });
 }
 
 /**
@@ -387,18 +478,41 @@ function replayOrder(entries: PendingWrite[]): PendingWrite[] {
  * seule photo en tête de file bloquait les autres indéfiniment, sans « Échec » affiché. Une erreur
  * applicative (validation refusée) marque l'entrée `error`, visible, sans bloquer le reste.
  */
-export async function replayPendingWrites(): Promise<ReplayProgress> {
-  if (!navigator.onLine) return progress;
+export async function replayPendingWrites(force = false): Promise<ReplayProgress> {
+  if (!navigator.onLine || paused) return progress;
   if (replaying && Date.now() - replayingSince < REPLAY_STALE_MS) return progress;
   replaying = true;
   replayingSince = Date.now();
+  cancelRequested = false;
   let consecutiveFailures = 0;
+  let photosThisPass = 0;
+  let bytesThisPass = 0;
+  let moreToSend = false;
+  let failedPhotos = 0;
+  let lastFailure = '';
+  let nextRetryMs = 0;
+  let cancelled = false;
   try {
-    const entries = replayOrder(await db.pendingWrites.toArray());
+    // Une entrée dont la reprise est espacée (échec récent) attend son heure, sauf reprise demandée à la main.
+    const now = Date.now();
+    const all = await db.pendingWrites.toArray();
+    const entries = replayOrder(all.filter(e => force || !e.nextAttemptAt || e.nextAttemptAt <= now));
     setProgress({ ...IDLE_PROGRESS, running: true, total: entries.length, startedAt: Date.now() });
 
     for (const entry of entries) {
+      if (cancelRequested) { cancelled = true; setProgress({ stopReason: 'cancelled' }); break; }
       if (!navigator.onLine) { setProgress({ stopReason: 'offline' }); break; }
+
+      // Plafond par passage : le reste des photos part au passage suivant (voir MAX_PHOTOS_PER_PASS).
+      if (entry.kind === 'multipart') {
+        const size = entry.blob?.size ?? 0;
+        if (photosThisPass >= MAX_PHOTOS_PER_PASS || (photosThisPass > 0 && bytesThisPass + size > MAX_BYTES_PER_PASS)) {
+          moreToSend = true;
+          break;
+        }
+        photosThisPass++;
+        bytesThisPass += size;
+      }
       setProgress({
         currentId: entry.id, currentEntity: entry.entity, currentKind: entry.kind,
         bytesSent: 0, bytesTotal: entry.kind === 'multipart' ? entry.blob?.size ?? 0 : 0,
@@ -445,26 +559,53 @@ export async function replayPendingWrites(): Promise<ReplayProgress> {
         // Permet à l'écran qui a mis l'écriture en file (toujours ouvert ou rouvert depuis) de lever
         // son badge « en attente » — voir Reunions.tsx. Chaque écran filtre par entity/id ce qui le concerne.
         window.dispatchEvent(new CustomEvent(OFFLINE_WRITE_SYNCED_EVENT, { detail: { id: entry.id, entity: entry.entity, data } }));
+        // Souffle entre deux photos : le serveur les décode une à une, sans enchaînement serré.
+        if (entry.kind === 'multipart') await new Promise(resolve => setTimeout(resolve, PAUSE_BETWEEN_PHOTOS_MS));
       } catch (error) {
+        if (error instanceof ReplayCancelledError) {
+          // Annulé par la personne : l'entrée reste en file, intacte, sans essai compté.
+          cancelled = true;
+          setProgress({ stopReason: 'cancelled' });
+          break;
+        }
         if (isNetworkError(error)) {
-          // Entrée gardée en attente, raison enregistrée (visible dans la liste), on passe à la suivante.
-          await db.pendingWrites.update(entry.id, { attempts: entry.attempts + 1, lastError: transientFailureMessage(error) });
+          // Entrée gardée en attente, raison enregistrée (visible dans la liste), reprise espacée (délai
+          // croissant) : sans cela, les 30 s du sondage rejouaient toute la file à chaque tour.
+          const attempts = entry.attempts + 1;
+          const status = (error as { status?: unknown } | null)?.status;
+          const delay = status === 429 ? 10_000 : backoffDelayMs(attempts);
+          lastFailure = transientFailureMessage(error);
+          await db.pendingWrites.update(entry.id, { attempts, lastError: lastFailure, nextAttemptAt: Date.now() + delay });
           setProgress({ processed: progress.processed + 1, failed: progress.failed + 1 });
+          failedPhotos++;
+          nextRetryMs = nextRetryMs ? Math.min(nextRetryMs, delay) : delay;
           consecutiveFailures++;
-          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) { setProgress({ stopReason: 'network' }); break; }
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES || status === 429) { setProgress({ stopReason: 'network' }); break; }
           continue;
         }
+        lastFailure = error instanceof Error ? error.message : String(error);
         await db.pendingWrites.update(entry.id, {
           status: 'error',
           attempts: entry.attempts + 1,
-          lastError: error instanceof Error ? error.message : String(error),
+          lastError: lastFailure,
         });
         setProgress({ processed: progress.processed + 1, failed: progress.failed + 1 });
+        failedPhotos++;
       }
     }
   } finally {
     replaying = false;
     setProgress({ running: false, currentId: null, currentEntity: null, currentKind: null, bytesSent: 0, bytesTotal: 0, finishedAt: Date.now() });
+  }
+
+  if (cancelled) {
+    notify('Envoi annulé. Les éléments restent en attente : ouvrez la pastille pour reprendre.', 'success');
+  } else if (failedPhotos > 0) {
+    const retry = nextRetryMs ? ` Nouvelle tentative automatique dans ${Math.max(1, Math.round(nextRetryMs / 1000))} s.` : '';
+    notify(`Problème d'envoi : ${failedPhotos} élément${failedPhotos > 1 ? 's' : ''} non envoyé${failedPhotos > 1 ? 's' : ''} (${lastFailure}).${retry}`, 'error');
+  } else if (moreToSend && !paused && consecutiveFailures === 0) {
+    // Lot suivant, quelques secondes plus tard : le serveur ne reçoit jamais tout d'un coup.
+    setTimeout(() => void replayPendingWrites(), FOLLOW_UP_DELAY_MS);
   }
   return progress;
 }
@@ -473,7 +614,7 @@ export async function replayPendingWrites(): Promise<ReplayProgress> {
  * Lance un rejeu en attendant qu'un éventuel passage déjà en cours se termine : un import ou un
  * « Réessayer » ne doit pas être avalé parce que le sondage de 30 s vient de démarrer.
  */
-export async function replayNow(): Promise<ReplayProgress> {
+export async function replayNow(force = false): Promise<ReplayProgress> {
   if (progress.running) {
     await new Promise<void>(resolve => {
       const unsubscribe = subscribeReplayProgress(() => {
@@ -481,7 +622,7 @@ export async function replayNow(): Promise<ReplayProgress> {
       });
     });
   }
-  return replayPendingWrites();
+  return replayPendingWrites(force);
 }
 
 let initialized = false;

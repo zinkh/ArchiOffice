@@ -21,11 +21,13 @@ import {
   IconStack2,
   IconUsers,
   IconCalendarDue,
+  IconList,
+  IconMap2,
+  IconX,
 } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import { CardHeader } from '../ui/Card';
 import { StatTile } from '../ui/StatTile';
-import { PlanAnnotator } from '../PlanAnnotator';
 import {
   queuedJsonRequest, listPendingWrites, getReplayProgress, subscribeReplayProgress,
   OFFLINE_WRITE_SYNCED_EVENT, OFFLINE_QUEUE_CHANGED_EVENT,
@@ -42,7 +44,12 @@ import type { AgencySettings } from '../../lib/proposalExport';
 import type { ReservesExportProject } from '../../lib/reservesExport';
 import { ReserveDetail, type LotOption } from './ReserveDetail';
 import { ReserveDiffusionDialog } from './ReserveDiffusionDialog';
-import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
+import { ReservePlanView } from './ReservePlanView';
+import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed, isReserveForRecord } from './reserveShared';
+import { construireLegende, couleursParCle, couleurDe } from '../../lib/reserveCouleurs';
+import {
+  SANS_LOT_FILTRE, choixDeLots, cleGroupe, correspondAuLot, libelleGroupe, numerosParLot, trierGroupes, trierParLot, voisine,
+} from '../../lib/reserveTri';
 // Sélection multiple : les mêmes composants que le DPGF et le BPU (barre d'actions et menus à cocher).
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import type { ToolbarMenuEntry } from './toolbar/toolbarState';
@@ -140,7 +147,16 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   useEffect(() => {
     try { selectedPlanId ? sessionStorage.setItem(planStorageKey, selectedPlanId) : sessionStorage.removeItem(planStorageKey); } catch { /* stockage indisponible */ }
   }, [planStorageKey, selectedPlanId]);
-  const planViewerRef = useRef<HTMLDivElement>(null);
+  // Deux présentations : la liste (tableau groupé par lot) ou la vue par plan (plan pleine largeur + volet des réserves).
+  const viewStorageKey = `reserves:view:${apiBase}:${projectId}`;
+  const [view, setView] = useState<'liste' | 'plan'>(() => {
+    try { return sessionStorage.getItem(viewStorageKey) === 'plan' ? 'plan' : 'liste'; } catch { return 'liste'; }
+  });
+  useEffect(() => {
+    try { sessionStorage.setItem(viewStorageKey, view); } catch { /* stockage indisponible */ }
+  }, [viewStorageKey, view]);
+  // Réserve mise en évidence dans la vue par plan (repère agrandi, ligne du volet colorée).
+  const [planFocusId, setPlanFocusId] = useState<string | null>(null);
   const [annotationCoords, setAnnotationCoords] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [openReserveId, setOpenReserveId] = useState<string | null>(null);
@@ -161,12 +177,20 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   const [filter, setFilter] = useState<Filter>('toutes');
   const [search, setSearch] = useState('');
   const [entrepriseFilter, setEntrepriseFilter] = useState('');
+  const [lotFilter, setLotFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const filtersActive = filter !== 'toutes' || !!entrepriseFilter || !!lotFilter || !!statusFilter || !!search.trim();
+  const resetFilters = () => { setFilter('toutes'); setEntrepriseFilter(''); setLotFilter(''); setStatusFilter(''); setSearch(''); };
+
+  // Numéros des lots de l'affaire (par intitulé) : classent le tableau et le volet, et préfixent les libellés.
+  const numeros = useMemo(() => numerosParLot(lotsList), [lotsList]);
+  const lotChoices = useMemo(() => choixDeLots(reserves, lotsList), [reserves, lotsList]);
 
   const reserveStats = useMemo(() => ({
     ouvertes: reserves.filter(r => r.status === 'A faire' || r.status === 'En cours').length,
     retard: reserves.filter(r => reserveOverdueDays(r) > 0).length,
     urgentes: reserves.filter(r => {
-      if (isReserveClosed(r) || !r.due_date) return false;
+      if (isReserveClosed(r) || isReserveForRecord(r) || !r.due_date) return false;
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const in7 = new Date(today.getTime() + 7 * 86400000);
       const due = new Date(r.due_date);
@@ -182,6 +206,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
     return [...names].sort((a, b) => a.localeCompare(b, 'fr'));
   }, [reserves]);
 
+  // Une couleur par entreprise (à défaut par lot) responsable, calculée sur TOUTES les réserves :
+  // filtrer la liste ne change jamais la couleur d'une entreprise.
+  const legende = useMemo(() => construireLegende(reserves), [reserves]);
+  const couleurs = useMemo(() => couleursParCle(legende), [legende]);
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return reserves.filter(r => {
@@ -189,6 +218,8 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         const noms = parseJsonList(r.entreprises);
         if (entrepriseFilter === SANS_ENTREPRISE ? noms.length > 0 : !noms.includes(entrepriseFilter)) return false;
       }
+      if (!correspondAuLot(r, lotFilter)) return false;
+      if (statusFilter && r.status !== statusFilter) return false;
       if (filter === 'ouvertes' && isReserveClosed(r)) return false;
       if (filter === 'retard' && reserveOverdueDays(r) === 0) return false;
       if (filter === 'levees' && !isReserveClosed(r)) return false;
@@ -197,9 +228,8 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [reserves, filter, search, entrepriseFilter]);
+  }, [reserves, filter, search, entrepriseFilter, lotFilter, statusFilter]);
 
-  const selectedPlan = plans.find(p => p.id === selectedPlanId) || null;
   const openReserve = reserves.find(r => r.id === openReserveId) || null;
 
   // Tous les repères de l'affaire (réserves ayant un plan et une position), tous plans confondus : le plan
@@ -210,34 +240,71 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
       const x = r.x == null ? NaN : Number(r.x);
       const y = r.y == null ? NaN : Number(r.y);
       if (!r.plan_id || !Number.isFinite(x) || !Number.isFinite(y)) return [];
-      return [{ id: r.id, planId: String(r.plan_id), x, y, number: r.number, title: r.title }];
+      return [{ id: r.id, planId: String(r.plan_id), x, y, number: r.number, title: r.title, couleur: couleurDe(r, couleurs) }];
     })
-  ), [reserves]);
-  const planMarkers = useMemo(() => (
-    allMarkers.filter(m => m.planId === selectedPlanId).map(({ planId: _planId, ...m }) => m)
-  ), [allMarkers, selectedPlanId]);
+  ), [reserves, couleurs]);
   const hasPlanMarker = (r: ReserveLike) => allMarkers.some(m => m.id === r.id);
+
+  // Vue par plan : seuls les repères des réserves affichées (filtres appliqués) sont dessinés, et le volet liste les mêmes.
+  const planMode = view === 'plan' && plans.length > 0;
+  const visibleMarkers = useMemo(() => {
+    const ids = new Set(visible.map(r => r.id));
+    return allMarkers.filter(m => ids.has(m.id));
+  }, [visible, allMarkers]);
+  const countsByPlan = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of visibleMarkers) counts.set(m.planId, (counts.get(m.planId) ?? 0) + 1);
+    return counts;
+  }, [visibleMarkers]);
+  // Le plan affiché : celui choisi, à défaut le premier qui porte des repères, à défaut le premier plan.
+  const planViewId = useMemo(() => {
+    if (plans.length === 0) return null;
+    if (selectedPlanId && plans.some(p => p.id === selectedPlanId)) return selectedPlanId;
+    return (plans.find(p => (countsByPlan.get(p.id) ?? 0) > 0) ?? plans[0]).id;
+  }, [plans, selectedPlanId, countsByPlan]);
+  const planMarkers = useMemo(() => (
+    visibleMarkers.filter(m => m.planId === planViewId).map(({ planId: _planId, ...m }) => m)
+  ), [visibleMarkers, planViewId]);
+  const planRows = useMemo(() => {
+    const ids = new Set(planMarkers.map(m => m.id));
+    return trierParLot(visible.filter(r => ids.has(r.id)), numeros);
+  }, [visible, planMarkers, numeros]);
+  const unplacedCount = useMemo(() => visible.filter(r => !hasPlanMarker(r)).length, [visible, allMarkers]);
+
   const showOnPlan = (r: ReserveLike) => {
     if (!r.plan_id) return;
+    // Une réserve masquée par un filtre n'aurait pas de repère à montrer : on lève les filtres.
+    if (!visible.some(v => v.id === r.id)) resetFilters();
     setSelectedPlanId(String(r.plan_id));
     setAnnotationCoords(null);
-    setTimeout(() => planViewerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    setPlanFocusId(r.id);
+    setView('plan');
   };
 
-  const groupKeyOf = (r: ReserveLike) => {
-    const lots = parseJsonList(r.lots);
-    const entreprises = parseJsonList(r.entreprises);
-    return lots.length > 0 ? `${lots.join(', ')} / ${entreprises.join(', ')}` : 'Sans Lot / Entreprise';
-  };
-
+  // Groupes du tableau rangés par NUMÉRO de lot (« 01 », « 01A », « 2 », « 10 »), les lots sans numéro puis les
+  // réserves sans lot en dernier ; dans un groupe, par numéro de réserve.
   const groups = useMemo(() => {
     const acc: Record<string, ReserveLike[]> = {};
-    for (const r of visible) (acc[groupKeyOf(r)] ||= []).push(r);
+    for (const r of visible) (acc[cleGroupe(r)] ||= []).push(r);
     for (const k of Object.keys(acc)) acc[k].sort((a, b) => (a.number || 0) - (b.number || 0));
-    return Object.entries(acc);
-  }, [visible]);
+    return trierGroupes(Object.entries(acc), numeros);
+  }, [visible, numeros]);
+  // Libellé (avec le numéro du lot) et couleur d'un groupe, lus sur ses lignes COMPLÈTES : un groupe replié n'en affiche aucune.
+  const groupInfo = useMemo(() => new Map(groups.map(([key, rows]) => [key, { label: libelleGroupe(rows[0], numeros), first: rows[0] }])), [groups, numeros]);
 
   const mobileList = useMemo(() => [...visible].sort((a, b) => (b.number || 0) - (a.number || 0)), [visible]);
+
+  // Ordre dans lequel les flèches de la fiche parcourent les réserves : celui que l'écran montre.
+  const navList = useMemo(
+    () => (planMode ? planRows : isDesktop ? groups.flatMap(([, rows]) => rows) : mobileList),
+    [planMode, planRows, isDesktop, groups, mobileList],
+  );
+  const goTo = (id: string) => { setOpenReserveId(id); setPlanFocusId(id); };
+  const navIndex = openReserveId ? navList.findIndex(r => r.id === openReserveId) : -1;
+  const previous = voisine(navList, openReserveId, -1);
+  const following = voisine(navList, openReserveId, 1);
+  // Un premier appui situe la réserve (plan et volet), un second l'ouvre.
+  const activateOnPlan = (id: string) => { if (planFocusId === id) setOpenReserveId(id); else setPlanFocusId(id); };
 
   const isGroupExpanded = useCallback((key: string) => expandedGroups[key] ?? true, [expandedGroups]);
   // Seule la présentation active est paginée : l'autre n'est pas montée.
@@ -249,7 +316,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
 
   // Un autre filtre ou une autre recherche repart de la première page : sinon on resterait sur une
   // fenêtre de 500 lignes pour trois résultats, ou en bas d'une liste qui n'existe plus.
-  useEffect(() => { setLimit(RESERVE_PAGE_SIZE); }, [filter, search, entrepriseFilter]);
+  useEffect(() => { setLimit(RESERVE_PAGE_SIZE); }, [filter, search, entrepriseFilter, lotFilter, statusFilter]);
 
   // Une réserve qu'on vient de créer se montre même si elle tombe au-delà de la fenêtre (elle clôt son
   // lot dans le tableau, et la liste mobile est triée du plus récent au plus ancien).
@@ -465,15 +532,22 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
             // Sur téléphone, les trois commandes remplissent la ligne sous le titre au lieu de se tasser à droite.
             <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto sm:justify-end">
               {plans.length > 0 && (
-                <select
-                  aria-label="Plan"
-                  className="flex-1 min-w-0 sm:flex-none bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 pointer-coarse:min-h-11 text-sm font-bold outline-none sm:max-w-[160px]"
-                  value={selectedPlanId || ''}
-                  onChange={e => { setSelectedPlanId(e.target.value || null); setAnnotationCoords(null); }}
-                >
-                  <option value="">Plan</option>
-                  {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                <div role="group" aria-label={t('reserve_view_label')} className="flex shrink-0 rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">
+                  {([['liste', IconList, 'reserve_view_list'], ['plan', IconMap2, 'reserve_view_plan']] as const).map(([id, Icone, cle]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => { setView(id); if (id === 'plan') setAnnotationCoords(null); }}
+                      aria-pressed={view === id}
+                      className={cn(
+                        'flex items-center gap-1.5 rounded-md px-3 py-1.5 pointer-coarse:min-h-11 text-sm font-bold transition-colors',
+                        view === id ? 'bg-white dark:bg-zinc-900 text-[var(--tblr-text)] shadow-sm' : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]',
+                      )}
+                    >
+                      <Icone size={14} /> {t(cle)}
+                    </button>
+                  ))}
+                </div>
               )}
               <button
                 onClick={openDiffusion}
@@ -495,33 +569,6 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
             </div>
           }
         />
-
-        {selectedPlan && (
-          <div ref={planViewerRef} className="p-3 sm:p-4 border-b border-[var(--tblr-border)] space-y-2 scroll-mt-16">
-            <div className="flex items-center gap-2 text-xs font-medium text-[var(--tblr-muted)] flex-wrap">
-              <IconMapPin size={14} className={annotationCoords ? 'text-green-600' : 'text-blue-600'} />
-              {annotationCoords ? (
-                <>
-                  <span>Repère posé sur le plan.</span>
-                  <button onClick={openForCreation} className="px-2 py-1 rounded bg-blue-600 text-white font-bold">Créer une réserve ici</button>
-                  <button onClick={() => setAnnotationCoords(null)} className="px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 font-bold">Annuler</button>
-                </>
-              ) : (
-                <span>Touchez le plan pour positionner une nouvelle réserve, ou un repère pour ouvrir sa fiche.</span>
-              )}
-            </div>
-            <div className="h-[60dvh] sm:h-[500px]">
-              <PlanAnnotator
-                fileUrl={selectedPlan.file_url}
-                markers={planMarkers}
-                pendingMarker={annotationCoords}
-                onAddMarker={(x, y) => setAnnotationCoords({ x, y })}
-                onSelectMarker={id => setOpenReserveId(id)}
-                isAddingMode
-              />
-            </div>
-          </div>
-        )}
 
         {/* Filtres et recherche */}
         <div className="px-3 sm:px-4 py-3 border-b border-[var(--tblr-border)] flex items-center gap-2 flex-wrap">
@@ -552,6 +599,27 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
               <option value={SANS_ENTREPRISE}>Sans entreprise</option>
             </select>
           )}
+          {lotChoices.length > 0 && (
+            <select
+              value={lotFilter}
+              onChange={e => setLotFilter(e.target.value)}
+              aria-label={t('reserve_filter_lot')}
+              className="max-w-[14rem] px-3 py-1.5 pointer-coarse:min-h-11 rounded-lg text-sm bg-zinc-100 dark:bg-zinc-800 border-none outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">{t('reserve_filter_lot_all')}</option>
+              {lotChoices.map(c => <option key={c.value} value={c.value}>{c.label} ({c.count})</option>)}
+              {reserves.some(r => parseJsonList(r.lots).length === 0) && <option value={SANS_LOT_FILTRE}>{t('reserve_filter_lot_none')}</option>}
+            </select>
+          )}
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            aria-label={t('reserve_filter_status')}
+            className="max-w-[12rem] px-3 py-1.5 pointer-coarse:min-h-11 rounded-lg text-sm bg-zinc-100 dark:bg-zinc-800 border-none outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">{t('reserve_filter_status_all')}</option>
+            {RESERVE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
           <div className="relative flex-1 min-w-[160px]">
             <IconSearch size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)]" />
             <input
@@ -562,14 +630,77 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
               className="w-full pl-8 pr-3 py-1.5 pointer-coarse:min-h-11 rounded-lg text-sm bg-zinc-100 dark:bg-zinc-800 border-none outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="flex items-center gap-1 px-2.5 py-1.5 pointer-coarse:min-h-11 rounded-lg text-xs font-bold text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <IconX size={12} /> {t('reserve_filter_reset')}
+            </button>
+          )}
           <span className="text-xs text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
         </div>
+        {legende.length > 0 && (
+          <ul
+            aria-label="Légende des couleurs par entreprise ou lot"
+            className="flex flex-wrap gap-x-4 gap-y-1.5 px-4 py-2 border-b border-[var(--tblr-border)] text-xs list-none m-0"
+          >
+            {legende.map(l => {
+              const actif = l.kind === 'entreprise'
+                ? entrepriseFilter === l.nom
+                : lotFilter.trim().toLowerCase() === l.nom.trim().toLowerCase();
+              const contenu = (
+                <>
+                  <span aria-hidden className="inline-block h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: l.couleur }} />
+                  <span className="truncate max-w-[12rem]">{l.nom}</span>
+                  <span className="text-[var(--tblr-muted)]">({l.total})</span>
+                </>
+              );
+              return (
+                <li key={l.cle}>
+                  <button
+                    type="button"
+                    onClick={() => (l.kind === 'entreprise' ? setEntrepriseFilter(actif ? '' : l.nom) : setLotFilter(actif ? '' : l.nom))}
+                    aria-pressed={actif}
+                    title={actif ? 'Retirer le filtre' : `Filtrer : ${l.nom}`}
+                    className={cn('inline-flex items-center gap-1.5 rounded-full px-1.5 py-0.5 pointer-coarse:min-h-8', actif && 'bg-zinc-200 dark:bg-zinc-700 font-semibold')}
+                  >
+                    {contenu}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
         {bulkNotice && (
           <div role="status" className={cn('px-4 py-2 text-xs font-medium border-b border-[var(--tblr-border)]', bulkNotice.error ? 'text-red-700 bg-red-50 dark:bg-red-950/20' : 'text-[var(--tblr-text)] bg-[var(--tblr-surface-2)]')}>
             {bulkNotice.text}
           </div>
         )}
 
+        {planMode && planViewId ? (
+          <ReservePlanView
+            plans={plans}
+            planId={planViewId}
+            onPlanChange={id => { setSelectedPlanId(id); setAnnotationCoords(null); setPlanFocusId(null); }}
+            rows={planRows}
+            markers={planMarkers}
+            countsByPlan={countsByPlan}
+            unplacedCount={unplacedCount}
+            couleurs={couleurs}
+            numeros={numeros}
+            selectedId={planFocusId}
+            onActivate={activateOnPlan}
+            onOpen={setOpenReserveId}
+            pendingCoords={annotationCoords}
+            onPlaceMarker={(x, y) => setAnnotationCoords({ x, y })}
+            onCreateHere={openForCreation}
+            onCancelPending={() => setAnnotationCoords(null)}
+            onStatusChange={changeStatus}
+            renderThumb={renderThumb}
+          />
+        ) : (<>
         {/* Mobile : une carte par réserve */}
         {!isDesktop && (
         <div className="divide-y divide-[var(--tblr-border)]">
@@ -580,7 +711,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
             return (
               // Le statut est un <select> : il ne peut pas vivre dans le <button> qui ouvre la fiche
               // (contrôles imbriqués) et sa pastille, large comme la plus longue option, débordait de la carte.
-              <div key={res.id} className={cn('px-3 py-3', retard > 0 && 'bg-red-50/40 dark:bg-red-950/10')}>
+              <div
+                key={res.id}
+                className={cn('px-3 py-3 border-l-4', retard > 0 && 'bg-red-50/40 dark:bg-red-950/10')}
+                style={{ borderLeftColor: couleurDe(res, couleurs) }}
+              >
               <button
                 type="button"
                 onClick={() => setOpenReserveId(res.id)}
@@ -645,11 +780,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                 </th>
                 <th className="px-4 py-3 text-left w-12">N°</th>
                 <th className="px-4 py-3 text-left w-16">Photo</th>
-                <th className="px-4 py-3 text-left">Intitulé</th>
-                <th className="px-4 py-3 text-left">Bâtiment / Local</th>
+                <th className="px-4 py-3 text-left min-w-[12rem]">Intitulé</th>
+                <th className="px-4 py-3 text-left hidden xl:table-cell">Bâtiment / Local</th>
                 <th className="px-2 py-3 text-center w-12" title="Repérage sur plan"><IconMapPin size={14} className="inline" aria-label="Repérage sur plan" /></th>
                 <th className="px-4 py-3 text-left">Statut</th>
-                <th className="px-4 py-3 text-left">Créé le</th>
+                <th className="px-4 py-3 text-left hidden lg:table-cell">Créé le</th>
                 <th className="px-4 py-3 text-left">Echéance / Retard</th>
                 <th className="px-4 py-3 text-right w-10"></th>
               </tr>
@@ -665,7 +800,10 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                       <td colSpan={10} className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {expanded ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
-                          <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
+                          {groupInfo.get(groupKey)?.first && (
+                            <span aria-hidden className="inline-block h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: couleurDe(groupInfo.get(groupKey)!.first, couleurs) }} />
+                          )}
+                          <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupInfo.get(groupKey)?.label ?? groupKey}</span>
                           <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupTotal} réserve{groupTotal > 1 ? 's' : ''})</span>
                         </div>
                       </td>
@@ -678,16 +816,24 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                           onClick={() => setOpenReserveId(res.id)}
                           className={cn('transition-colors group cursor-pointer', retard > 0 ? 'bg-red-50/30 dark:bg-red-950/10 hover:bg-red-50/50' : 'hover:bg-[var(--tblr-surface-2)]')}
                         >
-                          <td className="pl-4 pr-1 py-3 w-8" onClick={e => e.stopPropagation()}>{selectCell(res)}</td>
+                          <td
+                            className="pl-4 pr-1 py-3 w-8"
+                            style={{ boxShadow: `inset 4px 0 0 ${couleurDe(res, couleurs)}` }}
+                            onClick={e => e.stopPropagation()}
+                          >{selectCell(res)}</td>
                           <td className="px-4 py-3 font-mono text-[0.6875rem] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
                           <td className="px-4 py-2">{renderThumb(res, 'w-12 h-12')}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 min-w-[12rem]">
                             <div className="font-medium text-[var(--tblr-text)] flex items-center gap-1.5">
                               {res.title}
                               {res.pendingSync && (
                                 <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
                               )}
                             </div>
+                            {/* La colonne Bâtiment / Local est masquée sous 1280 px : elle passe sous le titre. */}
+                            {(res.batiment || res.local) && (
+                              <div className="xl:hidden text-[0.6875rem] text-[var(--tblr-muted)] truncate">{[res.batiment, res.local].filter(Boolean).join(' / ')}</div>
+                            )}
                             {res.description && <div className="text-[0.6875rem] text-[var(--tblr-muted)] line-clamp-1">{res.description}</div>}
                             {res.reponse && (
                               <div className="flex items-start gap-1 text-[0.6875rem] text-[var(--tblr-text)] line-clamp-2" title={res.reponse}>
@@ -696,7 +842,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>
+                          <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300 hidden xl:table-cell">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>
                           <td className="px-2 py-3 text-center" onClick={e => e.stopPropagation()}>
                             {hasPlanMarker(res) && (
                               <button
@@ -710,8 +856,9 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                               </button>
                             )}
                           </td>
-                          <td className="px-4 py-3"><StatusSelect value={res.status} onChange={s => changeStatus(res, s)} /></td>
-                          <td className="px-4 py-3 text-[0.6875rem] text-[var(--tblr-muted)]">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
+                          {/* Statut plafonné sous 1280 px : la pastille est large comme la plus longue option et écrasait le titre. */}
+                          <td className="px-2 xl:px-4 py-3"><StatusSelect value={res.status} onChange={s => changeStatus(res, s)} className="max-w-[7.5rem] xl:max-w-none" /></td>
+                          <td className="px-4 py-3 text-[0.6875rem] text-[var(--tblr-muted)] hidden lg:table-cell">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
                           <td className="px-4 py-3">
                             <div className="space-y-0.5">
                               <div className={cn('text-xs font-medium', retard > 0 ? 'text-red-500' : 'text-zinc-600 dark:text-zinc-300')}>
@@ -748,6 +895,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         )}
 
         <ListFooter shown={shownCount} total={totalCount} onMore={showMore} />
+        </>)}
       </div>
 
       {diffusionOpen && project && settings && (
@@ -756,6 +904,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           title={title}
           projectId={projectId}
           reserves={reserves}
+          couleurs={couleurs}
           plans={plans}
           project={project}
           settings={settings}
@@ -767,14 +916,22 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
       <AnimatePresence>
       {(creating || openReserve) && (
         <ReserveDetail
-          key={creating ? 'new' : openReserve!.id}
+          // Clé stable : passer à la réserve voisine ne referme ni ne rouvre la fenêtre (la fiche se réinitialise seule).
+          key={creating ? 'new' : 'detail'}
           apiBase={apiBase}
           projectId={projectId}
           reserve={creating ? null : openReserve}
           plans={plans}
           lotsList={lotsList}
+          couleurs={couleurs}
           existingMarkers={allMarkers}
-          pendingPlan={creating ? { planId: selectedPlanId, x: annotationCoords?.x, y: annotationCoords?.y } : null}
+          pendingPlan={creating ? { planId: planMode ? planViewId : selectedPlanId, x: annotationCoords?.x, y: annotationCoords?.y } : null}
+          nav={!creating && navIndex >= 0 ? {
+            index: navIndex,
+            total: navList.length,
+            onPrev: previous ? () => goTo(previous.id) : undefined,
+            onNext: following ? () => goTo(following.id) : undefined,
+          } : null}
           onClose={() => { setCreating(false); setOpenReserveId(null); }}
           onSaved={saved => {
             // Une réserve créée est montrée même au-delà de la fenêtre affichée (voir revealId).

@@ -28,8 +28,12 @@ function marqueurPourAgent(m: any): Record<string, unknown> | undefined {
     ...(m.statut === 'en_cours' ? { consigne: "Quelqu'un édite cet élément : ne le modifie pas sans l'accord explicite de l'utilisateur." } : {}),
   };
 }
-const MAX_ARTICLES_PER_LOT = 60;
-const MAX_LIGNES_PER_LOT = 120;
+// Budget de texte par appel (≈ 15 000 jetons) : au-delà, la réponse est paginée
+// avec un `offset` de reprise, jamais coupée sans le dire.
+const MAX_CHARS_PER_CALL = 60_000;
+const ARTICLE_OVERHEAD_CHARS = 200;
+const MAX_FULL_ARTICLE_CHARS = 30_000;
+const MAX_LIGNES_PER_LOT = 300;
 
 async function getJson(baseUrl: string, path: string, auth: InternalAuth): Promise<{ status: number; data: any }> {
   try {
@@ -88,31 +92,55 @@ function compterMarques(lot: any): { incomplets: number; en_cours: number } {
   return { incomplets, en_cours: enCours };
 }
 
-function resumerArticlesCctp(lignes: any[], remaining: { n: number }): Record<string, unknown>[] {
+// Pagination d'un lot : on compte TOUS les articles (total exact) mais on n'en
+// renvoie qu'une tranche tenant dans le budget de caractères. Sans ce décompte,
+// un lot long était coupé en silence et le modèle prenait la tranche pour le tout.
+interface PageCctp { skip: number; budget: number; total: number; returned: number; cut: boolean; nextOffset: number }
+
+function resumerArticlesCctp(lignes: any[], page: PageCctp): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   for (const l of lignes ?? []) {
-    if (remaining.n <= 0) break;
     if (Array.isArray(l?.children) && l.children.length) {
       const groupe = marqueurPourAgent(l?.marqueur);
-      if (groupe) out.push({ numero: l?.numero, designation: l?.designation, marqueur: groupe, note: "Article à sous-articles : son marqueur vaut pour l'ensemble." });
-      out.push(...resumerArticlesCctp(l.children, remaining));
+      if (groupe && page.budget > 0) out.push({ numero: l?.numero, designation: l?.designation, marqueur: groupe, note: "Article à sous-articles : son marqueur vaut pour l'ensemble." });
+      out.push(...resumerArticlesCctp(l.children, page));
       continue;
     }
-    remaining.n--;
+    const index = page.total++;
+    if (index < page.skip) continue;
+    if (page.budget <= 0) { page.cut = true; continue; }
     const text = String(l?.cctpDescription ?? '');
+    const contenu = text ? text.slice(0, MAX_ARTICLE_CHARS) : undefined;
+    page.budget -= (contenu?.length ?? 0) + ARTICLE_OVERHEAD_CHARS;
+    page.returned++;
+    page.nextOffset = index + 1;
+    const tronque = text.length > MAX_ARTICLE_CHARS;
     out.push({
       numero: l?.numero,
       designation: l?.designation,
       unite: l?.unite,
-      contenu: text ? text.slice(0, MAX_ARTICLE_CHARS) : undefined,
-      tronque: text.length > MAX_ARTICLE_CHARS || undefined,
+      contenu,
+      tronque: tronque || undefined,
+      longueur_totale: tronque ? text.length : undefined,
+      texte_complet: tronque ? `Texte coupé : rappelle read_cctp avec article="${l?.numero}" pour le lire en entier.` : undefined,
       marqueur: marqueurPourAgent(l?.marqueur),
     });
   }
   return out;
 }
 
-export function summarizeCctp(dpgf: any, wantedLot?: string): Record<string, unknown> {
+function trouverArticle(lignes: any[], numero: string): any | undefined {
+  for (const l of lignes ?? []) {
+    if (String(l?.numero ?? '').trim() === numero) return l;
+    const found = Array.isArray(l?.children) ? trouverArticle(l.children, numero) : undefined;
+    if (found) return found;
+  }
+  return undefined;
+}
+
+export interface CctpReadOptions { chapitre?: string; offset?: number; article?: string }
+
+export function summarizeCctp(dpgf: any, wantedLot?: string, opts: CctpReadOptions = {}): Record<string, unknown> {
   const lots: any[] = Array.isArray(dpgf?.lots) ? dpgf.lots : [];
   const header = {
     titre: dpgf?.titre ?? null,
@@ -140,19 +168,64 @@ export function summarizeCctp(dpgf: any, wantedLot?: string): Record<string, unk
     return { ...header, error: `Aucun lot ne correspond à « ${wantedLot} ».`, lots_disponibles: lots.map(l => `${l?.numero} ${l?.titre}`) };
   }
 
-  const remaining = { n: MAX_ARTICLES_PER_LOT };
-  const chapitres = (lot.chapitres || []).map((c: any) => ({
+  const lotInfo = { numero: lot.numero, titre: lot.titre };
+
+  // Lecture intégrale d'un seul article (texte non coupé à 1200 caractères).
+  if (opts.article) {
+    const wanted = opts.article.trim();
+    for (const c of lot.chapitres || []) {
+      const l = trouverArticle(c?.lignes || [], wanted);
+      if (!l) continue;
+      const text = String(l?.cctpDescription ?? '');
+      return {
+        ...header,
+        lot: lotInfo,
+        chapitre: { numero: c?.numero, titre: c?.titre },
+        article: {
+          numero: l?.numero, designation: l?.designation, unite: l?.unite,
+          contenu: text.slice(0, MAX_FULL_ARTICLE_CHARS),
+          longueur_totale: text.length,
+          tronque: text.length > MAX_FULL_ARTICLE_CHARS || undefined,
+          marqueur: marqueurPourAgent(l?.marqueur),
+        },
+      };
+    }
+    return { ...header, lot: lotInfo, error: `Aucun article « ${wanted} » dans ce lot.` };
+  }
+
+  let selection: any[] = lot.chapitres || [];
+  if (opts.chapitre) {
+    const needle = opts.chapitre.toLowerCase().trim();
+    selection = selection.filter((c: any) =>
+      String(c?.numero ?? '').toLowerCase() === needle || String(c?.titre ?? '').toLowerCase().includes(needle));
+    if (!selection.length) {
+      return { ...header, lot: lotInfo, error: `Aucun chapitre ne correspond à « ${opts.chapitre} ».`, chapitres_disponibles: (lot.chapitres || []).map((c: any) => `${c?.numero} ${c?.titre}`) };
+    }
+  }
+
+  const page: PageCctp = { skip: Math.max(0, Math.floor(opts.offset ?? 0)), budget: MAX_CHARS_PER_CALL, total: 0, returned: 0, cut: false, nextOffset: 0 };
+  const chapitres = selection.map((c: any) => ({
     numero: c?.numero,
     titre: c?.titre,
     description: c?.cctpDescription || undefined,
     marqueur: marqueurPourAgent(c?.marqueur),
-    articles: resumerArticlesCctp(c?.lignes || [], remaining),
+    nb_articles: nbArticlesCctp(c?.lignes || []),
+    articles: resumerArticlesCctp(c?.lignes || [], page),
   }));
 
-  return { ...header, lot: { numero: lot.numero, titre: lot.titre, description: lot.cctpDescription || undefined, marqueur: marqueurPourAgent(lot.marqueur), chapitres } };
+  return {
+    ...header,
+    lot: { ...lotInfo, description: lot.cctpDescription || undefined, marqueur: marqueurPourAgent(lot.marqueur), chapitres },
+    nb_articles_total: page.total,
+    nb_articles_retournes: page.returned,
+    tronque: page.cut || undefined,
+    suite: page.cut
+      ? { offset: page.nextOffset, consigne: `Lecture INCOMPLÈTE : ${page.total - page.nextOffset} article(s) restent à lire. Rappelle read_cctp avec le même lot et offset=${page.nextOffset} (ou chapitre=...), sans conclure avant d'avoir tout lu.` }
+      : undefined,
+  };
 }
 
-export function summarizeDpgf(dpgf: any, wantedLot?: string): Record<string, unknown> {
+export function summarizeDpgf(dpgf: any, wantedLot?: string, offset = 0): Record<string, unknown> {
   const lots: any[] = Array.isArray(dpgf?.lots) ? dpgf.lots : [];
   const header = {
     titre: dpgf?.titre ?? null,
@@ -177,28 +250,37 @@ export function summarizeDpgf(dpgf: any, wantedLot?: string): Record<string, unk
     return { ...header, error: `Aucun lot ne correspond à « ${wantedLot} ».`, lots_disponibles: lots.map(l => `${l?.numero} ${l?.titre}`) };
   }
 
+  const skip = Math.max(0, Math.floor(offset));
   const lignes: any[] = [];
+  let total = 0;
   const walk = (rows: any[]) => {
     for (const row of rows || []) {
-      if (lignes.length >= MAX_LIGNES_PER_LOT) return;
-      lignes.push({
-        numero: row?.numero,
-        designation: row?.designation,
-        unite: row?.unite,
-        quantite: row?.quantite,
-        prix_unitaire_ht: row?.prixUnitaire,
-        prix_total_ht: row?.prixTotal,
-        marqueur: marqueurPourAgent(row?.marqueur),
-      });
+      const index = total++;
+      if (index >= skip && lignes.length < MAX_LIGNES_PER_LOT) {
+        lignes.push({
+          numero: row?.numero,
+          designation: row?.designation,
+          unite: row?.unite,
+          quantite: row?.quantite,
+          prix_unitaire_ht: row?.prixUnitaire,
+          prix_total_ht: row?.prixTotal,
+          marqueur: marqueurPourAgent(row?.marqueur),
+        });
+      }
       if (Array.isArray(row?.children)) walk(row.children);
     }
   };
   for (const chapitre of lot.chapitres || []) walk(chapitre?.lignes || []);
 
+  const nextOffset = skip + lignes.length;
+  const cut = nextOffset < total;
   return {
     ...header,
     lot: { numero: lot.numero, titre: lot.titre, sous_total_ht: lot.sousTotal ?? null, lignes },
-    tronque: lignes.length >= MAX_LIGNES_PER_LOT || undefined,
+    nb_lignes_total: total,
+    nb_lignes_retournees: lignes.length,
+    tronque: cut || undefined,
+    suite: cut ? { offset: nextOffset, consigne: `Lecture INCOMPLÈTE : ${total - nextOffset} ligne(s) restent à lire. Rappelle read_dpgf avec le même lot et offset=${nextOffset}.` } : undefined,
   };
 }
 
@@ -215,7 +297,7 @@ const TYPE_MARCHE_LABELS: Record<string, string> = {
  * sur quantités réellement exécutées. C'est l'erreur métier que la
  * fonctionnalité existe pour éviter.
  */
-function summarizeBpu(bpu: any, wantedLot?: string): Record<string, unknown> {
+function summarizeBpu(bpu: any, wantedLot?: string, offset = 0): Record<string, unknown> {
   const marche = bpu?.marche ?? {};
   const lots: any[] = Array.isArray(bpu?.lots) ? bpu.lots : [];
 
@@ -257,11 +339,14 @@ function summarizeBpu(bpu: any, wantedLot?: string): Record<string, unknown> {
   const lot = lots.find(l => matchesLot(l, wantedLot));
   if (!lot) return { ...entete, erreur: `Aucun lot ne correspond à « ${wantedLot} ».` };
 
+  const skip = Math.max(0, Math.floor(offset));
   const articles: Record<string, unknown>[] = [];
+  let total = 0;
   const walk = (lignes: any[]) => {
     for (const l of lignes ?? []) {
-      if (articles.length >= MAX_LIGNES_PER_LOT) return;
       if (Array.isArray(l.children) && l.children.length) { walk(l.children); continue; }
+      const index = total++;
+      if (index < skip || articles.length >= MAX_LIGNES_PER_LOT) continue;
       articles.push({
         numero: l.numero,
         designation: String(l.designation ?? '').slice(0, MAX_ARTICLE_CHARS),
@@ -274,11 +359,16 @@ function summarizeBpu(bpu: any, wantedLot?: string): Record<string, unknown> {
   };
   for (const chap of lot.chapitres ?? []) walk(chap.lignes);
 
+  const nextOffset = skip + articles.length;
+  const cut = nextOffset < total;
   return {
     ...entete,
     lot: { numero: lot.numero, titre: lot.titre, montant_estimatif_ht: lot.sousTotal },
     articles,
-    tronque: articles.length >= MAX_LIGNES_PER_LOT || undefined,
+    nb_articles_lot_total: total,
+    nb_articles_retournes: articles.length,
+    tronque: cut || undefined,
+    suite: cut ? { offset: nextOffset, consigne: `Lecture INCOMPLÈTE : ${total - nextOffset} article(s) restent à lire. Rappelle read_bpu avec le même lot et offset=${nextOffset}.` } : undefined,
   };
 }
 
@@ -288,6 +378,9 @@ export function buildProjectDocTools(): FunctionDeclarationLike[] {
     properties: {
       project_id: { type: 'string', description: "Identifiant du projet (visible dans la liste des projets du prompt système)" },
       lot: { type: 'string', description: "Numéro ou titre du lot à détailler. Sans ce paramètre, seul le sommaire est renvoyé." },
+      chapitre: { type: 'string', description: "read_cctp uniquement : numéro ou titre d'un chapitre du lot, pour ne lire que lui." },
+      offset: { type: 'integer', description: "Reprise d'une lecture paginée : si la réponse porte `tronque: true`, rappelle l'outil avec le `suite.offset` indiqué, jusqu'à ce qu'elle ne soit plus tronquée." },
+      article: { type: 'string', description: "read_cctp uniquement : numéro d'un article (avec lot) pour lire son texte en entier, quand `contenu` est marqué tronqué." },
     },
     required: ['project_id'],
   };
@@ -352,9 +445,14 @@ export async function executeProjectDocTool(
 
   // La route du BPU rend la ligne entière (document + offres), pas le document.
   const payload = kind === 'bpu' ? (data.document ?? data) : data;
-  const summary = kind === 'cctp' ? summarizeCctp(payload, lot)
-    : kind === 'bpu' ? summarizeBpu(payload, lot)
-    : summarizeDpgf(payload, lot);
+  const offset = Number.isFinite(Number(args.offset)) ? Number(args.offset) : 0;
+  const summary = kind === 'cctp' ? summarizeCctp(payload, lot, {
+      chapitre: args.chapitre ? String(args.chapitre) : undefined,
+      article: args.article ? String(args.article) : undefined,
+      offset,
+    })
+    : kind === 'bpu' ? summarizeBpu(payload, lot, offset)
+    : summarizeDpgf(payload, lot, offset);
   return {
     response: summary,
     summary: `${label} consulté${lot ? ` (lot ${lot})` : ''}`,

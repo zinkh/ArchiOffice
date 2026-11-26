@@ -5,6 +5,7 @@
 // les deux doivent calculer exactement de la même façon, donc une seule
 // implémentation plutôt que deux qui dérivent avec le temps.
 import type { Contact } from '../types';
+import { listeTranches, tranchesActives, missionsDeTranche, type Tranche } from './tranches';
 import type { AgencySettings } from './proposalExport';
 import {
   ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO,
@@ -18,10 +19,14 @@ export interface FeeDistributionMission {
   default_pct?: number;
   amount?: number;
   percentages: Record<string, number>;
+  /** Tranche de rattachement (voir ./tranches.ts) ; absent = tranche ferme. */
+  tranche_id?: string;
 }
 
 export interface FeeDistributionData {
   missions: FeeDistributionMission[];
+  /** Tranches fermes et conditionnelles ; absent = mode tranches désactivé. */
+  tranches?: import('./tranches').Tranche[];
 }
 
 export const DEFAULT_MISSIONS: Omit<FeeDistributionMission, 'amount' | 'percentages'>[] = [
@@ -37,7 +42,49 @@ export const DEFAULT_MISSIONS: Omit<FeeDistributionMission, 'amount' | 'percenta
 ];
 
 export function defaultFeeDistribution(): FeeDistributionData {
-  return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
+  return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: { architect: 100 } })) };
+}
+
+/**
+ * Parts par défaut (en %) de l'architecte et du premier cotraitant sur chaque
+ * mission, d'après le tableau de répartition type du cabinet (architecte 70 %
+ * et BET 30 % sur le diagnostic, 80/20 sur l'APS, 60/40 sur l'APD, 50/50 sur
+ * le projet, 70/30 sur l'ACT, 75/25 sur la DET, 70/30 sur l'AOR, OPC 100 % BET).
+ * Le VISA suit la DET, l'esquisse suit le diagnostic. Ajustable ensuite.
+ */
+export const DEFAULT_COTRAITANT_SHARES: Record<string, { architect: number; cotraitant: number }> = {
+  esquisse: { architect: 70, cotraitant: 30 },
+  aps: { architect: 80, cotraitant: 20 },
+  apd: { architect: 60, cotraitant: 40 },
+  projet: { architect: 50, cotraitant: 50 },
+  act: { architect: 70, cotraitant: 30 },
+  visa: { architect: 75, cotraitant: 25 },
+  det: { architect: 75, cotraitant: 25 },
+  aor: { architect: 70, cotraitant: 30 },
+  opc: { architect: 0, cotraitant: 100 },
+};
+
+/**
+ * Initialise les parts non renseignées : architecte 100 %, cotraitants 0 %.
+ * Toute valeur saisie, y compris 0, est conservée. Renvoie null sans changement.
+ */
+export function applyDefaultCotraitantShares(
+  missions: FeeDistributionMission[],
+  contactIds: string[],
+): FeeDistributionMission[] | null {
+  let changed = false;
+  const next = missions.map(m => {
+    const pct = { ...(m.percentages || {}) };
+    let touched = false;
+    if (pct.architect === undefined) { pct.architect = 100; touched = true; }
+    contactIds.forEach((id) => {
+      if (pct[id] === undefined) { pct[id] = 0; touched = true; }
+    });
+    if (!touched) return m;
+    changed = true;
+    return { ...m, percentages: pct };
+  });
+  return changed ? next : null;
 }
 
 /**
@@ -90,6 +137,7 @@ export async function exportFeeDistributionToXlsx(
   vatRate: number | undefined,
   filenameLabel: string,
   settings: AgencySettings = {},
+  montantBase?: number,
 ): Promise<void> {
   if (!feeDistribution) return;
   try {
@@ -150,9 +198,21 @@ export async function exportFeeDistributionToXlsx(
     // de base) attend la ligne du sous-total, connue seulement après la première catégorie.
     const lignesRelatives: number[] = [];
 
+    // Tranches : un groupe par tranche (titre + catégories), sinon un seul groupe sans titre.
+    const listeT = listeTranches(data);
+    const groupes: Array<{ tranche: Tranche | null; missions: any[] }> = tranchesActives(data)
+      ? listeT.map(tr => ({ tranche: tr, missions: missionsDeTranche(data.missions, tr, listeT) }))
+      : [{ tranche: null, missions: data.missions }];
+    const sousTotauxParType: Record<'ferme' | 'conditionnelle', number[]> = { ferme: [], conditionnelle: [] };
+
+    groupes.forEach((groupe) => {
+    if (groupe.tranche) {
+      const tr = groupe.tranche;
+      ecrire([`${tr.label} (${tr.type === 'conditionnelle' ? 'tranche conditionnelle' : 'tranche ferme'})${tr.condition ? ` : ${tr.condition}` : ''}`], { gras: true, fond: 'groupe' });
+    }
     categories.forEach((cat) => {
       ecrire([cat.label], { gras: true, fond: 'doux' });
-      const missions = data.missions.filter((m: any) => m.category === cat.category);
+      const missions = groupe.missions.filter((m: any) => m.category === cat.category);
       const startRow = ligne + 1;
 
       missions.forEach((m: any) => {
@@ -166,7 +226,7 @@ export async function exportFeeDistributionToXlsx(
         soldeFormula += "))/100";
         rowData.push({ f: soldeFormula });
 
-        rowData.push(m.percentages['architect'] || 0);
+        rowData.push(m.percentages?.['architect'] ?? 100);
         rowData.push({ f: `B${r}*E${r}/100` });
 
         selectedContacts.forEach((c, i) => {
@@ -179,8 +239,9 @@ export async function exportFeeDistributionToXlsx(
       });
 
       const subRowIdx = ligne + 1;
-      if (cat.category === "Mission base") baseSubtotalRow = subRowIdx;
+      if (cat.category === "Mission base" && !baseSubtotalRow) baseSubtotalRow = subRowIdx;
       sousTotaux.push(subRowIdx);
+      if (groupe.tranche) sousTotauxParType[groupe.tranche.type].push(subRowIdx);
 
       const subRow: Cellule[] = [`Sous-total ${cat.label}`];
       subRow.push({ f: `SUM(B${startRow}:B${subRowIdx - 1})` });
@@ -195,14 +256,24 @@ export async function exportFeeDistributionToXlsx(
       ecrire(subRow, { gras: true, fond: 'groupe' });
       f.vide(); ligne++;
     });
+    });
 
     for (const row of lignesRelatives) {
       const cell = f.ws.getRow(row).getCell(3);
-      cell.value = { formula: `B${row}/$B$${baseSubtotalRow}*100` };
+      // Même référence que la grille : le montant des honoraires de base quand il est
+      // connu, sinon le sous-total de base (le total relatif peut alors s'écarter de 100).
+      cell.value = { formula: montantBase && montantBase > 0 ? `B${row}/${montantBase}*100` : `B${row}/$B$${baseSubtotalRow}*100` };
       cell.numFmt = pct;
     }
 
     const htSumFormula = sousTotaux.map(r => `B${r}`).join("+");
+    if (tranchesActives(data)) {
+      const somme = (rows: number[]) => (rows.length ? rows.map(r => `B${r}`).join("+") : "0");
+      f.total(["TOTAL TRANCHES FERMES HT", { f: somme(sousTotauxParType.ferme) }]); ligne++;
+      if (sousTotauxParType.conditionnelle.length > 0) {
+        f.total(["TOTAL TRANCHES CONDITIONNELLES HT", { f: somme(sousTotauxParType.conditionnelle) }]); ligne++;
+      }
+    }
     f.total(["TOTAL GENERAL HT", { f: htSumFormula }]); ligne++;
     const vat = vatRate || 20;
     f.ligne([`TVA (${vat}%)`, { f: `B${ligne}*${vat}/100` }]); ligne++;

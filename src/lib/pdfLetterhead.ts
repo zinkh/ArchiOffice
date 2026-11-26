@@ -32,6 +32,19 @@ export interface LetterheadOptions {
    * liste vide : l'en-tête reste celui du cabinet seul.
    */
   partnerLogos?: LogoImage[];
+  /**
+   * Mandataire du groupement quand ce n'est pas le cabinet : son logo et ses
+   * coordonnées prennent l'en-tête principal, le cabinet passe dans le bandeau
+   * « En groupement avec ». Absent : le mandataire du groupement actif de
+   * l'écran ; `null` : l'en-tête reste celui du cabinet.
+   */
+  mandataire?: CotraitantIdentity | null;
+  /**
+   * Texte du pied de page, à la place de la ligne du cabinet (nom, adresse,
+   * coordonnées, SIRET). Une fonction le donne page par page ; une chaîne vide
+   * ne laisse que la pagination.
+   */
+  piedDePage?: string | ((page: number) => string);
 }
 
 // ── Groupement actif ─────────────────────────────────────────────────────────
@@ -45,6 +58,61 @@ let groupementActif: LogoImage[] = [];
 
 export function setActiveGroupementLogos(logos: LogoImage[]): void {
   groupementActif = logos;
+}
+
+// Mandataire du groupement actif, quand c'est un cotraitant (voir
+// useActiveGroupement) : même principe que les logos, lu par chaque en-tête.
+let mandataireActif: CotraitantIdentity | null = null;
+// Logo du cabinet, gardé avec le mandataire : il rejoint alors le bandeau « En
+// groupement avec » des documents Word et Excel, qui ne reçoivent pas de logo.
+let logoCabinetActif: LogoImage | null = null;
+
+export function setActiveMandataire(mandataire: CotraitantIdentity | null, logoCabinet: LogoImage | null = null): void {
+  mandataireActif = mandataire;
+  logoCabinetActif = mandataire ? logoCabinet : null;
+}
+
+/** Mandataire du groupement actif (cotraitant), ou null quand c'est le cabinet. */
+export function getActiveMandataire(): { mandataire: CotraitantIdentity; logoCabinet: LogoImage | null } | null {
+  return mandataireActif ? { mandataire: mandataireActif, logoCabinet: logoCabinetActif } : null;
+}
+
+/**
+ * Réglages à imprimer dans l'en-tête principal d'un document Word : ceux du
+ * cabinet, ou ceux du cotraitant mandataire (nom, adresse, contact, logo). Le
+ * pied de page garde les réglages d'origine.
+ */
+export function reglagesEntete(settings: AgencySettings): AgencySettings {
+  const m = mandataireActif;
+  if (!m) return settings;
+  return {
+    ...settings, agencyName: m.titre, address: m.adresse, phone: m.telephone, email: m.email,
+    logoUrl: m.logo?.dataUrl ?? '',
+  };
+}
+
+/**
+ * Ce qui s'imprime dans l'en-tête principal : le cabinet, ou le cotraitant
+ * mandataire (logo et coordonnées), le cabinet rejoignant alors le bandeau des
+ * partenaires. Le pied de page reste celui du cabinet.
+ */
+export function enteteDe(
+  settings: AgencySettings, opts: Pick<LetterheadOptions, 'logo' | 'partnerLogos' | 'mandataire'>,
+): { settings: AgencySettings; logo: LogoImage | null; partners: LogoImage[] } {
+  const partners = resolvePartnerLogos(opts.partnerLogos);
+  const m = opts.mandataire === undefined ? mandataireActif : opts.mandataire;
+  if (!m) return { settings, logo: opts.logo ?? null, partners };
+  return {
+    settings: { ...settings, agencyName: m.titre, address: m.adresse, phone: m.telephone, email: m.email },
+    logo: m.logo,
+    partners: [...((opts.logo ?? (opts.mandataire === undefined ? logoCabinetActif : null)) ? [(opts.logo ?? logoCabinetActif) as LogoImage] : []), ...partners],
+  };
+}
+
+/** Logos du bandeau « En groupement avec » : le cabinet s'y ajoute quand un cotraitant est mandataire. */
+export function logosDuBandeau(explicit?: LogoImage[]): LogoImage[] {
+  const cabinet = explicit === undefined && mandataireActif && logoCabinetActif ? [logoCabinetActif] : [];
+  return [...cabinet, ...resolvePartnerLogos(explicit)];
 }
 
 /** Logos à imprimer : ceux passés explicitement, à défaut ceux du groupement actif. */
@@ -75,6 +143,18 @@ export function agencyFooterLine(s: AgencySettings): string {
 }
 
 /**
+ * Pied de page d'un document de groupement : l'identité du mandataire (nom, adresse,
+ * contact, SIRET) quand c'est un cotraitant, sinon la ligne du cabinet. La TVA et le
+ * numéro d'ordre du cabinet ne sont jamais mêlés à ceux d'un autre.
+ */
+export function piedDePageMandataire(s: AgencySettings): string {
+  const m = mandataireActif;
+  if (!m) return agencyFooterLine(s);
+  return [m.titre, m.adresse, m.telephone ? `Tél : ${m.telephone}` : '', m.email, m.siret ? `SIRET ${m.siret}` : '']
+    .filter(Boolean).join('  ·  ');
+}
+
+/**
  * Charge le logo du cabinet en data URL, avec ses dimensions réelles — le
  * rapport largeur/hauteur est indispensable pour ne pas le déformer.
  * Rend null en cas d'échec : un logo manquant ne doit jamais empêcher un export.
@@ -92,16 +172,17 @@ export async function loadLogoDataUrl(
       el.src = logoUrl;
     });
     const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
+    const echelle = Math.min(1, 800 / Math.max(img.naturalWidth, img.naturalHeight));
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * echelle));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * echelle));
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     return {
       dataUrl: canvas.toDataURL('image/png'),
       format: 'PNG',
-      width: img.naturalWidth,
-      height: img.naturalHeight,
+      width: canvas.width,
+      height: canvas.height,
     };
   } catch {
     return null;
@@ -136,8 +217,9 @@ export const ENTETE_REDUIT_BAS = 16;
  * Rend l'ordonnée où le contenu peut commencer.
  */
 export function drawCompactHeader(
-  pdf: any, settings: AgencySettings, opts: Pick<LetterheadOptions, 'title' | 'subtitle' | 'margin'>,
+  pdf: any, agencySettings: AgencySettings, opts: Pick<LetterheadOptions, 'title' | 'subtitle' | 'margin' | 'mandataire'>,
 ): number {
+  const settings = enteteDe(agencySettings, opts).settings;
   const pageW = pdf.internal.pageSize.getWidth();
   const margin = opts.margin ?? 14;
   const base = 8;
@@ -168,9 +250,10 @@ export function drawCompactHeader(
  * ligne réduite (voir plus haut), jamais le logo.
  */
 export function drawAgencyHeader(
-  pdf: any, settings: AgencySettings, opts: LetterheadOptions,
+  pdf: any, agencySettings: AgencySettings, opts: LetterheadOptions,
 ): number {
-  if (pageCourante(pdf) > 1) return drawCompactHeader(pdf, settings, opts);
+  if (pageCourante(pdf) > 1) return drawCompactHeader(pdf, agencySettings, opts);
+  const { settings, logo, partners } = enteteDe(agencySettings, opts);
   marquerEntete(pdf, 1);
   const pageW = pdf.internal.pageSize.getWidth();
   const margin = opts.margin ?? 14;
@@ -178,12 +261,12 @@ export function drawAgencyHeader(
 
   // Logo à gauche, hauteur bornée, rapport conservé.
   let textX = margin;
-  if (opts.logo) {
+  if (logo) {
     const hMax = 14;
     const h = hMax;
-    const w = (opts.logo.width / opts.logo.height) * h;
+    const w = (logo.width / logo.height) * h;
     try {
-      pdf.addImage(opts.logo.dataUrl, opts.logo.format, margin, y, w, h);
+      pdf.addImage(logo.dataUrl, logo.format, margin, y, w, h, undefined, 'SLOW');
       textX = margin + w + 5;
     } catch { /* un logo illisible ne doit pas emporter l'export */ }
   }
@@ -202,10 +285,24 @@ export function drawAgencyHeader(
   if (contact) { pdf.text(contact, textX, infoY); infoY += 3.5; }
 
   // Titre du document, à droite.
+  // Le titre ne doit jamais passer sur le bloc de gauche : il est réduit (12 à 8 pt)
+  // puis coupé à la place restante.
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(12);
   pdf.setTextColor(...GRIS_TEXTE);
-  pdf.text(opts.title, pageW - margin, y + 4.5, { align: 'right' });
+  pdf.setFontSize(12);
+  let titre = opts.title;
+  if (typeof pdf.getTextWidth === 'function') {
+    const infos = [settings.address, [settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  ')];
+    pdf.setFontSize(11);
+    const largeurAgence = pdf.getTextWidth(settings.agencyName || '');
+    const largeurInfos = Math.max(0, ...infos.map(l => (l ? pdf.getTextWidth(l) * (7.5 / 11) : 0)));
+    const placeTitre = Math.max(pageW - margin - (textX + Math.max(largeurAgence, largeurInfos)) - 8, 30);
+    let tailleTitre = 12;
+    pdf.setFontSize(tailleTitre);
+    while (tailleTitre > 8 && pdf.getTextWidth(opts.title) > placeTitre) { tailleTitre -= 0.5; pdf.setFontSize(tailleTitre); }
+    titre = (pdf.splitTextToSize(opts.title, placeTitre) as string[])[0] ?? '';
+  }
+  pdf.text(titre, pageW - margin, y + 4.5, { align: 'right' });
   if (opts.subtitle) {
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(8.5);
@@ -225,7 +322,7 @@ export function drawAgencyHeader(
   pdf.setLineWidth(0.4);
   pdf.line(margin, y, pageW - margin, y);
 
-  const bandeauBas = drawPartnerLogos(pdf, resolvePartnerLogos(opts.partnerLogos), margin, y + 3);
+  const bandeauBas = drawPartnerLogos(pdf, partners, margin, y + 3);
   if (bandeauBas !== null) {
     pdf.setLineWidth(0.25);
     pdf.line(margin, bandeauBas, pageW - margin, bandeauBas);
@@ -262,7 +359,7 @@ export function drawPartnerLogos(
     }
     if (x + w > pageW - margin) break;
     try {
-      pdf.addImage(logo.dataUrl, logo.format, x, logoTop + (PARTNER_LOGO_HEIGHT - h) / 2, w, h);
+      pdf.addImage(logo.dataUrl, logo.format, x, logoTop + (PARTNER_LOGO_HEIGHT - h) / 2, w, h, undefined, 'SLOW');
     } catch { /* un logo illisible ne doit pas emporter l'export */ }
     x += w + PARTNER_LOGO_GAP;
   }
@@ -383,6 +480,32 @@ export async function loadCotraitantIdentities(
 }
 
 /**
+ * Membre du groupement qui peut être désigné mandataire : le cabinet l'est par
+ * défaut, un cotraitant l'est quand son contrat le marque `mandataire`.
+ */
+export interface GroupementMemberMandataire extends GroupementMember {
+  mandataire?: boolean;
+}
+
+/**
+ * En-tête d'un groupement : le cotraitant mandataire (identité complète, s'il y
+ * en a un) et les logos des AUTRES cotraitants, qui vont dans le bandeau « En
+ * groupement avec ». Sans mandataire, tous les logos de cotraitants.
+ */
+export async function loadGroupementHeader(
+  members: GroupementMemberMandataire[] | undefined | null,
+): Promise<{ mandataire: CotraitantIdentity | null; partnerLogos: LogoImage[] }> {
+  const identites = await loadCotraitantIdentities(members);
+  const idMandataire = (members ?? []).find(m => m.mandataire && m.contact_id)?.contact_id;
+  const mandataire = identites.find(i => i.contactId === idMandataire) ?? null;
+  const partnerLogos = identites
+    .filter(i => i !== mandataire)
+    .map(i => i.logo)
+    .filter((l): l is LogoImage => l !== null);
+  return { mandataire, partnerLogos };
+}
+
+/**
  * Dessine le pied de page sur TOUTES les pages. À appeler une fois le contenu
  * terminé, quand le nombre de pages est connu.
  *
@@ -391,14 +514,18 @@ export async function loadCotraitantIdentities(
  * agents (packages/archioffice-agents/src/server/artifacts.ts).
  */
 export function drawAgencyFooters(pdf: any, settings: AgencySettings, opts: LetterheadOptions): void {
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
   const margin = opts.margin ?? 14;
   const total = pdf.internal.getNumberOfPages();
-  const ligne = agencyFooterLine(settings);
+  const ligneCabinet = agencyFooterLine(settings);
 
   for (let p = 1; p <= total; p++) {
     pdf.setPage(p);
+    const ligne = typeof opts.piedDePage === 'function' ? opts.piedDePage(p) : (opts.piedDePage ?? ligneCabinet);
+    // Taille lue page par page, APRÈS setPage : un document qui mêle portrait et paysage (annexe de plans) a des
+    // pages de tailles différentes. Lue une seule fois avant la boucle, c'était celle de la dernière page, et le
+    // pied des pages portrait se dessinait à 210 mm au lieu de 297 mm, en plein milieu du contenu.
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
     if (p > 1 && !pagesAvecEntete.get(pdf)?.has(p)) drawCompactHeader(pdf, settings, opts);
     pdf.setDrawColor(...GRIS_FILET);
     pdf.setLineWidth(0.25);
