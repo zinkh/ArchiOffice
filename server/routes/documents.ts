@@ -21,6 +21,7 @@ import { isOwnStorageRef } from '../externalStorage/externalRef';
 import { isProjectArchived } from './projectArchive';
 import { buildDocumentFolderPath } from '../externalStorage/businessFolderPath';
 import { createDocumentFolderResolver } from '../externalStorage/documentFolders';
+import { resolveFolderForDocument } from './documentFolders';
 import type { RelocateBusinessFile, RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/storeBusinessFile';
 
 // Ressources auxquelles une pièce jointe peut se rattacher au-delà d'un
@@ -157,6 +158,12 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       }
 
       const phaseVal = phase || null;
+      // Dossier libre sous la phase (GED) : facultatif, de la même affaire et de la même phase.
+      const folderIdVal: string | null = req.body.folder_id || null;
+      if (folderIdVal) {
+        const resolved = await resolveFolderForDocument(supabaseAdmin, tenantId, folderIdVal, projectIdVal, phaseVal);
+        if (resolved.error) return res.status(400).json({ error: resolved.error });
+      }
       const id = crypto.randomUUID();
       const phaseSegment = phaseVal ? `${safeSegment(phaseVal)}/` : '';
       const stored = await storeBusinessFile({
@@ -170,7 +177,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       }, file.buffer, file.mimetype);
       const file_url = stored.fileUrl;
       const uploaded_at = new Date().toISOString();
-      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, resource_type: resourceType, resource_id: resourceIdVal, name, category, phase: phaseVal, version: 1, file_url, storage_backend: stored.storageBackend, mime_type: file.mimetype, size_bytes: stored.sizeBytes, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
+      const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, resource_type: resourceType, resource_id: resourceIdVal, name, category, phase: phaseVal, version: 1, file_url, storage_backend: stored.storageBackend, mime_type: file.mimetype, size_bytes: stored.sizeBytes, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending', ...(folderIdVal ? { folder_id: folderIdVal } : {}) });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, storage_backend: stored.storageBackend, uploaded_by, uploaded_at, description, size_bytes: stored.sizeBytes });
       // Partage automatique (si le cabinet l'a demandé pour ce type de document) : en
@@ -341,6 +348,28 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
         if (validation_status !== undefined) updateFields.validation_status = validation_status;
         if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
+
+        // Dossier libre sous la phase : choisi explicitement (folder_id, vide pour le retirer), sinon
+        // retiré tout seul quand le document change d'affaire ou de phase (un dossier ne vaut que
+        // pour son affaire et sa phase). Une instance non migrée n'a pas la colonne : rien n'est écrit.
+        {
+          const { data: curDoc } = await supabaseAdmin.from('documents').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+          const current = curDoc as any;
+          if (current) {
+            const nextProject = 'project_id' in updateFields ? updateFields.project_id : (current.project_id || null);
+            const nextPhase = 'phase' in updateFields ? updateFields.phase : (current.phase || null);
+            const requested = req.body.folder_id !== undefined ? (req.body.folder_id || null) : undefined;
+            if (requested) {
+              const resolved = await resolveFolderForDocument(supabaseAdmin, tenantId, requested, nextProject || null, nextPhase || null);
+              if (resolved.error) return res.status(400).json({ error: resolved.error });
+              updateFields.folder_id = requested;
+            } else if (requested === null) {
+              if (current.folder_id) updateFields.folder_id = null;
+            } else if (current.folder_id && ((nextProject || null) !== (current.project_id || null) || (nextPhase || 'Général') !== (current.phase || 'Général'))) {
+              updateFields.folder_id = null;
+            }
+          }
+        }
 
         // Classement : un fichier hébergé sur l'espace du cabinet suit son document dans
         // l'arborescence du drive. Si le fournisseur refuse, rien n'est changé en base

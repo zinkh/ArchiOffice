@@ -137,6 +137,7 @@ import { registerRfiRoutes } from "./server/routes/rfis";
 import { registerProjectRoutes } from "./server/routes/projects";
 import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
+import { registerDocumentFolderRoutes } from "./server/routes/documentFolders";
 import { registerDesktopSyncRoutes } from "./server/routes/desktopSync";
 import { registerDesktopAiRoutes } from "./server/routes/desktopAi";
 import { registerKnowledgeSharingRoutes } from "./server/routes/knowledgeSharing";
@@ -1280,6 +1281,7 @@ export async function createApp() {
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, relocateBusinessFile, requireRole });
+  registerDocumentFolderRoutes(app, { supabaseAdmin, getTenantId });
   // Synchronisation desktop (Explorateur Windows, Finder macOS) : /api/desktop/v1.
   registerDesktopAiRoutes(app, { supabaseAdmin, getTenantId, maybeRefreshMonthlyCredits, reserveAiCredit, refundAiCredit, estimateReserveCents, settleAiCredit });
   registerDesktopSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, getSystemRole });

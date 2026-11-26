@@ -7,10 +7,10 @@
 
 export type ProjectTabId =
   | 'INFOS' | 'TACHES' | 'HONOS' | 'INSPIRATION' | 'DIAG' | 'CT' | 'CSPS' | 'PRO' | 'NOTICES' | 'ACT'
-  | 'VISA' | 'DET' | 'RDT' | 'AOR' | 'GPA' | 'CORRESPONDANCE';
+  | 'VISA' | 'DET' | 'RDT' | 'AOR' | 'GPA' | 'DOCS' | 'CORRESPONDANCE';
 
 export type ProjectTabGroupId =
-  | 'INFOS' | 'TACHES' | 'HONOS' | 'ETUDES' | 'CONSULTATION' | 'CHANTIER' | 'CORRESPONDANCE';
+  | 'INFOS' | 'TACHES' | 'HONOS' | 'ETUDES' | 'CONSULTATION' | 'CHANTIER' | 'DOCUMENTS' | 'CORRESPONDANCE';
 
 export interface ProjectTabGroup {
   id: ProjectTabGroupId;
@@ -25,6 +25,8 @@ export const PROJECT_TAB_GROUPS: readonly ProjectTabGroup[] = [
   { id: 'ETUDES', tabs: ['INSPIRATION', 'DIAG', 'CT', 'CSPS', 'PRO', 'NOTICES'] },
   { id: 'CONSULTATION', tabs: ['ACT'] },
   { id: 'CHANTIER', tabs: ['VISA', 'DET', 'RDT', 'AOR', 'GPA'] },
+  // Les documents de l'affaire (vue simple par phase) : la vue GED générale vit sur /documents.
+  { id: 'DOCUMENTS', tabs: ['DOCS'] },
   { id: 'CORRESPONDANCE', tabs: ['CORRESPONDANCE'] },
 ];
 

@@ -8,6 +8,7 @@ import { isProjectArchived } from './routes/projectArchive';
 export const TABLES_RATTACHEES: Record<string, string> = {
   tasks: 'tasks',
   documents: 'documents',
+  'document-folders': 'document_folders',
   invoices: 'invoices',
   reserves: 'reserves',
   receptions: 'receptions',
