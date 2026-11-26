@@ -196,7 +196,8 @@ export function buildDocxFillTools(): FunctionDeclarationLike[] {
   }];
 }
 
-async function findDocument(baseUrl: string, auth: InternalAuth, id: string): Promise<any | null> {
+/** Ligne `documents` d'un identifiant (une pièce du cabinet), partagée avec fill_pdf_form. */
+export async function findDocument(baseUrl: string, auth: InternalAuth, id: string): Promise<any | null> {
   const res = await fetch(`${baseUrl}/api/documents?id=${encodeURIComponent(id)}`, { headers: internalHeaders(auth) });
   if (!res.ok) return null;
   const rows = await res.json().catch(() => []);

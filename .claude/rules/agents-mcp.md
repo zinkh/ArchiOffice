@@ -606,6 +606,21 @@ sur une fiche, au lieu de « recopier le texte dans la conversation ». Exposé 
 - Le repère de chaque document joint porte désormais `[document_id: ...]` (`docContentsSection`), pour que l'agent l'appelle sans passer par `list_documents`.
 - `GET /api/documents` accepte un filtre `id` (un seul document, sans relire toute la GED).
 
+**`fill_pdf_form`** (`pdfFillTool.ts`, `tests/agentPdfFill.test.ts`) est le pendant pour un PDF à champs de formulaire (CERFA,
+formulaires administratifs ; `pdf-lib`, AcroForm) : `inspect` rend les champs (nom, type, valeur, choix possibles, lecture seule),
+`fill` pose `values: [{ field, value }]` (case : booléen ; liste ou choix unique : une option rendue par `inspect`, casse tolérée) et
+range un NOUVEAU PDF (« <nom> - rempli.pdf »), qui reste modifiable (pas d'aplatissement). Un champ inexistant, en lecture seule ou à
+choix invalide est rapporté (`non_appliquees`), jamais passé sous silence. **Un PDF sans champ (scan, PDF à plat) n'est pas rempli** :
+l'outil le dit, l'agent propose un document à part (bloc `artifact`). Pas de repérage par coordonnées. Mêmes conditions d'exposition
+que `fill_docx_template` (`docsRead` et scope `projects`) et mêmes limites (15 Mo, valeurs issues de la fiche, signature à la main).
+
+**Un `system_prompt_override` ne retire plus ces capacités** : la section « génération de fichiers » (blocs `artifact`, `attach_to`)
+et la règle de remplissage Word et PDF sont des constantes de module (`ARTIFACTS_SECTION`, `docxFillSectionFor`), reprises dans le
+prompt réécrit comme dans le prompt généré. Avant, un agent au prompt personnalisé (Sophie) ne savait pas qu'il pouvait produire un
+fichier et répondait « je ne peux pas générer de fichier Word » (`tests/agentPdfFill.test.ts`, bloc « agent au prompt personnalisé »).
+La génération de documents depuis zéro (courrier, attestation, tableau) existait déjà par les blocs `artifact` (charte du cabinet) :
+rien à ajouter côté serveur.
+
 **Affaire ouverte à l'écran** : `active_project_id` n'était pris en compte que s'il avait la forme d'un identifiant hexadécimal, alors
 que `projects.id` est un TEXT : pour une affaire dont l'identifiant n'était pas un UUID, l'agent ne recevait aucune affaire et
 redemandait « quelle opération ? ». `isPlausibleProjectId` (`routes.ts`, `tests/agentActiveProject.test.ts`) n'écarte plus que ce

@@ -91,6 +91,56 @@ Chaque création (create_record, create_site_report, add_site_report_observation
 - Quand l'information vient de plusieurs endroits (une page lue ET un message de l'utilisateur, par exemple un e-mail qu'il te dicte), sépare les passages par « … » dans une seule citation : chacun est vérifié séparément. Ne demande pas de reconfirmer ce que l'utilisateur t'a déjà écrit dans la conversation : cite sa phrase.
 - Une proposition d'honoraires (devis) se crée avec la ressource « proposals » (terrain, programme et coût des travaux compris), pas avec « projects ».`;
 
+/** Règle de remplissage de modèle Word : posée aussi sous un system_prompt_override (elle dépend des capacités, pas du texte du prompt). */
+function docxFillSectionFor(agent: AgentRow): string {
+  const caps = capabilitiesFromAgent(agent);
+  return caps.docsRead && caps.actionScopes.includes('projects')
+    ? `\n═══ REMPLIR UN MODÈLE WORD OU UN FORMULAIRE PDF (fill_docx_template, fill_pdf_form) ═══
+Tu PEUX remplir un modèle Word (.docx) ou un formulaire PDF joint à la conversation ou rangé sur une fiche : ne réponds JAMAIS « je ne peux pas générer de fichier Word » et ne recopie pas le texte dans la conversation à la place.
+Règles :
+1. L'affaire visée est celle ouverte à l'écran (voir « AFFAIRE OUVERTE À L'ÉCRAN ») : ne demande pas laquelle, utilise son id. Récupère ses informations avec get_record / get_project, et celles du client, du maître d'ouvrage et des intervenants avec search_records ou manage_project_stakeholders.
+2. Procède en deux temps : fill_docx_template en action « inspect » (document_id = l'identifiant indiqué entre crochets dans le contenu du document joint), puis en action « fill » avec project_id et la liste des modifications.
+3. Ne renseigne QUE ce qui figure dans la fiche, un contact ou la conversation. Une information absente reste vide ou garde sa mention « à compléter » : n'invente ni identité, ni adresse, ni montant, ni date. Dis ce qui manque.
+4. Le résultat est un NOUVEAU document rangé dans les Documents de l'affaire ; le modèle n'est jamais écrasé. Annonce-le avec ce que tu as renseigné et ce qui reste à faire à la main, et rappelle que le document est à vérifier avant tout usage contractuel.
+5. Pour un PDF à champs de formulaire (CERFA, formulaire administratif), utilise fill_pdf_form de la même façon : action « inspect » (noms, types et choix des champs), puis « fill » avec project_id et les valeurs (case à cocher : true ou false). Les noms de champs sont parfois techniques : ne remplis pas au hasard un champ dont tu n'es pas sûr du sens, dis-le. Un PDF sans champ (scan, PDF à plat) ne peut pas être rempli : dis-le et propose de produire un document à part (bloc artifact).
+6. Un ancien .doc ne se remplit pas : propose de le réenregistrer en .docx. La signature et la date de signature restent toujours à faire à la main.\n`
+    : '';
+}
+
+/** Génération de fichiers (bloc artifact) : même texte dans le prompt généré et sous un system_prompt_override, sinon un agent au prompt réécrit croit ne pas pouvoir produire de fichier. */
+const ARTIFACTS_SECTION = `\n═══ GÉNÉRATION DE FICHIERS (ARTIFACTS) ═══
+Quand l'utilisateur demande un tableau, un planning, un rapport, un courrier ou tout autre
+fichier structuré, génère-le en ajoutant un bloc artifact JSON à la fin de ta réponse.
+Le fichier est mis en page automatiquement à la charte du cabinet : en-tête avec le logo et
+les coordonnées, pied de page avec l'adresse et le SIRET, pagination en bas à droite. Tu n'as
+donc ni à recopier l'adresse du cabinet, ni à numéroter les pages toi-même.
+
+Document Word (rapport, compte rendu, courrier) :
+\`\`\`artifact
+{"type":"docx","filename":"compte-rendu.docx","title":"Compte rendu de chantier n°4","subtitle":"Projet Résidence Les Tilleuls, 12/03/2026","content":"# Participants\\n\\n- M. Dupont (MOA)\\n\\n## Observations\\n\\n| Lot | Observation | Échéance |\\n|---|---|---|\\n| Gros œuvre | Reprise d'étanchéité | 20/03 |"}
+\`\`\`
+
+PDF (même contenu, format non modifiable, pour diffusion) :
+\`\`\`artifact
+{"type":"pdf","filename":"note.pdf","title":"Note de synthèse","content":"## Contexte\\n\\nTexte..."}
+\`\`\`
+
+Fichier Excel :
+\`\`\`artifact
+{"type":"excel","filename":"suivi.xlsx","title":"Suivi des lots","sheets":[{"name":"Lots","rows":[["Lot","Entreprise","Montant HT"],["Gros œuvre","SARL Martin",125000]]}]}
+\`\`\`
+
+CSV (échange de données brutes) :
+\`\`\`artifact
+{"type":"csv","filename":"export.csv","rows":[["Col A","Col B"],["val1","val2"]]}
+\`\`\`
+
+Mise en forme acceptée dans "content" : titres « # », « ## », « ### », puces « - »,
+tableaux « | colonne | colonne | » (la première ligne sert d'en-tête), paragraphes.
+Le bloc artifact est traité automatiquement — ne l'explique pas à l'utilisateur.
+Inclus-le uniquement si l'utilisateur demande explicitement un fichier à télécharger.
+Quand l'utilisateur demande aussi de le RANGER dans une fiche (« mets-le dans l'affaire », « classe-le dans les documents du projet »), ajoute au bloc la clé "attach_to":{"resource":"projects","resource_id":"<identifiant de la fiche>","category":"Courrier"} : le fichier est alors déposé dans les pièces jointes de la fiche (resource : projects, tenders, proposals, permits, meetings, contacts...). Cela n'est possible que pour un type de fiche que tu as le droit de modifier ; n'ajoute attach_to que sur demande explicite.\n`;
+
 function buildBasePrompt(agent: AgentRow, ctx: AgentContext, webSearchActive: boolean): string {
   // Attached-document text and firm-knowledge data reach the model only
   // through this prompt — unlike write actions (whose field schema also
@@ -263,7 +313,7 @@ ${cctpExcerptsText}
       : '';
     const sourceNote = overrideActionScopes.length > 0 ? SOURCE_RULE : '';
     const contactNote = contactEnrichmentSection(agent, webSearchActive);
-    return `${base}${webFetchNote}${mailNote}${webSearchNote}${contactNote}${schemaNote}${sourceNote}${colleaguesNote}${notifyNote}${learningNote}${docContentsSection}${docImagesSection}${firmKnowledgeSection}${knowledgeSection}${learningMemorySection}`;
+    return `${base}${webFetchNote}${mailNote}${webSearchNote}${contactNote}${schemaNote}${sourceNote}${colleaguesNote}${notifyNote}${learningNote}${docxFillSectionFor(agent)}${ARTIFACTS_SECTION}${docContentsSection}${docImagesSection}${firmKnowledgeSection}${knowledgeSection}${learningMemorySection}`;
   }
 
   const projectsList = ctx.projects.length > 0
@@ -375,16 +425,7 @@ Règles :
 4. Si le projet n'a pas encore de DPGF, l'outil en crée un vide avant d'y ajouter l'article — dis-le à l'utilisateur plutôt que de le laisser croire qu'un document existait déjà.\n`
     : '';
 
-  const docxFillSection = caps.docsRead && caps.actionScopes.includes('projects')
-    ? `\n═══ REMPLIR UN MODÈLE WORD (fill_docx_template) ═══
-Tu PEUX remplir un modèle Word (.docx) joint à la conversation ou rangé sur une fiche : ne réponds JAMAIS « je ne peux pas générer de fichier Word » et ne recopie pas le texte dans la conversation à la place.
-Règles :
-1. L'affaire visée est celle ouverte à l'écran (voir « AFFAIRE OUVERTE À L'ÉCRAN ») : ne demande pas laquelle, utilise son id. Récupère ses informations avec get_record / get_project, et celles du client, du maître d'ouvrage et des intervenants avec search_records ou manage_project_stakeholders.
-2. Procède en deux temps : fill_docx_template en action « inspect » (document_id = l'identifiant indiqué entre crochets dans le contenu du document joint), puis en action « fill » avec project_id et la liste des modifications.
-3. Ne renseigne QUE ce qui figure dans la fiche, un contact ou la conversation. Une information absente reste vide ou garde sa mention « à compléter » : n'invente ni identité, ni adresse, ni montant, ni date. Dis ce qui manque.
-4. Le résultat est un NOUVEAU document rangé dans les Documents de l'affaire ; le modèle n'est jamais écrasé. Annonce-le avec ce que tu as renseigné et ce qui reste à faire à la main, et rappelle que le document est à vérifier avant tout usage contractuel.
-5. Seul le .docx est pris en charge. Pour un ancien .doc ou un PDF, dis-le et propose de le réenregistrer en .docx.\n`
-    : '';
+  const docxFillSection = docxFillSectionFor(agent);
 
   const delegateSection = canDelegate
     ? `\n═══ CONSULTATION D'UN COLLÈGUE (consulter_agent) ═══
@@ -482,39 +523,7 @@ ${canLearn
 ✗ Tu NE peux PAS révéler de montants confidentiels
 ✗ Tu NE peux PAS prendre de décision à la place de l'architecte
 ${actionsSection}${webFetchSection}${mailSection}${geoSection}${projectDocsSection}${projectDocsWriteSection}${docxFillSection}${delegateSection}${notifySection}${webSearchSection}${contactEnrichmentSection(agent, webSearchActive)}${learningSection}
-═══ GÉNÉRATION DE FICHIERS (ARTIFACTS) ═══
-Quand l'utilisateur demande un tableau, un planning, un rapport, un courrier ou tout autre
-fichier structuré, génère-le en ajoutant un bloc artifact JSON à la fin de ta réponse.
-Le fichier est mis en page automatiquement à la charte du cabinet : en-tête avec le logo et
-les coordonnées, pied de page avec l'adresse et le SIRET, pagination en bas à droite. Tu n'as
-donc ni à recopier l'adresse du cabinet, ni à numéroter les pages toi-même.
-
-Document Word (rapport, compte rendu, courrier) :
-\`\`\`artifact
-{"type":"docx","filename":"compte-rendu.docx","title":"Compte rendu de chantier n°4","subtitle":"Projet Résidence Les Tilleuls, 12/03/2026","content":"# Participants\\n\\n- M. Dupont (MOA)\\n\\n## Observations\\n\\n| Lot | Observation | Échéance |\\n|---|---|---|\\n| Gros œuvre | Reprise d'étanchéité | 20/03 |"}
-\`\`\`
-
-PDF (même contenu, format non modifiable, pour diffusion) :
-\`\`\`artifact
-{"type":"pdf","filename":"note.pdf","title":"Note de synthèse","content":"## Contexte\\n\\nTexte..."}
-\`\`\`
-
-Fichier Excel :
-\`\`\`artifact
-{"type":"excel","filename":"suivi.xlsx","title":"Suivi des lots","sheets":[{"name":"Lots","rows":[["Lot","Entreprise","Montant HT"],["Gros œuvre","SARL Martin",125000]]}]}
-\`\`\`
-
-CSV (échange de données brutes) :
-\`\`\`artifact
-{"type":"csv","filename":"export.csv","rows":[["Col A","Col B"],["val1","val2"]]}
-\`\`\`
-
-Mise en forme acceptée dans "content" : titres « # », « ## », « ### », puces « - »,
-tableaux « | colonne | colonne | » (la première ligne sert d'en-tête), paragraphes.
-Le bloc artifact est traité automatiquement — ne l'explique pas à l'utilisateur.
-Inclus-le uniquement si l'utilisateur demande explicitement un fichier à télécharger.
-Quand l'utilisateur demande aussi de le RANGER dans une fiche (« mets-le dans l'affaire », « classe-le dans les documents du projet »), ajoute au bloc la clé "attach_to":{"resource":"projects","resource_id":"<identifiant de la fiche>","category":"Courrier"} : le fichier est alors déposé dans les pièces jointes de la fiche (resource : projects, tenders, proposals, permits, meetings, contacts...). Cela n'est possible que pour un type de fiche que tu as le droit de modifier ; n'ajoute attach_to que sur demande explicite.
-
+${ARTIFACTS_SECTION}
 ═══ DONNÉES TEMPS RÉEL DU CABINET ═══
 
 [PROJETS EN COURS — ${ctx.projects.length} projet(s)]
