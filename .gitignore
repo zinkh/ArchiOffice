@@ -26,3 +26,4 @@ native/windows-shell/build/
 playwright-report/
 test-results/
 .playwright/
+test-results-kb/
