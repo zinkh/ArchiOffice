@@ -44,6 +44,7 @@ import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLib
 import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
 import StorageTreeMigrationCard from '../components/StorageTreeMigrationCard';
 import { SwapText } from '../components/ui/SwapText';
+import { normalizeChantierDefaultView } from '../lib/chantierDefaultView';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -371,6 +372,7 @@ export default function Settings() {
     invoicePaymentTermsDays: 30,
     archiveRetentionYears: 10,
     desktopLockMode: 'advisory',
+    chantierDefaultView: 'all',
     defaultLeaveDaysCongesPayes: 25,
     defaultLeaveDaysRtt: 0,
     maf_enabled: false,
@@ -2759,6 +2761,31 @@ export default function Settings() {
             </div>
             {renderSaveButton('archiveRetention', () => saveSection('archiveRetention', {
               archiveRetentionYears: settings.archiveRetentionYears ?? 10,
+            }))}
+          </div>
+
+          {/* ── Chantier : vue par défaut des listes (CR de chantier, AOR, GPA) ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_chantier_view_title')}</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_chantier_view_help')}</p>
+            </div>
+            <div className="max-w-md">
+              <label htmlFor="chantier-default-view" className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_chantier_view_label')}</label>
+              <select
+                id="chantier-default-view"
+                className="w-full p-2 rounded-lg text-sm"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                value={normalizeChantierDefaultView(settings.chantierDefaultView)}
+                onChange={e => setSettings({ ...settings, chantierDefaultView: e.target.value })}
+              >
+                <option value="reserves">{t('settings_chantier_view_reserves')}</option>
+                <option value="open">{t('settings_chantier_view_open')}</option>
+                <option value="all">{t('settings_chantier_view_all')}</option>
+              </select>
+            </div>
+            {renderSaveButton('chantierView', () => saveSection('chantierView', {
+              chantierDefaultView: normalizeChantierDefaultView(settings.chantierDefaultView),
             }))}
           </div>
 

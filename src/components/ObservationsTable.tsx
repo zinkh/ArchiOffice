@@ -26,6 +26,8 @@ import { observationSelectedLotIds, observationTargetsLot, TCE_FULL_LABEL, TCE_L
 import { db } from '../db';
 import { apiFetch } from '../lib/api';
 import { isReprenable } from '../lib/observationsReserves';
+import { useSettings } from '../hooks/useSettings';
+import { normalizeChantierDefaultView, observationsInitialFilters } from '../lib/chantierDefaultView';
 
 interface Props {
   projectId: string;
@@ -138,7 +140,11 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
-  const [openOnly, setOpenOnly] = useState(initialOpenOnly);
+  // Vue par défaut du cabinet (Paramètres), sauf si l'appelant impose déjà « ouverts » (revue des non levées)
+  // ou une nature fixe (`typeFilter`).
+  const { settings: cabinetSettings } = useSettings();
+  const defaultFilters = observationsInitialFilters(normalizeChantierDefaultView(cabinetSettings?.chantierDefaultView));
+  const [openOnly, setOpenOnly] = useState(initialOpenOnly || defaultFilters.openOnly);
   // Observations dont la réponse est dépliée (flèche à gauche de la ligne).
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleExpanded = useCallback((id: string) => setExpanded(prev => {
@@ -148,7 +154,14 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
   }), []);
   const [filtreDecoupage, setFiltreDecoupage] = useState<FiltreDecoupage>({ batimentId: '', phaseId: '' });
   const aDecoupage = batimentsActifs(decoupage).length + phasesActives(decoupage).length > 0;
-  const [typeSelect, setTypeSelect] = useState('');
+  const [typeSelect, setTypeSelect] = useState(typeFilter ? '' : defaultFilters.type);
+  const defaultViewApplied = useRef(!!cabinetSettings);
+  useEffect(() => {
+    if (!cabinetSettings || defaultViewApplied.current) return;
+    defaultViewApplied.current = true;
+    if (defaultFilters.openOnly) setOpenOnly(true);
+    if (!typeFilter && defaultFilters.type) setTypeSelect(defaultFilters.type);
+  }, [cabinetSettings, defaultFilters.openOnly, defaultFilters.type, typeFilter]);
   const [aorMessage, setAorMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const storeKey = `obsTable:${typeFilter || 'all'}`;
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {

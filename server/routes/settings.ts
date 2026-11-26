@@ -50,6 +50,7 @@ const toSnake: Record<string, string> = {
   invoicePaymentTermsDays: 'invoice_payment_terms_days',
   archiveRetentionYears: 'archive_retention_years',
   desktopLockMode: 'desktop_lock_mode',
+  chantierDefaultView: 'chantier_default_view',
   onboardingCompletedAt: 'onboarding_completed_at',
   defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
   defaultLeaveDaysRtt: 'default_leave_days_rtt',
@@ -114,7 +115,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'zoho_books_org_id',
         'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires', 'num_prefix_affaire',
         'num_affaire_sep_prefix', 'num_affaire_sep_seq', 'num_affaire_digits',
-        'invoice_payment_terms_days', 'archive_retention_years', 'desktop_lock_mode',
+        'invoice_payment_terms_days', 'archive_retention_years', 'desktop_lock_mode', 'chantier_default_view',
         'onboarding_completed_at',
         'maf_enabled', 'maf_numero_adherent', 'maf_taux_contrat_permil', 'maf_declaration_year',
         'ragic_api_key', 'ragic_account',
@@ -165,6 +166,11 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
       // Mode de verrouillage de la synchronisation desktop : vocabulaire fermé.
       if ('desktop_lock_mode' in filteredData && !['off', 'advisory', 'enforced'].includes(filteredData.desktop_lock_mode)) {
         return res.status(400).json({ error: "Mode de verrouillage inconnu (off, advisory ou enforced attendu)." });
+      }
+
+      // Vue par défaut des listes de chantier : vocabulaire fermé.
+      if ('chantier_default_view' in filteredData && !['reserves', 'open', 'all'].includes(filteredData.chantier_default_view)) {
+        return res.status(400).json({ error: "Vue par défaut inconnue (reserves, open ou all attendu)." });
       }
 
       // L'agent de triage référencé doit appartenir à CE cabinet — même

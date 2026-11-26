@@ -54,6 +54,7 @@ import {
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import type { ToolbarMenuEntry } from './toolbar/toolbarState';
 import { useReserveOptions } from './useReserveOptions';
+import { normalizeChantierDefaultView, reservesInitialFilter } from '../../lib/chantierDefaultView';
 import { dueInDays, listState, setDueDate, setStatus, toggleListValue, type ListField } from '../../lib/reserveBulk';
 
 interface ReserveTrackerProps {
@@ -174,13 +175,21 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialOpenReserveId, reserves]);
   const [creating, setCreating] = useState(false);
-  const [filter, setFilter] = useState<Filter>('toutes');
+  // Vue par défaut du cabinet (Paramètres) : appliquée à l'ouverture, puis chacun règle ses filtres.
+  const defaultFilter: Filter = reservesInitialFilter(normalizeChantierDefaultView(settings?.chantierDefaultView));
+  const [filter, setFilter] = useState<Filter>(defaultFilter);
+  const defaultFilterApplied = useRef(!!settings);
+  useEffect(() => {
+    if (!settings || defaultFilterApplied.current) return;
+    defaultFilterApplied.current = true;
+    setFilter(defaultFilter);
+  }, [settings, defaultFilter]);
   const [search, setSearch] = useState('');
   const [entrepriseFilter, setEntrepriseFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const filtersActive = filter !== 'toutes' || !!entrepriseFilter || !!lotFilter || !!statusFilter || !!search.trim();
-  const resetFilters = () => { setFilter('toutes'); setEntrepriseFilter(''); setLotFilter(''); setStatusFilter(''); setSearch(''); };
+  const filtersActive = filter !== defaultFilter || !!entrepriseFilter || !!lotFilter || !!statusFilter || !!search.trim();
+  const resetFilters = () => { setFilter(defaultFilter); setEntrepriseFilter(''); setLotFilter(''); setStatusFilter(''); setSearch(''); };
 
   // Numéros des lots de l'affaire (par intitulé) : classent le tableau et le volet, et préfixent les libellés.
   const numeros = useMemo(() => numerosParLot(lotsList), [lotsList]);
@@ -639,7 +648,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
               <IconX size={12} /> {t('reserve_filter_reset')}
             </button>
           )}
-          <span className="text-xs text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
+          <span className="text-xs text-[var(--tblr-muted)] font-medium">{reserves.filter(r => !isReserveClosed(r)).length} / {reserves.length}</span>
         </div>
         {legende.length > 0 && (
           <ul

@@ -127,7 +127,7 @@ export async function chargerDossier(supabaseAdmin: any, tenantId: string, proje
   const emailsContacts = new Map<string, string>();
   const nomsContacts = new Map<string, string>();
   if (idsContacts.length) {
-    const { data } = await supabaseAdmin.from('contacts').select('id, email, name, company_name, first_name, last_name').eq('tenant_id', tenantId).in('id', idsContacts);
+    const { data } = await supabaseAdmin.from('contacts').select('id, email, company_name, first_name, last_name').eq('tenant_id', tenantId).in('id', idsContacts);
     for (const c of (data as any[]) || []) {
       if (c.email) emailsContacts.set(c.id, c.email);
       const libelle = contactLabel(c);
