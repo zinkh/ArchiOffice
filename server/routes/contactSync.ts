@@ -30,6 +30,7 @@ function mapGooglePersonToContactFields(person: any) {
     ...phones,
     company_name: org.name || '',
     job_title: org.title || '',
+    department: org.department || '',
     city: addr.city || '',
     zip: addr.postalCode || '',
     country: addr.country || '',
@@ -44,8 +45,8 @@ function buildGooglePersonPayload(contact: any) {
     names: [{ givenName: contact.first_name || '', familyName: contact.last_name || '' }],
     emailAddresses: emailsForGoogle(contact),
     phoneNumbers: phonesForGoogle(contact),
-    organizations: (contact.company_name || contact.job_title)
-      ? [{ name: contact.company_name || '', title: contact.job_title || '' }] : [],
+    organizations: (contact.company_name || contact.job_title || contact.department)
+      ? [{ name: contact.company_name || '', title: contact.job_title || '', department: contact.department || '' }] : [],
     addresses: (contact.city || contact.zip || contact.country)
       ? [{ city: contact.city || '', postalCode: contact.zip || '', country: contact.country || '' }] : [],
   };

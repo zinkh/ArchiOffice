@@ -73,8 +73,9 @@ export interface AgentResourceDef {
 
 export const AGENT_RESOURCES: AgentResourceDef[] = [
   { key: 'contacts', label: 'Contacts', basePath: '/api/contacts', create: true, update: true, delete: true, list: true,
-    knownFields: ['company_name', 'first_name', 'last_name', 'email', 'phone', 'category', 'address', 'city', 'zip', 'notes', 'website', 'siret', 'corps_etat', 'specialite'],
-    fields: 'company_name, first_name, last_name, email, phone, category, address, city, zip, notes, website, siret (14 chiffres), corps_etat (tableau de textes, entreprises : ["Couverture", "Bardage"]), specialite (tableau de textes, bureaux d\'études : ["Structure"]). ' +
+    knownFields: ['company_name', 'first_name', 'last_name', 'email', 'phone', 'category', 'address', 'city', 'zip', 'notes', 'website', 'siret', 'corps_etat', 'specialite',
+      'job_title', 'department', 'phone_mobile', 'phone_work', 'email_work'],
+    fields: 'company_name, first_name, last_name, job_title (poste / fonction dans la société, synchronisé avec le champ « Titre » de Google Contacts : ne le mets JAMAIS dans notes), department (service), email, email_work, phone, phone_mobile, phone_work, category, address, city, zip, notes, website, siret (14 chiffres), corps_etat (tableau de textes, entreprises : ["Couverture", "Bardage"]), specialite (tableau de textes, bureaux d\'études : ["Structure"]). ' +
       "Un contact identifie soit une personne (first_name* + last_name*), soit une société/un bureau d'études (company_name* seul, sans personne nommée) — " +
       "l'un des deux est obligatoire, mais jamais les deux ensemble ne sont requis. Pour un contact 'entreprise' (bureau d'études, société), " +
       "renseigne uniquement company_name (+ email/phone/adresse si connus) : ne laisse jamais un ajout de contact bloqué faute d'un prénom/nom de personne que la source ne fournit pas." },

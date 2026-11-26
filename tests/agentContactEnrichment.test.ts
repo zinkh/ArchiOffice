@@ -94,4 +94,14 @@ describe('contacts : site, SIRET et spécialités', () => {
     expect(prepared.ignoredFields).toEqual([]);
     expect(prepared.data.corps_etat).toEqual(['Couverture', 'Bardage']);
   });
+
+  it('accepte le poste (job_title) et le service, au lieu de les reléguer dans les notes', () => {
+    const prepared = prepareRecord(contacts, {
+      first_name: 'Jean', last_name: 'Martin', company_name: 'Copas Systèmes',
+      job_title: 'Directeur commercial', department: 'Ventes', phone_mobile: '0681170845',
+    });
+    expect(prepared.ignoredFields).toEqual([]);
+    expect(prepared.data.job_title).toBe('Directeur commercial');
+    expect(contacts.fields).toContain('job_title');
+  });
 });
