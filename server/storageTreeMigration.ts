@@ -195,7 +195,8 @@ export async function planTreeMigration(deps: MigrationDeps, tenantId: string): 
   async function documentFolder(doc: any): Promise<string[]> {
     const type = doc.resource_type || 'projects';
     if (type !== 'projects') return resolver.folderPathForResource(type, doc.resource_id ?? null, tenantId);
-    return buildDocumentFolderPath(await project(doc.project_id ?? null), doc.phase || null);
+    // Un document rangé dans un dossier libre de la GED y est migré aussi (document_folders).
+    return buildDocumentFolderPath(await project(doc.project_id ?? null), doc.phase || null, await resolver.loadFolderNames(doc.folder_id, tenantId));
   }
 
   async function folderFor(table: Source['table'], row: any): Promise<string[]> {

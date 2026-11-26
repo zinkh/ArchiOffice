@@ -86,7 +86,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
   // Dossier d'un document selon son rattachement (affaire, phase, ressource) :
   // règle partagée avec la migration des fichiers existants, voir
   // server/externalStorage/documentFolders.ts.
-  const { loadFolderProject, folderPathForResource } = createDocumentFolderResolver(supabaseAdmin);
+  const { loadFolderProject, folderPathForResource, loadFolderNames } = createDocumentFolderResolver(supabaseAdmin);
 
   app.get("/api/documents", async (req: any, res: any) => {
     try {
@@ -170,7 +170,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         tenantId,
         bucket: 'documents',
         folderPath: resourceType === 'projects'
-          ? buildDocumentFolderPath(await loadFolderProject(projectIdVal, tenantId), phaseVal)
+          ? buildDocumentFolderPath(await loadFolderProject(projectIdVal, tenantId), phaseVal, await loadFolderNames(folderIdVal, tenantId))
           : await folderPathForResource(resourceType, resourceIdVal, tenantId),
         fileName: file.originalname,
         supabasePath: `${tenantId}/${projectIdVal || resourceIdVal || 'general'}/${phaseSegment}${id}/${sanitizeFilename(file.originalname)}`,
@@ -302,7 +302,8 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         // Derived from the authenticated caller, not the request body — see the
         // same fix on POST /api/documents above.
         const uploaded_by = await getUserName(tenantId, req.user.id, req.user.email);
-        const { data: doc } = await supabaseAdmin.from('documents').select('version, project_id, phase, indice').eq('id', id).eq('tenant_id', tenantId).single();
+        // `select('*')` : folder_id n'existe pas sur une instance dont la base n'a pas la migration des dossiers.
+        const { data: doc } = await supabaseAdmin.from('documents').select('*').eq('id', id).eq('tenant_id', tenantId).single();
         const newVersion = ((doc as any)?.version || 1) + 1;
         const currentIndice = (doc as any)?.indice || 'A';
         const nextIndice = String.fromCharCode(currentIndice.charCodeAt(0) + 1);
@@ -315,7 +316,12 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         const stored = await storeBusinessFile({
           tenantId,
           bucket: 'documents',
-          folderPath: buildDocumentFolderPath(await loadFolderProject((doc as any)?.project_id || null, tenantId), existingPhase),
+          // Une nouvelle version rejoint le dossier libre du document, tant que la phase ne change pas.
+          folderPath: buildDocumentFolderPath(
+            await loadFolderProject((doc as any)?.project_id || null, tenantId), existingPhase,
+            (doc as any)?.folder_id && (phaseVal || null) === ((doc as any)?.phase || null)
+              ? await loadFolderNames((doc as any).folder_id, tenantId) : [],
+          ),
           fileName: file.originalname,
           supabasePath: `${tenantId}/${projectId}/${phaseSegment}${id}/v${newVersion}-${sanitizeFilename(file.originalname)}`,
         }, file.buffer, file.mimetype);
@@ -323,6 +329,8 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         const uploaded_at = new Date().toISOString();
         const updateFields: any = { name, category, description, version: newVersion, file_url, storage_backend: stored.storageBackend, uploaded_at, indice: nextIndice, doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null };
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        // Un dossier libre ne vaut que pour sa phase : changer de phase en déposant une version en sort le document.
+        if ((doc as any)?.folder_id && (phaseVal || null) !== ((doc as any)?.phase || null)) updateFields.folder_id = null;
         if (contact_id !== undefined) updateFields.contact_id = contact_id || null;
         if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
         if (validation_status !== undefined) updateFields.validation_status = validation_status;
@@ -377,17 +385,21 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         let relocated: { from: string; to: string; fromFolder: string[]; fileName: string } | null = null;
         if (relocateBusinessFile) {
           const { data: current } = await supabaseAdmin.from('documents')
-            .select('file_url, project_id, phase, name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+            .select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
           const cur = current as any;
           const targetProject = 'project_id' in updateFields ? updateFields.project_id : (cur?.project_id || null);
-          const moved = cur?.file_url && ((targetProject || null) !== (cur.project_id || null) || (phaseVal || null) !== (cur.phase || null));
+          // Le dossier libre fait partie du chemin : changer de dossier déplace le fichier chez le fournisseur,
+          // comme changer de phase. (updateFields.folder_id est posé plus haut quand le dossier change.)
+          const targetFolder: string | null = 'folder_id' in updateFields ? updateFields.folder_id : (cur?.folder_id || null);
+          const moved = cur?.file_url && ((targetProject || null) !== (cur.project_id || null) || (phaseVal || null) !== (cur.phase || null)
+            || (targetFolder || null) !== (cur.folder_id || null));
           if (moved) {
-            const folderPath = buildDocumentFolderPath(await loadFolderProject(targetProject || null, tenantId), phaseVal);
+            const folderPath = buildDocumentFolderPath(await loadFolderProject(targetProject || null, tenantId), phaseVal, await loadFolderNames(targetFolder, tenantId));
             const fileName = cur.name || name || 'document';
             const newUrl = await relocateBusinessFile(tenantId, cur.file_url, folderPath, fileName);
             if (newUrl && newUrl !== cur.file_url) {
               updateFields.file_url = newUrl;
-              relocated = { from: cur.file_url, to: newUrl, fileName, fromFolder: buildDocumentFolderPath(await loadFolderProject(cur.project_id || null, tenantId), cur.phase || null) };
+              relocated = { from: cur.file_url, to: newUrl, fileName, fromFolder: buildDocumentFolderPath(await loadFolderProject(cur.project_id || null, tenantId), cur.phase || null, await loadFolderNames(cur.folder_id, tenantId)) };
             }
           }
         }

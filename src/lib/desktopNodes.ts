@@ -11,6 +11,8 @@ export type ParsedNodeId =
   | { kind: 'inbox'; tenantId: string }
   | { kind: 'prj'; projectId: string }
   | { kind: 'phase'; projectId: string; code: string }
+  /** Dossier libre sous une phase (`document_folders`, GED), éventuellement dans un autre dossier. */
+  | { kind: 'fld'; folderId: string }
   | { kind: 'doc'; documentId: string };
 
 /** Phase d'un document sans phase : le même libellé que le dossier « Général » de l'écran Documents. */
@@ -26,6 +28,7 @@ export const inboxNodeId = (tenantId: string) => `inbox:${tenantId}`;
 export const projectNodeId = (projectId: string) => `prj:${projectId}`;
 export const phaseNodeId = (projectId: string, code: string) => `phase:${projectId}:${code}`;
 export const documentNodeId = (documentId: string) => `doc:${documentId}`;
+export const folderNodeId = (folderId: string) => `fld:${folderId}`;
 
 /** Code de phase d'un document : sa valeur, ou « Général » quand elle est vide. */
 export function phaseCode(phase: string | null | undefined): string {
@@ -43,6 +46,7 @@ export function parseNodeId(raw: string | null | undefined): ParsedNodeId | null
   if (kind === 'inbox') return { kind: 'inbox', tenantId: rest };
   if (kind === 'prj') return { kind: 'prj', projectId: rest };
   if (kind === 'doc') return { kind: 'doc', documentId: rest };
+  if (kind === 'fld') return { kind: 'fld', folderId: rest };
   if (kind === 'phase') {
     // Un identifiant d'affaire ne contient jamais « : » ; le code de phase peut en contenir.
     const sep = rest.indexOf(':');

@@ -30,13 +30,18 @@ export function projectFolderName(project: FolderProject | null | undefined): st
  *  la phase par défaut, et que le nœud « non assignés » de l'écran Documents. */
 const SANS_AFFAIRE = 'Général';
 
+/**
+ * `folders` : les dossiers libres de la GED sous la phase, du plus haut au plus bas
+ * (`document_folders`, supabase/migrate_document_folders.sql). Un document sans affaire n'en a pas.
+ */
 export function buildDocumentFolderPath(
   project: FolderProject | null | undefined,
   phase: string | null | undefined,
+  folders: readonly string[] = [],
 ): string[] {
   const phaseSegment = sanitizeFolderSegment(phase || SANS_AFFAIRE);
   if (!project) return [SANS_AFFAIRE, phaseSegment];
-  return [projectFolderName(project), phaseSegment];
+  return [projectFolderName(project), phaseSegment, ...folders.map(sanitizeFolderSegment)];
 }
 
 /** Un plan n'a pas de phase — il va dans son propre sous-dossier de l'affaire. */
