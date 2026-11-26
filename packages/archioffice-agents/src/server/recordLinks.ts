@@ -3,7 +3,7 @@
 // rapidement » à ce qu'il vient de créer, plutôt qu'un identifiant brut sans
 // usage) — voir le champ `record_url` posé par tools.ts.
 //
-// Les 19 ressources d'AGENT_RESOURCES (types.ts) ne s'ouvrent pas toutes de
+// Les ressources d'AGENT_RESOURCES (types.ts) ne s'ouvrent pas toutes de
 // la même façon côté écran : certaines ont une vraie route par id
 // (/projects/:id), la plupart n'ont qu'une page de liste qui ouvre une modale
 // au clic sur une ligne (pas de route par id), et sept vivent comme onglets
@@ -100,6 +100,9 @@ export function buildRecordPath(resourceKey: string, record: Record<string, unkn
     case 'tender_partner_solicitations':
     case 'tender_activity_notes':
       return record?.tender_id != null ? `/tenders/${encodeURIComponent(String(record.tender_id))}` : null;
+    // Base de données du cabinet : une vraie route par identifiant.
+    case 'kb_pages':
+      return id ? `/base-de-donnees/${encodeURIComponent(id)}` : null;
 
     default:
       return null;

@@ -297,6 +297,16 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     knownFields: ['tender_id', 'content'],
     required: ['tender_id', 'content'],
     fields: "tender_id*, content*. Journal libre de l'appel d'offres (échange avec l'acheteur, décision de répondre...). Lecture : search_records avec parent_id = identifiant de l'appel d'offres." },
+  // Base de données du cabinet (mini-Notion) : notes, fiches techniques, détails constructifs, fabricants.
+  // `texte` est du texte brut (un paragraphe par ligne) converti en blocs par le serveur : un agent n'écrit
+  // jamais le JSON Tiptap ni les identifiants de colonnes. Le PUT est partiel (pas de mergeOnUpdate) et
+  // refuse de réécrire en texte brut une page qui porte des blocs enrichis. DELETE met en corbeille.
+  { key: 'kb_pages', label: 'Base de données du cabinet (pages et notes)', basePath: '/api/kb/pages', create: true, update: true, delete: true, list: true, identityField: 'title',
+    knownFields: ['title', 'texte', 'parent_id', 'project_id', 'icon', 'kind'],
+    required: ['title'],
+    enums: { kind: ['page', 'database'] },
+    defaults: { kind: 'page' },
+    fields: "title*, texte (texte brut de la page : un paragraphe par ligne, sans mise en forme), parent_id (identifiant de la page parente ou de la base : la page devient une sous-page ou une fiche de cette base), project_id (affaire liée), icon (un emoji), kind (page par défaut, database crée une base vide). Notes, fiches techniques, détails constructifs et fabricants du cabinet : ce ne sont pas des documents joints. Une page qui contient déjà des titres, tableaux ou fichiers ne se réécrit pas en texte brut (refus) : créer une nouvelle page. Supprimer met la page à la corbeille (restaurable)." },
 ];
 
 // Périmètre d'écriture par défaut d'un métier, appliqué quand un cabinet
@@ -305,23 +315,24 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
 // le template reste la source, cette table n'intervient que s'il arrive vide,
 // cas d'une base où la migration de backfill n'a pas encore tourné.
 export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
-  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits', 'tenders', 'phone_calls'],
-  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits', 'tenders', 'rfis', 'avenants_moe'],
-  'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'gpa_reserves', 'rfis', 'marches_entreprises'],
-  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'articles_type'],
-  'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
-  'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders'],
-  'responsable-hqe':     ['tasks'],
+  // 'kb_pages' (base de données du cabinet) est donné à tous les métiers : voir supabase/migrate_agent_kb_pages_scope.sql.
+  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits', 'tenders', 'phone_calls', 'kb_pages'],
+  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits', 'tenders', 'rfis', 'avenants_moe', 'kb_pages'],
+  'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'gpa_reserves', 'rfis', 'marches_entreprises', 'kb_pages'],
+  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'articles_type', 'kb_pages'],
+  'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe', 'kb_pages'],
+  'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders', 'kb_pages'],
+  'responsable-hqe':     ['tasks', 'kb_pages'],
   // Ces quatre métiers n'avaient que 'specifications' (l'ancienne ressource
   // CCTP, retirée du système — voir CLAUDE.md) en défaut : sans elle, aucun
   // périmètre d'écriture par défaut ne leur correspond encore, à régler au
   // cas par cas depuis /agents/:id/edit plutôt que d'improviser un remplaçant.
-  'ingenieur-thermique': [],
-  'ingenieur-structure': [],
-  'ingenieur-fluides':   [],
-  'acousticien':         [],
-  'paysagiste':          ['tasks'],
-  'urbaniste':           ['contacts', 'meetings', 'tasks', 'projects'],
+  'ingenieur-thermique': ['kb_pages'],
+  'ingenieur-structure': ['kb_pages'],
+  'ingenieur-fluides':   ['kb_pages'],
+  'acousticien':         ['kb_pages'],
+  'paysagiste':          ['tasks', 'kb_pages'],
+  'urbaniste':           ['contacts', 'meetings', 'tasks', 'projects', 'kb_pages'],
 };
 
 // Capacités hors CRUD interne. Chacune a sa propre colonne plutôt qu'une

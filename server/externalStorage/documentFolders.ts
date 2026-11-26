@@ -20,6 +20,7 @@ export const RESOURCE_FOLDER_LABELS: Record<string, string> = {
   notes_honoraires: "Notes d'honoraires", marches_entreprises: 'Marchés entreprises',
   tasks: 'Tâches', milestones: 'Jalons', agents: 'Bibliothèque de connaissances',
   agency_library: 'Bibliothèque notes méthodologiques',
+  kb_pages: 'Base de données',
 };
 
 export interface DocumentFolderResolver {
