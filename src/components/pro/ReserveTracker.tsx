@@ -188,7 +188,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   const [entrepriseFilter, setEntrepriseFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const filtersActive = filter !== defaultFilter ||!!entrepriseFilter || !!lotFilter || !!statusFilter || !!search.trim();
+  const filtersActive = filter !== defaultFilter || !!entrepriseFilter || !!lotFilter || !!statusFilter || !!search.trim();
   const resetFilters = () => { setFilter(defaultFilter); setEntrepriseFilter(''); setLotFilter(''); setStatusFilter(''); setSearch(''); };
 
   // Numéros des lots de l'affaire (par intitulé) : classent le tableau et le volet, et préfixent les libellés.
@@ -648,7 +648,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
               <IconX size={12} /> {t('reserve_filter_reset')}
             </button>
           )}
-          <span className="text-xs text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
+          <span className="text-xs text-[var(--tblr-muted)] font-medium">{reserves.filter(r => !isReserveClosed(r)).length} / {reserves.length}</span>
         </div>
         {legende.length > 0 && (
           <ul
