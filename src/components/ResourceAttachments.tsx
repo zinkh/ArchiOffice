@@ -27,7 +27,7 @@ export type AttachableResourceType =
   | 'projects' | 'contacts' | 'proposals' | 'tenders' | 'permits' | 'meetings'
   | 'receptions' | 'reserves' | 'contrats_moe' | 'ordres_de_service' | 'visas'
   | 'notes_honoraires' | 'marches_entreprises' | 'tasks' | 'milestones' | 'agents'
-  | 'agency_library' | 'ftm' | 'devis_travaux_modificatifs';
+  | 'agency_library' | 'ftm' | 'devis_travaux_modificatifs' | 'kb_pages';
 
 /** Doit rester aligné sur LINK_MIME_TYPE (server/routes/documents.ts) : une pièce jointe sans fichier, qui est un lien web. */
 export const LINK_MIME_TYPE = 'text/uri-list';

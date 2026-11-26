@@ -15,7 +15,7 @@ export const DOCUMENT_RESOURCE_TYPES = [
   'projects', 'contacts', 'proposals', 'tenders', 'permits', 'meetings',
   'receptions', 'reserves', 'contrats_moe', 'ordres_de_service', 'visas',
   'notes_honoraires', 'marches_entreprises', 'tasks', 'milestones',
-  'ftm', 'devis_travaux_modificatifs',
+  'ftm', 'devis_travaux_modificatifs', 'kb_pages',
 ];
 
 export interface DocumentSummary {
