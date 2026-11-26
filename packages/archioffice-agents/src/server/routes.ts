@@ -110,6 +110,15 @@ async function transcriptionVocabulary(supabaseAdmin: any, tenantId: string): Pr
 /** Garde de rôle du serveur hôte (`requireRole` de server.ts), injectée comme pour les missions et le RAG. */
 export type RequireRole = (...roles: string[]) => (req: any, res: any, next: any) => unknown;
 
+/**
+ * Forme acceptée pour l'affaire ouverte à l'écran. `projects.id` est un TEXT, pas forcément un UUID :
+ * on écarte seulement ce qui n'a pas la forme d'un identifiant. La vraie vérification est le filtre
+ * par cabinet fait ensuite sur la base.
+ */
+export function isPlausibleProjectId(value: unknown): value is string {
+  return typeof value === 'string' && /^[\w.:-]{1,128}$/.test(value);
+}
+
 export function registerAgentRoutes(
   app: any,
   supabaseAdmin: any,
@@ -675,7 +684,10 @@ export function registerAgentRoutes(
       // Affaire ouverte à l'écran : l'identifiant vient du client, donc relu dans
       // CE cabinet avant d'être donné à l'agent (un id d'un autre cabinet, ou
       // inconnu, est simplement ignoré). Meilleur effort : jamais bloquant.
-      if (typeof active_project_id === 'string' && /^[0-9a-fA-F-]{8,64}$/.test(active_project_id)) {
+      // projects.id est un TEXT (pas forcément un UUID) : on n'écarte que ce qui
+      // n'a pas la forme d'un identifiant. Le filtre par cabinet juste dessous
+      // reste la vraie vérification.
+      if (isPlausibleProjectId(active_project_id)) {
         const { data: activeProject } = await supabaseAdmin.from('projects')
           .select('id, name, project_code, address').eq('id', active_project_id).eq('tenant_id', tenantId).maybeSingle();
         if (activeProject) {

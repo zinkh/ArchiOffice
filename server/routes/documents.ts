@@ -91,8 +91,11 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
   app.get("/api/documents", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, resource_type, resource_id } = req.query;
+      const { project_id, resource_type, resource_id, id } = req.query;
       const query = supabaseAdmin.from('documents').select('*').eq('tenant_id', tenantId);
+      // Un seul document par identifiant (outil agent de remplissage de modèle) :
+      // évite de relire toute la GED pour retrouver une pièce déjà connue.
+      if (typeof id === 'string' && id) query.eq('id', id);
       // resource_type/resource_id (fiche permis, devis, appel d'offres...)
       // et project_id (l'onglet Documents d'une affaire) filtrent
       // indépendamment — aucun des deux n'implique l'autre, puisque

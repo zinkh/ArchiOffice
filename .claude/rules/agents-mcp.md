@@ -588,6 +588,29 @@ tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 lue dans `settings` par `server/agencyIdentity.ts` : logo et coordonnées en
 en-tête, adresse et SIRET en pied de page, pagination « P1|2 » en bas à droite.
 
+### Remplir un modèle Word (`fill_docx_template`) et affaire ouverte à l'écran
+
+`fill_docx_template` (`docxFillTool.ts`, testé dans `tests/agentDocxFill.test.ts`) remplit un modèle `.docx` joint au chat ou rangé
+sur une fiche, au lieu de « recopier le texte dans la conversation ». Exposé aux agents qui ont `docsRead` ET le scope `projects` (pas au MCP).
+
+- **Deux temps** : `inspect` rend les paragraphes numérotés (corps, tableaux, en-têtes, pieds), puis `fill` applique des
+  modifications ciblées : `{ paragraph, replace }` (tout le paragraphe), `{ paragraph, find, replace }` ou `{ find, replace }`
+  dans tout le document (400 au plus). Un texte coupé en plusieurs « runs » Word est retrouvé sur le texte complet du
+  paragraphe ; un paragraphe modifié prend la mise en forme de son premier run, un paragraphe non ciblé n'est jamais touché.
+- **Jamais d'écrasement** : le résultat est un NOUVEAU document (`« <nom> - rempli.docx »`, catégorie « Assistant IA », description
+  « Généré par IA... à vérifier ») rangé par `POST /api/documents` sur l'affaire (`project_id` de l'appel, sinon celui du modèle).
+  Ce qui ne correspond à rien est rapporté (`non_appliquees`), jamais passé sous silence ; aucune modification applicable : rien n'est déposé.
+- **Limites** : `.docx` seulement (pas de `.doc`, ni de PDF), 15 Mo, cases à cocher et listes déroulantes par simple remplacement de
+  texte (`☐` vers `☒`), pas d'image ni de champ de contenu. Les valeurs viennent de la fiche, d'un contact ou de la conversation :
+  la règle de prompt (`docxFillSection`) interdit d'inventer une identité, une adresse, un montant ou une date.
+- Le repère de chaque document joint porte désormais `[document_id: ...]` (`docContentsSection`), pour que l'agent l'appelle sans passer par `list_documents`.
+- `GET /api/documents` accepte un filtre `id` (un seul document, sans relire toute la GED).
+
+**Affaire ouverte à l'écran** : `active_project_id` n'était pris en compte que s'il avait la forme d'un identifiant hexadécimal, alors
+que `projects.id` est un TEXT : pour une affaire dont l'identifiant n'était pas un UUID, l'agent ne recevait aucune affaire et
+redemandait « quelle opération ? ». `isPlausibleProjectId` (`routes.ts`, `tests/agentActiveProject.test.ts`) n'écarte plus que ce
+qui n'a pas la forme d'un identifiant ; le filtre par cabinet reste la vraie vérification.
+
 ### Connecteur MCP : changer d'agence sans reconnecter
 
 Un architecte qui exerce dans plusieurs structures (AAZS, AACZ) change d'agence depuis le connecteur par trois outils

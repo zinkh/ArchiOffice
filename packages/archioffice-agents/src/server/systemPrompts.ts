@@ -110,7 +110,7 @@ function buildBasePrompt(agent: AgentRow, ctx: AgentContext, webSearchActive: bo
       `dis-le simplement et demande à la personne de vérifier le fichier. ` +
       `Avant de créer ou modifier des enregistrements à partir d'un document, cite les lignes exactes que tu reprends ; ` +
       `sans ligne précise dans le contenu ci-dessous, tu ne crées rien.\n` +
-      ctx.documentContents.map(d => `\n--- ${d.name} ---\n${d.content}\n---`).join('\n')
+      ctx.documentContents.map(d => `\n--- ${d.name}${d.id ? ` [document_id: ${d.id}]` : ''} ---\n${d.content}\n---`).join('\n')
     : '';
 
   // Les images de ctx.documentImages (photos, pages scannées) sont
@@ -375,6 +375,17 @@ Règles :
 4. Si le projet n'a pas encore de DPGF, l'outil en crée un vide avant d'y ajouter l'article — dis-le à l'utilisateur plutôt que de le laisser croire qu'un document existait déjà.\n`
     : '';
 
+  const docxFillSection = caps.docsRead && caps.actionScopes.includes('projects')
+    ? `\n═══ REMPLIR UN MODÈLE WORD (fill_docx_template) ═══
+Tu PEUX remplir un modèle Word (.docx) joint à la conversation ou rangé sur une fiche : ne réponds JAMAIS « je ne peux pas générer de fichier Word » et ne recopie pas le texte dans la conversation à la place.
+Règles :
+1. L'affaire visée est celle ouverte à l'écran (voir « AFFAIRE OUVERTE À L'ÉCRAN ») : ne demande pas laquelle, utilise son id. Récupère ses informations avec get_record / get_project, et celles du client, du maître d'ouvrage et des intervenants avec search_records ou manage_project_stakeholders.
+2. Procède en deux temps : fill_docx_template en action « inspect » (document_id = l'identifiant indiqué entre crochets dans le contenu du document joint), puis en action « fill » avec project_id et la liste des modifications.
+3. Ne renseigne QUE ce qui figure dans la fiche, un contact ou la conversation. Une information absente reste vide ou garde sa mention « à compléter » : n'invente ni identité, ni adresse, ni montant, ni date. Dis ce qui manque.
+4. Le résultat est un NOUVEAU document rangé dans les Documents de l'affaire ; le modèle n'est jamais écrasé. Annonce-le avec ce que tu as renseigné et ce qui reste à faire à la main, et rappelle que le document est à vérifier avant tout usage contractuel.
+5. Seul le .docx est pris en charge. Pour un ancien .doc ou un PDF, dis-le et propose de le réenregistrer en .docx.\n`
+    : '';
+
   const delegateSection = canDelegate
     ? `\n═══ CONSULTATION D'UN COLLÈGUE (consulter_agent) ═══
 Tu peux poser une question à un collègue (voir COLLÈGUES DU CABINET plus bas) et recevoir sa réponse dans ce même tour, avec consulter_agent(agent_id, message).
@@ -470,7 +481,7 @@ ${canLearn
   : "✗ Tu NE peux PAS proposer d'amélioration à retenir — l'architecte n'a pas activé cette capacité pour toi"}
 ✗ Tu NE peux PAS révéler de montants confidentiels
 ✗ Tu NE peux PAS prendre de décision à la place de l'architecte
-${actionsSection}${webFetchSection}${mailSection}${geoSection}${projectDocsSection}${projectDocsWriteSection}${delegateSection}${notifySection}${webSearchSection}${contactEnrichmentSection(agent, webSearchActive)}${learningSection}
+${actionsSection}${webFetchSection}${mailSection}${geoSection}${projectDocsSection}${projectDocsWriteSection}${docxFillSection}${delegateSection}${notifySection}${webSearchSection}${contactEnrichmentSection(agent, webSearchActive)}${learningSection}
 ═══ GÉNÉRATION DE FICHIERS (ARTIFACTS) ═══
 Quand l'utilisateur demande un tableau, un planning, un rapport, un courrier ou tout autre
 fichier structuré, génère-le en ajoutant un bloc artifact JSON à la fin de ta réponse.
