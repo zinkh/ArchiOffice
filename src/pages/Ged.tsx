@@ -80,6 +80,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 interface ContactChoice { id: string; label: string }
 
+/** Destination d'un import : affaire (vide = à classer), phase et dossier libre (vide = racine de la phase). */
+interface ImportTarget { projectId: string; phase: string; folderId: string }
+
+const hasFiles = (e: React.DragEvent): boolean => Array.from(e.dataTransfer?.types || []).includes('Files');
+
 /** Émetteur lu dans les métadonnées d'un fichier déposé, sans jamais bloquer l'import : vide si rien n'est lisible. */
 async function emetteurOfFile(file: File): Promise<string> {
   if (!canReadMetadata(file.name) || file.size > MAX_METADATA_BYTES) return '';
@@ -317,9 +322,50 @@ export default function Ged() {
       if (phase ? !unchanged(project, target, '') : (doc.project_id || '') !== project) void classify(doc, project, target, phase ? '' : undefined);
     },
   });
-  const dragging = !!drag;
+  const [filesDragging, setFilesDragging] = useState(false);
+  const dragging = !!drag || filesDragging;
   const dropStyle = (key: string): React.CSSProperties => drag?.over === key
     ? { outline: '2px dashed var(--tblr-primary)', outlineOffset: -2, background: 'var(--tblr-primary-lt)', borderRadius: 8 } : {};
+
+  // Fichiers glissés depuis le bureau (glisser-déposer natif du navigateur, distinct du geste ci-dessus) : déposés
+  // sur une affaire, une phase, un dossier ou « À classer » de la navigation, ou sur la liste (destination ouverte).
+  const [fileOver, setFileOver] = useState<string | null>(null);
+  const targetOfZone = (zone: string): ImportTarget | null => {
+    const [kind, key, phase] = zone.split(':');
+    if (kind === 'none') return { projectId: '', phase: 'Général', folderId: '' };
+    if (kind === 'f') {
+      const folder = folders.find(f => f.id === key);
+      return folder ? { projectId: folder.project_id, phase: folder.phase, folderId: folder.id } : null;
+    }
+    return { projectId: key === NO_PROJECT ? '' : key, phase: phase || 'Général', folderId: '' };
+  };
+  const fileDrop = (zone: string) => ({
+    onDragOver: (e: React.DragEvent) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (fileOver !== zone) setFileOver(zone); },
+    onDragLeave: (e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFileOver(prev => (prev === zone ? null : prev)); },
+    onDrop: (e: React.DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); e.stopPropagation(); setFileOver(null);
+      const target = zone === 'list' ? undefined : targetOfZone(zone) || undefined;
+      void importFiles(Array.from(e.dataTransfer.files), target);
+    },
+  });
+  // Contour de la cible : geste interne (`drag.over`) ou fichier venu du bureau (`fileOver`).
+  const dropMark = (key: string): React.CSSProperties => (fileOver === key ? { outline: '2px dashed var(--tblr-primary)', outlineOffset: -2, background: 'var(--tblr-primary-lt)', borderRadius: 8 } : dropStyle(key));
+  // Pendant un glisser de fichiers (`filesDragging`), les affaires et phases se déplient comme pour un classement.
+  useEffect(() => {
+    const isFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types || []).includes('Files');
+    const start = (e: DragEvent) => { if (isFiles(e)) setFilesDragging(true); };
+    const end = () => { setFilesDragging(false); setFileOver(null); };
+    // Un fichier lâché hors d'une cible ne doit pas être ouvert par le navigateur à la place de la page.
+    const guard = (e: DragEvent) => { if (isFiles(e)) e.preventDefault(); };
+    const leave = (e: DragEvent) => { if (!e.relatedTarget) end(); };
+    window.addEventListener('dragenter', start); window.addEventListener('dragover', guard);
+    window.addEventListener('dragleave', leave); window.addEventListener('dragend', end); window.addEventListener('drop', end);
+    return () => {
+      window.removeEventListener('dragenter', start); window.removeEventListener('dragover', guard);
+      window.removeEventListener('dragleave', leave); window.removeEventListener('dragend', end); window.removeEventListener('drop', end);
+    };
+  }, []);
 
   // Émetteur d'un document : le serveur réécrit tous les champs du corps (phase, type, nom...), on les renvoie donc
   // tels qu'ils sont. Un contact choisi rattache la fiche (contact_id), un texte libre la détache.
@@ -342,13 +388,13 @@ export default function Ged() {
   };
 
   // Import : le dossier ouvert dans la navigation (affaire, phase) devient la destination.
-  const importFiles = async (files: FileList | null) => {
+  const importFiles = async (files: FileList | File[] | null, to?: ImportTarget) => {
     const list = Array.from(files || []);
     if (!list.length) return;
     const inProject = nav.kind === 'project' || nav.kind === 'folder';
-    const projectId = inProject && nav.project !== NO_PROJECT ? nav.project || '' : '';
-    const phase = inProject && nav.value ? nav.value : 'Général';
-    const folderId = nav.kind === 'folder' ? nav.folder || '' : '';
+    const projectId = to ? to.projectId : inProject && nav.project !== NO_PROJECT ? nav.project || '' : '';
+    const phase = to ? to.phase : inProject && nav.value ? nav.value : 'Général';
+    const folderId = to ? to.folderId : nav.kind === 'folder' ? nav.folder || '' : '';
     setUploading(true);
     let failed = 0;
     try {
@@ -430,7 +476,7 @@ export default function Ged() {
   };
   const renderFolders = (nodes: FolderNode[]): React.ReactNode => nodes.map(node => (
     <div key={node.id}>
-      <div {...zoneProps(`f:${node.id}`)} style={dropStyle(`f:${node.id}`)}>
+      <div {...zoneProps(`f:${node.id}`)} {...fileDrop(`f:${node.id}`)} style={dropMark(`f:${node.id}`)}>
         <NavButton indent={2 + node.depth} active={nav.kind === 'folder' && nav.folder === node.id}
           onClick={() => go({ kind: 'folder', project: node.project_id, value: node.phase, folder: node.id })}
           icon={<IconFolder size={14} aria-hidden="true" />} count={folderDocCount(node.id)}>{node.name}</NavButton>
@@ -563,7 +609,7 @@ export default function Ged() {
           <NavButton active={isNav('all')} onClick={() => go(GED_ALL)} icon={<IconFolderOpen size={16} aria-hidden="true" />} count={docs.length}>Tous les documents</NavButton>
           <NavButton active={isNav('recent')} onClick={() => go({ kind: 'recent' })} icon={<IconClock size={16} aria-hidden="true" />}>Récents</NavButton>
           <NavButton active={isNav('fav')} onClick={() => go({ kind: 'fav' })} icon={<IconStar size={16} aria-hidden="true" />} count={favs.size}>Favoris</NavButton>
-          <div {...zoneProps('none')} style={dropStyle('none')}>
+          <div {...zoneProps('none')} {...fileDrop('none')} style={dropMark('none')}>
             <NavButton active={isNav('toclass')} onClick={() => go({ kind: 'toclass' })} icon={<IconInbox size={16} aria-hidden="true" />} count={byProject.get(NO_PROJECT) || 0}>À classer</NavButton>
           </div>
 
@@ -577,7 +623,7 @@ export default function Ged() {
                     className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)]" style={muted}>
                     {open ? <IconChevronDown size={14} aria-hidden="true" /> : <IconChevronRight size={14} aria-hidden="true" />}
                   </button>
-                  <div className="flex-1 min-w-0" {...zoneProps(`p:${p.id}`)} style={dropStyle(`p:${p.id}`)}>
+                  <div className="flex-1 min-w-0" {...zoneProps(`p:${p.id}`)} {...fileDrop(`p:${p.id}`)} style={dropMark(`p:${p.id}`)}>
                     <NavButton active={isNav('project', p.id)} onClick={() => { go({ kind: 'project', project: p.id }); if (!open) toggleExpanded(p.id); }}
                       icon={<IconFolder size={16} aria-hidden="true" />} count={byProject.get(p.id)}>{p.name}</NavButton>
                   </div>
@@ -585,7 +631,7 @@ export default function Ged() {
                 {open && (dragging ? PHASES.map(ph => [ph, countBy(docs.filter(d => (d.project_id || NO_PROJECT) === p.id), phaseOf).get(ph) || 0] as const) : projectPhases(p.id)).map(([phase, n]) => (
                   <div key={phase}>
                     <div className="flex items-center">
-                      <div className="flex-1 min-w-0" {...zoneProps(`p:${p.id}:${phase}`)} style={dropStyle(`p:${p.id}:${phase}`)}>
+                      <div className="flex-1 min-w-0" {...zoneProps(`p:${p.id}:${phase}`)} {...fileDrop(`p:${p.id}:${phase}`)} style={dropMark(`p:${p.id}:${phase}`)}>
                         <NavButton indent={2} active={isNav('project', p.id, phase)} onClick={() => go({ kind: 'project', project: p.id, value: phase })} count={n}>{phase}</NavButton>
                       </div>
                       {p.id !== NO_PROJECT && (
@@ -626,7 +672,12 @@ export default function Ged() {
         </nav>
 
         {/* Liste */}
-        <section aria-label="Liste des documents" className="rounded-xl min-w-0" style={surface}>
+        <section aria-label="Liste des documents" className="rounded-xl min-w-0 relative" style={{ ...surface, ...(fileOver === 'list' ? { outline: '2px dashed var(--tblr-primary)', outlineOffset: -2 } : {}) }} {...fileDrop('list')}>
+          {fileOver === 'list' && (
+            <div className="absolute inset-0 z-10 grid place-items-center rounded-xl text-sm font-semibold pointer-events-none" style={{ background: 'color-mix(in srgb, var(--tblr-primary-lt) 85%, transparent)', color: 'var(--tblr-primary)' }}>
+              Déposez les fichiers pour les importer dans « {title} »
+            </div>
+          )}
           <div className="px-4 pt-3 pb-1">
             <h1 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{title}</h1>
             <p className="text-xs" role="status" style={muted}>
