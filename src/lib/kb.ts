@@ -134,6 +134,31 @@ export function kbContentToText(node: unknown, limit = 200_000): string {
   return parts.join('').replace(/\n{3,}/g, '\n\n').trim().slice(0, limit);
 }
 
+/**
+ * Texte brut vers document Tiptap : un paragraphe par ligne, les lignes vides restent des paragraphes vides.
+ * C'est la seule porte d'entrée des agents IA : ils écrivent du texte (champ `texte`), jamais du JSON Tiptap.
+ */
+export function kbTextToContent(text: string, limit = 200_000): { type: 'doc'; content: Array<Record<string, unknown>> } {
+  const lines = text.replace(/\r\n?/g, '\n').slice(0, limit).split('\n');
+  return {
+    type: 'doc',
+    content: lines.map(line => (line.trim() === '' ? { type: 'paragraph' } : { type: 'paragraph', content: [{ type: 'text', text: line }] })),
+  };
+}
+
+/**
+ * Vrai si le document est vide ou ne contient que des paragraphes de texte : on peut alors le réécrire à
+ * partir d'un texte brut sans perdre de mise en forme (titres, listes, tableaux, fichiers, images...).
+ */
+export function kbIsPlainContent(content: unknown): boolean {
+  if (content === null || content === undefined) return true;
+  const nodes = (content as { content?: unknown })?.content;
+  if (nodes === undefined) return true;
+  if (!Array.isArray(nodes)) return false;
+  return nodes.every((node: any) => node?.type === 'paragraph'
+    && (node.content === undefined || (Array.isArray(node.content) && node.content.every((child: any) => child?.type === 'text' || child?.type === 'hardBreak'))));
+}
+
 /** Profondeur d'une page dans l'arbre (0 = racine), ou null si la chaîne boucle ou est coupée. */
 export function kbDepth(id: string | null, pages: Array<Pick<KbPage, 'id' | 'parent_id'>>): number | null {
   const byId = new Map(pages.map(p => [p.id, p]));

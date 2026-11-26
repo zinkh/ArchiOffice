@@ -1,7 +1,8 @@
 // Logique pure de la base de données du cabinet : src/lib/kb.ts (filtres, tris, validation, arbre).
 import { describe, expect, it } from 'vitest';
 import {
-  applyKbView, kbContentToText, kbDepth, kbFilterOps, kbOpNeedsValue, kbWouldCycle, sanitizeKbOptions, sanitizeKbValue,
+  applyKbView, kbContentToText, kbDepth, kbFilterOps, kbIsPlainContent, kbOpNeedsValue, kbTextToContent, kbWouldCycle,
+  sanitizeKbOptions, sanitizeKbValue,
   type KbPage, type KbProperty,
 } from '../kb';
 
@@ -123,6 +124,34 @@ describe('kbFilterOps', () => {
     expect(kbOpNeedsValue('has')).toBe(true);
     expect(kbOpNeedsValue('is_empty')).toBe(false);
     expect(kbOpNeedsValue('checked')).toBe(false);
+  });
+});
+
+describe('kbTextToContent et kbIsPlainContent', () => {
+  it('fait un paragraphe par ligne et garde les lignes vides', () => {
+    const doc = kbTextToContent('a\r\n\r\nb');
+    expect(doc.type).toBe('doc');
+    expect(doc.content).toEqual([
+      { type: 'paragraph', content: [{ type: 'text', text: 'a' }] },
+      { type: 'paragraph' },
+      { type: 'paragraph', content: [{ type: 'text', text: 'b' }] },
+    ]);
+    // Un paragraphe vide ne laisse aucun texte : la recherche ne voit que les lignes écrites.
+    expect(kbContentToText(doc)).toBe('a\nb');
+  });
+
+  it('borne la taille du texte converti', () => {
+    expect(kbContentToText(kbTextToContent('x'.repeat(500), 100))).toHaveLength(100);
+  });
+
+  it('reconnaît un document vide ou de simples paragraphes, mais pas des blocs enrichis', () => {
+    expect(kbIsPlainContent(null)).toBe(true);
+    expect(kbIsPlainContent({ type: 'doc' })).toBe(true);
+    expect(kbIsPlainContent(kbTextToContent('un\ndeux'))).toBe(true);
+    expect(kbIsPlainContent({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'ok' }, { type: 'hardBreak' }] }] })).toBe(true);
+    expect(kbIsPlainContent({ type: 'doc', content: [{ type: 'heading', attrs: { level: 1 } }] })).toBe(false);
+    expect(kbIsPlainContent({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'image' }] }] })).toBe(false);
+    expect(kbIsPlainContent({ type: 'doc', content: [{ type: 'kbFile', attrs: {} }] })).toBe(false);
   });
 });
 

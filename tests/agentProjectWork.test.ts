@@ -159,9 +159,38 @@ describe('ressources ajoutées à AGENT_RESOURCES', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it('existent, avec champs obligatoires et vocabulaires', () => {
-    for (const key of ['rfis', 'avenants_moe', 'gpa_reserves', 'time_entries', 'tender_pieces', 'tender_competitors', 'tender_partner_solicitations', 'tender_activity_notes']) {
+    for (const key of ['rfis', 'avenants_moe', 'gpa_reserves', 'time_entries', 'tender_pieces', 'tender_competitors', 'tender_partner_solicitations', 'tender_activity_notes', 'kb_pages']) {
       expect(AGENT_RESOURCES.find(r => r.key === key), key).toBeTruthy();
     }
+  });
+
+  describe('kb_pages (base de données du cabinet)', () => {
+    it('est proposée avec le périmètre kb_pages et lue par la liste de pages', async () => {
+      const names = buildAgentTools(caps(['kb_pages'])).map(t => t.name);
+      expect(names).toEqual(expect.arrayContaining(['create_record', 'search_records', 'update_record']));
+      const m = stub({ 'GET /api/kb/pages': [{ id: 'k1', title: 'Détails constructifs', texte: 'Plancher bois' }, { id: 'k2', title: 'Fabricants' }] });
+      const r = await run(['kb_pages'], 'search_records', { resource: 'kb_pages', query: 'détails' });
+      expect(JSON.stringify(r.response)).toContain('k1');
+      expect(JSON.stringify(r.response)).not.toContain('k2');
+      expect(m.mock.calls.some(c => String(c[0]).includes('/api/kb/pages'))).toBe(true);
+    });
+
+    it("crée une page avec du texte brut : `texte` part tel quel, `kind` prend sa valeur par défaut, le JSON Tiptap est écarté", async () => {
+      const m = stub({ 'GET /api/kb/pages': [], 'POST /api/kb/pages': { id: 'k9' } });
+      const r = await run(['kb_pages'], 'create_record', {
+        resource: 'kb_pages',
+        data: { title: 'Fiche SOTTAS', texte: 'Adresse : Rue de la Gare 12\n1003 Lausanne', content: { type: 'doc' }, properties: { x: 1 } },
+        source: { type: 'message', citation: 'Fiche SOTTAS' },
+      });
+      expect(sent(m, 'POST', '/api/kb/pages')[0]).toEqual({ title: 'Fiche SOTTAS', texte: 'Adresse : Rue de la Gare 12\n1003 Lausanne', kind: 'page' });
+      expect(JSON.stringify(r.response)).toContain('champs_ignores');
+    });
+
+    it('exige un titre', async () => {
+      stub({ 'GET /api/kb/pages': [] });
+      const r = await run(['kb_pages'], 'create_record', { resource: 'kb_pages', data: { texte: 'sans titre' }, source: { type: 'message', citation: 'sans titre' } });
+      expect(JSON.stringify(r.response)).toMatch(/obligatoires/i);
+    });
   });
 
   it("une modification partielle de RFI renvoie l'enregistrement fusionné, rien n'est écrasé", async () => {

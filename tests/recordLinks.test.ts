@@ -11,6 +11,12 @@ describe('buildRecordPath — routes directes par id', () => {
     expect(buildRecordPath('tenders', { id: 't1' })).toBe('/tenders/t1');
     expect(buildRecordPath('articles_type', { id: 'a1' })).toBe('/specifications/a1');
   });
+
+  it('kb_pages (base de données du cabinet) ouvre la page par son identifiant', () => {
+    expect(buildRecordPath('kb_pages', { id: 'k1' })).toBe('/base-de-donnees/k1');
+    expect(buildRecordPath('kb_pages', { id: 'a b' })).toBe('/base-de-donnees/a%20b');
+    expect(buildRecordPath('kb_pages', {})).toBeNull();
+  });
 });
 
 describe('buildRecordPath — pages de liste avec ?open=', () => {

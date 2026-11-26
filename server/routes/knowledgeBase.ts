@@ -6,8 +6,8 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { firstForeignRelation } from '../assertTenantEntity';
 import {
-  KB_MAX_DEPTH, isKbPropertyType, kbContentToText, kbDepth, kbWouldCycle, sanitizeKbOptions, sanitizeKbValue,
-  type KbProperty,
+  KB_MAX_DEPTH, isKbPropertyType, kbContentToText, kbDepth, kbIsPlainContent, kbTextToContent, kbWouldCycle,
+  sanitizeKbOptions, sanitizeKbValue, type KbProperty,
 } from '../../src/lib/kb';
 
 export interface RouteDeps {
@@ -25,6 +25,8 @@ export function isMissingKbTable(error: any): boolean {
 const MIGRATION_MISSING = 'La base de données du cabinet n\'est pas encore disponible sur cette instance (migration kb_pages à appliquer).';
 const LIST_COLUMNS = 'id, parent_id, kind, title, icon, position, is_favorite, project_id, updated_at, trashed_at';
 const MAX_CONTENT_BYTES = 2_000_000;
+const KB_LIST_LIMIT = 500;
+const KB_LIST_TEXT_CHARS = 4_000;
 
 const cleanTitle = (value: unknown): string => (typeof value === 'string' ? value.slice(0, 200) : '');
 
@@ -91,6 +93,32 @@ export function registerKnowledgeBaseRoutes(app: Express, { supabaseAdmin, getTe
     }
   });
 
+  // Liste des pages hors corbeille, pour les agents IA et le MCP (search_records, get_record : ils lisent la
+  // liste de la ressource puis filtrent). Le contenu Tiptap n'y figure pas : `texte` en est le texte brut,
+  // coupé au-delà de KB_LIST_TEXT_CHARS (`texte_tronque`), la page entière restant à `GET /pages/:id`.
+  app.get('/api/kb/pages', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await table(tenantId, 'kb_pages')
+        .select('id, parent_id, kind, title, icon, project_id, updated_at, content_text')
+        .is('trashed_at', null).limit(KB_LIST_LIMIT);
+      if (error) throw error;
+      // Champs choisis un à un : la réponse ne dépend pas de ce que la requête a laissé passer.
+      res.json(((data || []) as any[]).map(page => {
+        const text = typeof page.content_text === 'string' ? page.content_text : '';
+        return {
+          id: page.id, parent_id: page.parent_id, kind: page.kind, title: page.title, icon: page.icon,
+          project_id: page.project_id, updated_at: page.updated_at,
+          texte: text.slice(0, KB_LIST_TEXT_CHARS),
+          ...(text.length > KB_LIST_TEXT_CHARS ? { texte_tronque: true } : {}),
+        };
+      }));
+    } catch (e: any) {
+      if (isMissingKbTable(e)) return res.json([]);
+      fail(res, '[GET /api/kb/pages]', e, 'Impossible de lire les pages.');
+    }
+  });
+
   app.get('/api/kb/pages/:id', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -137,7 +165,10 @@ export function registerKnowledgeBaseRoutes(app: Express, { supabaseAdmin, getTe
       const position = siblings.length ? Math.max(...siblings.map(s => Number(s.position) || 0)) + 1 : 0;
 
       const id = crypto.randomUUID();
-      const content = body.content && typeof body.content === 'object' ? body.content : null;
+      // `texte` (agents IA) : texte brut converti en paragraphes ; `content` (écran) : document Tiptap tel quel.
+      const content = body.content && typeof body.content === 'object'
+        ? body.content
+        : (typeof body.texte === 'string' && body.texte.trim() ? kbTextToContent(body.texte) : null);
       if (content && JSON.stringify(content).length > MAX_CONTENT_BYTES) return res.status(413).json({ error: 'Contenu trop volumineux.' });
       const { data, error } = await table(tenantId, 'kb_pages').insert({
         id, parent_id: parentId, kind, title: cleanTitle(body.title),
@@ -170,7 +201,7 @@ export function registerKnowledgeBaseRoutes(app: Express, { supabaseAdmin, getTe
     try {
       const tenantId = await getTenantId(req.user.id);
       const body = req.body || {};
-      const { data: current, error: readError } = await table(tenantId, 'kb_pages').select('id, parent_id, kind').eq('id', req.params.id).maybeSingle();
+      const { data: current, error: readError } = await table(tenantId, 'kb_pages').select('id, parent_id, kind, content').eq('id', req.params.id).maybeSingle();
       if (readError) throw readError;
       if (!current) return res.status(404).json({ error: 'Page introuvable.' });
 
@@ -183,6 +214,20 @@ export function registerKnowledgeBaseRoutes(app: Express, { supabaseAdmin, getTe
         if (body.content && JSON.stringify(body.content).length > MAX_CONTENT_BYTES) return res.status(413).json({ error: 'Contenu trop volumineux.' });
         patch.content = body.content;
         patch.content_text = body.content ? kbContentToText(body.content) : '';
+      }
+      // `texte` remplace le contenu par du texte brut, seulement si la page n'en a pas d'enrichi : une page
+      // avec titres, tableaux, fichiers ou images ne serait plus qu'un texte plat. L'agent crée alors une page.
+      if (body.content === undefined && typeof body.texte === 'string') {
+        if (!kbIsPlainContent((current as any).content)) {
+          return res.status(409).json({
+            error: 'Cette page contient des blocs enrichis (titres, listes, tableaux, fichiers...) : la réécrire en texte brut les ferait disparaître. Ajoutez le texte dans une nouvelle page.',
+            code: 'KB_RICH_CONTENT',
+          });
+        }
+        const converted = kbTextToContent(body.texte);
+        if (JSON.stringify(converted).length > MAX_CONTENT_BYTES) return res.status(413).json({ error: 'Contenu trop volumineux.' });
+        patch.content = converted;
+        patch.content_text = kbContentToText(converted);
       }
       if (body.project_id !== undefined) {
         const foreign = await firstForeignRelation(supabaseAdmin, tenantId, [{ table: 'projects', id: body.project_id, label: 'Affaire' }]);

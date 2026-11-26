@@ -4,7 +4,7 @@ Généré avec `npm run docs:routes`. Vérifier avec `npm run docs:check`.
 
 Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paquet agents. Il relève les appels HTTP app/router/*Router avec chemins littéraux, y compris les tableaux. Les commentaires et tests sont exclus. Les préfixes de montage des routers ne sont pas résolus ; les déclarations conditionnelles restent listées, même si leur mode n’est pas actif. Les fabriques de routes, alias de receivers et app.route(...).get(...) ne sont pas développés. Ce n’est ni une liste garantie des routes actives ni un contrat de paramètres ou d’autorisations. Lire [API.md](../API.md), [MCP.md](../MCP.md) et le gestionnaire lié avant intégration.
 
-901 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
+902 déclarations littérales relevées. Les chemins relatifs appartiennent à leur router.
 
 | Méthode | Chemin déclaré | Source |
 | --- | --- | --- |
@@ -276,22 +276,23 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/invoices/:id` | [server/routes/invoices.ts:88](../server/routes/invoices.ts#L88) |
 | PUT | `/api/invoices/:id` | [server/routes/invoices.ts:265](../server/routes/invoices.ts#L265) |
 | POST | `/api/invoices/:id/sync-retry` | [server/routes/invoices.ts:482](../server/routes/invoices.ts#L482) |
-| GET | `/api/kb/databases/:id/properties` | [server/routes/knowledgeBase.ts:292](../server/routes/knowledgeBase.ts#L292) |
-| POST | `/api/kb/databases/:id/properties` | [server/routes/knowledgeBase.ts:317](../server/routes/knowledgeBase.ts#L317) |
-| DELETE | `/api/kb/databases/:id/properties/:propertyId` | [server/routes/knowledgeBase.ts:367](../server/routes/knowledgeBase.ts#L367) |
-| PUT | `/api/kb/databases/:id/properties/:propertyId` | [server/routes/knowledgeBase.ts:339](../server/routes/knowledgeBase.ts#L339) |
-| GET | `/api/kb/databases/:id/rows` | [server/routes/knowledgeBase.ts:303](../server/routes/knowledgeBase.ts#L303) |
-| GET | `/api/kb/databases/:id/views` | [server/routes/knowledgeBase.ts:383](../server/routes/knowledgeBase.ts#L383) |
-| PUT | `/api/kb/databases/:id/views/:viewId` | [server/routes/knowledgeBase.ts:395](../server/routes/knowledgeBase.ts#L395) |
-| POST | `/api/kb/pages` | [server/routes/knowledgeBase.ts:106](../server/routes/knowledgeBase.ts#L106) |
-| DELETE | `/api/kb/pages/:id` | [server/routes/knowledgeBase.ts:250](../server/routes/knowledgeBase.ts#L250) |
-| GET | `/api/kb/pages/:id` | [server/routes/knowledgeBase.ts:94](../server/routes/knowledgeBase.ts#L94) |
-| PUT | `/api/kb/pages/:id` | [server/routes/knowledgeBase.ts:169](../server/routes/knowledgeBase.ts#L169) |
-| PATCH | `/api/kb/pages/:id/move` | [server/routes/knowledgeBase.ts:209](../server/routes/knowledgeBase.ts#L209) |
-| DELETE | `/api/kb/pages/:id/permanent` | [server/routes/knowledgeBase.ts:270](../server/routes/knowledgeBase.ts#L270) |
-| POST | `/api/kb/pages/:id/restore` | [server/routes/knowledgeBase.ts:260](../server/routes/knowledgeBase.ts#L260) |
-| GET | `/api/kb/search` | [server/routes/knowledgeBase.ts:79](../server/routes/knowledgeBase.ts#L79) |
-| GET | `/api/kb/tree` | [server/routes/knowledgeBase.ts:69](../server/routes/knowledgeBase.ts#L69) |
+| GET | `/api/kb/databases/:id/properties` | [server/routes/knowledgeBase.ts:337](../server/routes/knowledgeBase.ts#L337) |
+| POST | `/api/kb/databases/:id/properties` | [server/routes/knowledgeBase.ts:362](../server/routes/knowledgeBase.ts#L362) |
+| DELETE | `/api/kb/databases/:id/properties/:propertyId` | [server/routes/knowledgeBase.ts:412](../server/routes/knowledgeBase.ts#L412) |
+| PUT | `/api/kb/databases/:id/properties/:propertyId` | [server/routes/knowledgeBase.ts:384](../server/routes/knowledgeBase.ts#L384) |
+| GET | `/api/kb/databases/:id/rows` | [server/routes/knowledgeBase.ts:348](../server/routes/knowledgeBase.ts#L348) |
+| GET | `/api/kb/databases/:id/views` | [server/routes/knowledgeBase.ts:428](../server/routes/knowledgeBase.ts#L428) |
+| PUT | `/api/kb/databases/:id/views/:viewId` | [server/routes/knowledgeBase.ts:440](../server/routes/knowledgeBase.ts#L440) |
+| GET | `/api/kb/pages` | [server/routes/knowledgeBase.ts:99](../server/routes/knowledgeBase.ts#L99) |
+| POST | `/api/kb/pages` | [server/routes/knowledgeBase.ts:134](../server/routes/knowledgeBase.ts#L134) |
+| DELETE | `/api/kb/pages/:id` | [server/routes/knowledgeBase.ts:295](../server/routes/knowledgeBase.ts#L295) |
+| GET | `/api/kb/pages/:id` | [server/routes/knowledgeBase.ts:122](../server/routes/knowledgeBase.ts#L122) |
+| PUT | `/api/kb/pages/:id` | [server/routes/knowledgeBase.ts:200](../server/routes/knowledgeBase.ts#L200) |
+| PATCH | `/api/kb/pages/:id/move` | [server/routes/knowledgeBase.ts:254](../server/routes/knowledgeBase.ts#L254) |
+| DELETE | `/api/kb/pages/:id/permanent` | [server/routes/knowledgeBase.ts:315](../server/routes/knowledgeBase.ts#L315) |
+| POST | `/api/kb/pages/:id/restore` | [server/routes/knowledgeBase.ts:305](../server/routes/knowledgeBase.ts#L305) |
+| GET | `/api/kb/search` | [server/routes/knowledgeBase.ts:81](../server/routes/knowledgeBase.ts#L81) |
+| GET | `/api/kb/tree` | [server/routes/knowledgeBase.ts:71](../server/routes/knowledgeBase.ts#L71) |
 | GET | `/api/knowledge-sharing` | [server/routes/knowledgeSharing.ts:75](../server/routes/knowledgeSharing.ts#L75) |
 | PUT | `/api/knowledge-sharing/auto` | [server/routes/knowledgeSharing.ts:95](../server/routes/knowledgeSharing.ts#L95) |
 | POST | `/api/knowledge-sharing/auto/backfill` | [server/routes/knowledgeSharing.ts:135](../server/routes/knowledgeSharing.ts#L135) |
@@ -693,7 +694,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | DELETE | `/api/rfis/:id` | [server/routes/rfis.ts:59](../server/routes/rfis.ts#L59) |
 | PUT | `/api/rfis/:id` | [server/routes/rfis.ts:46](../server/routes/rfis.ts#L46) |
 | GET | `/api/rnb-buildings` | [server/routes/geoProxy.ts:945](../server/routes/geoProxy.ts#L945) |
-| GET | `/api/search` | [server/routes/globalSearch.ts:14](../server/routes/globalSearch.ts#L14) |
+| GET | `/api/search` | [server/routes/globalSearch.ts:15](../server/routes/globalSearch.ts#L15) |
 | POST | `/api/send-email` | [server/routes/sendEmail.ts:32](../server/routes/sendEmail.ts#L32) |
 | GET | `/api/settings` | [server/routes/settings.ts:66](../server/routes/settings.ts#L66) |
 | PUT | `/api/settings` | [server/routes/settings.ts:97](../server/routes/settings.ts#L97) |

@@ -106,6 +106,84 @@ describe('Pages de la base de données', () => {
   });
 });
 
+describe('Pages pour les agents IA : liste et texte brut', () => {
+  const paragraphs = (doc: any) => (doc.content || []).map((p: any) => (p.content || []).map((c: any) => c.text).join(''));
+
+  it('liste les pages hors corbeille avec leur texte, sans le JSON Tiptap, pour le cabinet seul', async () => {
+    const t = setup();
+    const other = setup();
+    await other.post('/api/kb/pages', { title: 'Autre cabinet', texte: 'secret' });
+    const a = (await t.post('/api/kb/pages', { title: 'Détails constructifs', texte: 'Plancher bois' })).body;
+    const b = (await t.post('/api/kb/pages', { title: 'Brouillon' })).body;
+    await t.del(`/api/kb/pages/${b.id}`);
+
+    const list = await t.get('/api/kb/pages');
+    expect(list.status).toBe(200);
+    expect(list.body.map((p: any) => p.id)).toEqual([a.id]);
+    expect(list.body[0]).toMatchObject({ title: 'Détails constructifs', texte: 'Plancher bois' });
+    expect(list.body[0]).not.toHaveProperty('content');
+    expect(list.body[0]).not.toHaveProperty('content_text');
+  });
+
+  it('coupe un texte très long dans la liste et le signale, la page entière restant lisible', async () => {
+    const t = setup();
+    const long = 'x'.repeat(5000);
+    const page = (await t.post('/api/kb/pages', { title: 'Long', texte: long })).body;
+    const list = (await t.get('/api/kb/pages')).body;
+    expect(list[0].texte).toHaveLength(4000);
+    expect(list[0].texte_tronque).toBe(true);
+    const full = (await t.get(`/api/kb/pages/${page.id}`)).body;
+    expect(full.content_text.length).toBe(5000);
+  });
+
+  it('crée une page à partir de `texte` : un paragraphe par ligne, texte brut indexé pour la recherche', async () => {
+    const t = setup();
+    const created = await t.post('/api/kb/pages', { title: 'Fiche SOTTAS', texte: 'Adresse : Rue de la Gare 12\r\n\r\n1003 Lausanne' });
+    expect(created.status).toBe(201);
+    expect(paragraphs(created.body.content)).toEqual(['Adresse : Rue de la Gare 12', '', '1003 Lausanne']);
+    expect(created.body.content_text).toContain('Lausanne');
+    expect((await t.get('/api/kb/search?q=Lausanne')).body.map((p: any) => p.id)).toEqual([created.body.id]);
+  });
+
+  it('`content` (écran) l\'emporte sur `texte`', async () => {
+    const t = setup();
+    const content = { type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Titre' }] }] };
+    const created = await t.post('/api/kb/pages', { title: 'Les deux', content, texte: 'ignoré' });
+    expect(created.body.content).toEqual(content);
+  });
+
+  it('réécrit une page en texte brut quand elle n\'a pas de blocs enrichis', async () => {
+    const t = setup();
+    const page = (await t.post('/api/kb/pages', { title: 'Note', texte: 'ancien' })).body;
+    const saved = await t.put(`/api/kb/pages/${page.id}`, { texte: 'nouveau\nsuite' });
+    expect(saved.status).toBe(200);
+    expect(paragraphs(saved.body.content)).toEqual(['nouveau', 'suite']);
+    expect(saved.body.content_text).toContain('suite');
+    // Une page vide aussi.
+    const empty = (await t.post('/api/kb/pages', { title: 'Vide' })).body;
+    expect((await t.put(`/api/kb/pages/${empty.id}`, { texte: 'rempli' })).status).toBe(200);
+  });
+
+  it('refuse de réduire en texte brut une page qui porte des blocs enrichis', async () => {
+    const t = setup();
+    const content = { type: 'doc', content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Titre' }] }] };
+    const page = (await t.post('/api/kb/pages', { title: 'Riche', content })).body;
+    const refused = await t.put(`/api/kb/pages/${page.id}`, { texte: 'écrase tout' });
+    expect(refused.status).toBe(409);
+    expect(refused.body.code).toBe('KB_RICH_CONTENT');
+    expect((await t.get(`/api/kb/pages/${page.id}`)).body.content).toEqual(content);
+  });
+
+  it('crée une fiche de base avec `texte`', async () => {
+    const t = setup();
+    const db = (await t.post('/api/kb/pages', { kind: 'database', title: 'Fabricants' })).body;
+    const row = await t.post('/api/kb/pages', { parent_id: db.id, title: 'La Rochère', texte: 'Localisation : Ville' });
+    expect(row.status).toBe(201);
+    expect(row.body.content_text).toContain('Ville');
+    expect((await t.get('/api/kb/pages')).body.map((p: any) => p.title).sort()).toEqual(['Fabricants', 'La Rochère']);
+  });
+});
+
 describe('Bases de données', () => {
   async function newDatabase(t: ReturnType<typeof setup>) {
     const db = (await t.post('/api/kb/pages', { kind: 'database', title: 'Fabricants' })).body;
