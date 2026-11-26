@@ -15,6 +15,7 @@ import { IMPORT_SITE_REPORT_NOTES_TOOL, IMPORT_SITE_REPORT_NOTES_TOOL_NAME, impo
 import { buildBusinessTools, executeBusinessTool, BUSINESS_TOOL_NAMES, BUSINESS_TOOL_SCOPES } from './businessTools.js';
 import { PROJECT_WORK_TOOLS, PROJECT_WORK_TOOL_NAMES, MEETING_WORK_TOOLS, MEETING_WORK_TOOL_NAMES, executeProjectWorkTool } from './projectWorkTools.js';
 import { buildDocumentReadTools, executeDocumentReadTool, DOCUMENT_READ_TOOL_NAMES } from './documentTools.js';
+import { buildDocxFillTools, executeDocxFillTool, FILL_DOCX_TOOL_NAME } from './docxFillTool.js';
 import { MANAGE_PROJECT_STAKEHOLDERS_TOOL, MANAGE_PROJECT_STAKEHOLDERS_TOOL_NAME, manageProjectStakeholders } from './projectStakeholdersTool.js';
 
 export type { FunctionDeclarationLike };
@@ -221,6 +222,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
       },
     });
   }
+  if (caps.docsRead && caps.actionScopes.includes('projects')) tools.push(...buildDocxFillTools());
   if (caps.docsWrite) tools.push(...buildWriteProjectDocTools());
   if (caps.delegate) tools.push(...buildDelegateTools());
   if (caps.notifyUsers) tools.push(...buildNotifyTools());
@@ -683,6 +685,12 @@ export async function executeAgentAction(
     if (!caps.docsRead) return { response: { error: "La lecture des documents n'est pas activée pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     return executeDocumentReadTool(baseUrl, auth, name, args);
+  }
+
+  if (name === FILL_DOCX_TOOL_NAME) {
+    if (!caps.docsRead) return { response: { error: "La lecture des documents n'est pas activée pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeDocxFillTool(baseUrl, auth, actionScopes, args);
   }
 
   if (name && PROJECT_DOC_WRITE_TOOL_NAMES.includes(name)) {
