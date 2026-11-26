@@ -1,124 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { IconPlus, IconTrash, IconPencil, IconCheck, IconX } from '@tabler/icons-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/api';
-import type { Observation, ProjectLot } from '../../types';
+import { loadContactsForAttendees } from '../../lib/meetingAttendeesOffline';
+import type { Contact, Observation, ProjectLot } from '../../types';
+import IntervenantsEntreprise, { RolesSuggestions, type LotIntervenant } from './IntervenantsEntreprise';
+
+export type { LotIntervenant };
 
 interface MarcheLu { id: string; lot_numero?: string | null; act_lot_id?: string | null; entreprise_nom?: string | null; type_marche?: string | null; statut?: string | null }
 interface SousTraitantLu { id: string; marche_id: string; nom: string; objet?: string | null }
-export interface LotIntervenant {
-  id: string; lot_id: string; entreprise: string; nom: string;
-  role?: string | null; telephone?: string | null; email?: string | null;
-}
-type Brouillon = { nom: string; role: string; telephone: string; email: string };
-const BROUILLON_VIDE: Brouillon = { nom: '', role: '', telephone: '', email: '' };
-const ROLES_COURANTS = ['Conducteur de travaux', 'Chef de chantier', 'Chef d’équipe', 'Responsable d’affaires', 'Dirigeant', 'Responsable sécurité', 'Bureau d’études'];
-const LISTE_ROLES = 'chantier-roles-intervenants';
 
 const normaliserNumeroLot = (v: unknown) => String(v ?? '').trim().toUpperCase().replace(/^0+(?=\d)/, '');
-
-/** Formulaire d'un intervenant : nom et rôle, téléphone et e-mail facultatifs. */
-function IntervenantForm({ valeur, onChange, onValider, onAnnuler, occupe }: {
-  valeur: Brouillon; onChange: (v: Brouillon) => void; onValider: () => void; onAnnuler: () => void; occupe: boolean;
-}) {
-  const champ = (k: keyof Brouillon, label: string, extra?: React.InputHTMLAttributes<HTMLInputElement>) => (
-    <input
-      className="tblr-input w-full" aria-label={label} placeholder={label} value={valeur[k]}
-      onChange={e => onChange({ ...valeur, [k]: e.target.value })}
-      onKeyDown={e => { if (e.key === 'Enter') onValider(); if (e.key === 'Escape') onAnnuler(); }}
-      {...extra}
-    />
-  );
-  return (
-    <div className="flex flex-col gap-1.5 rounded-lg p-2" style={{ border: '1px solid var(--tblr-border)' }}>
-      {champ('nom', 'Nom', { autoFocus: true, maxLength: 200 })}
-      {champ('role', 'Rôle', { list: LISTE_ROLES, maxLength: 120 })}
-      {champ('telephone', 'Téléphone', { type: 'tel', maxLength: 40 })}
-      {champ('email', 'E-mail', { type: 'email', maxLength: 200 })}
-      <div className="flex justify-end gap-1">
-        <button type="button" className="btn btn-ghost" onClick={onAnnuler} disabled={occupe} aria-label="Annuler"><IconX size={16} /></button>
-        <button type="button" className="btn btn-primary" onClick={onValider} disabled={occupe || !valeur.nom.trim()} aria-label="Enregistrer l’intervenant"><IconCheck size={16} /></button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Intervenants d'une entreprise sur un lot : plusieurs personnes, chacune avec son rôle.
- * Rattachés au lot et au nom de l'entreprise (qui vient de la fiche du lot, de l'ACT ou du marché).
- */
-function IntervenantsEntreprise({ lotId, entreprise, liste, onChange, onErreur }: {
-  lotId: string; entreprise: string; liste: LotIntervenant[];
-  onChange: (fn: (prev: LotIntervenant[]) => LotIntervenant[]) => void; onErreur: (m: string | null) => void;
-}) {
-  const [edition, setEdition] = useState<string | 'nouveau' | null>(null);
-  const [brouillon, setBrouillon] = useState<Brouillon>(BROUILLON_VIDE);
-  const [occupe, setOccupe] = useState(false);
-
-  const ouvrir = (cible: string | 'nouveau', depart: Brouillon) => { onErreur(null); setBrouillon(depart); setEdition(cible); };
-  const fermer = () => { setEdition(null); setBrouillon(BROUILLON_VIDE); };
-
-  const valider = async () => {
-    if (!brouillon.nom.trim() || occupe) return;
-    setOccupe(true);
-    try {
-      if (edition === 'nouveau') {
-        const cree = await apiFetch<LotIntervenant>(`/api/lots/${lotId}/intervenants`, { method: 'POST', body: JSON.stringify({ ...brouillon, entreprise }) });
-        onChange(prev => [...prev, cree]);
-      } else if (edition) {
-        const maj = await apiFetch<LotIntervenant>(`/api/lot-intervenants/${edition}`, { method: 'PUT', body: JSON.stringify(brouillon) });
-        onChange(prev => prev.map(i => (i.id === maj.id ? maj : i)));
-      }
-      fermer();
-    } catch (e: any) {
-      onErreur(e?.message || 'Enregistrement impossible.');
-    } finally { setOccupe(false); }
-  };
-
-  const supprimer = async (id: string) => {
-    setOccupe(true);
-    try {
-      await apiFetch(`/api/lot-intervenants/${id}`, { method: 'DELETE' });
-      onChange(prev => prev.filter(i => i.id !== id));
-    } catch (e: any) {
-      onErreur(e?.message || 'Suppression impossible.');
-    } finally { setOccupe(false); }
-  };
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      {liste.length > 0 && <div className="text-[0.6875rem] font-semibold text-[var(--tblr-muted)]">{entreprise}</div>}
-      {liste.map(i => (edition === i.id ? (
-        <IntervenantForm key={i.id} valeur={brouillon} onChange={setBrouillon} onValider={() => { void valider(); }} onAnnuler={fermer} occupe={occupe} />
-      ) : (
-        <div key={i.id} className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-[var(--tblr-text)]">{i.nom}{i.role ? <span className="text-[0.6875rem] text-[var(--tblr-muted)]"> · {i.role}</span> : null}</div>
-            {(i.telephone || i.email) && (
-              <div className="text-[0.6875rem] text-[var(--tblr-muted)] break-words">
-                {i.telephone && <a href={`tel:${i.telephone.replace(/\s/g, '')}`} className="hover:underline">{i.telephone}</a>}
-                {i.telephone && i.email ? ' · ' : ''}
-                {i.email && <a href={`mailto:${i.email}`} className="hover:underline">{i.email}</a>}
-              </div>
-            )}
-          </div>
-          <div className="flex shrink-0">
-            <button type="button" className="btn btn-ghost" aria-label={`Modifier ${i.nom}`} disabled={occupe}
-              onClick={() => ouvrir(i.id, { nom: i.nom, role: i.role ?? '', telephone: i.telephone ?? '', email: i.email ?? '' })}><IconPencil size={16} /></button>
-            <button type="button" className="btn btn-ghost" aria-label={`Supprimer ${i.nom}`} disabled={occupe}
-              onClick={() => { void supprimer(i.id); }}><IconTrash size={16} /></button>
-          </div>
-        </div>
-      )))}
-      {edition === 'nouveau' ? (
-        <IntervenantForm valeur={brouillon} onChange={setBrouillon} onValider={() => { void valider(); }} onAnnuler={fermer} occupe={occupe} />
-      ) : (
-        <button type="button" className="btn btn-ghost self-start" onClick={() => ouvrir('nouveau', BROUILLON_VIDE)}>
-          <IconPlus size={16} /> Intervenant
-        </button>
-      )}
-    </div>
-  );
-}
 
 /**
  * Entreprise de chaque lot : la fiche du lot, à défaut l'attribution de l'ACT,
@@ -132,6 +23,15 @@ export default function EntreprisesTab({ projectId, lots_list, observations }: {
   const [entreprisesAct, setEntreprisesAct] = useState<{ id: string; nom?: string }[]>([]);
   const [intervenants, setIntervenants] = useState<LotIntervenant[]>([]);
   const [erreur, setErreur] = useState<string | null>(null);
+  // Annuaire de l'agence : lu une seule fois, à la première ouverture d'une recherche de contact.
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const contactsDemandes = useRef(false);
+  const chargerContacts = useCallback(() => {
+    if (contactsDemandes.current) return;
+    contactsDemandes.current = true;
+    void loadContactsForAttendees().then(setContacts).catch(() => { contactsDemandes.current = false; });
+  }, []);
+  const ajouterContact = useCallback((c: Contact) => setContacts(prev => (prev.some(x => x.id === c.id) ? prev : [...prev, c])), []);
 
   useEffect(() => {
     let vivant = true;
@@ -155,7 +55,7 @@ export default function EntreprisesTab({ projectId, lots_list, observations }: {
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-      <datalist id={LISTE_ROLES}>{ROLES_COURANTS.map(r => <option key={r} value={r} />)}</datalist>
+      <RolesSuggestions />
       {erreur && <p role="alert" className="px-4 py-2 text-sm text-red-600 dark:text-red-400">{erreur}</p>}
       <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
@@ -186,6 +86,7 @@ export default function EntreprisesTab({ projectId, lots_list, observations }: {
             const intervenantsLot = intervenants.filter(i => i.lot_id === lot.id);
             // Une entreprise renommée ou retirée du lot garde ses intervenants, visibles sous leur ancien nom.
             const groupes = [...new Set([...entreprises, ...intervenantsLot.map(i => i.entreprise)])];
+            const dejaSurLot = new Set(intervenantsLot.map(i => i.contact_id).filter((v): v is string => !!v));
             return (
               <tr key={lot.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors align-top">
                 <td className="px-4 py-3 font-semibold text-[var(--tblr-text)]">{lot.lot_number} — {lot.lot_title}</td>
@@ -199,6 +100,8 @@ export default function EntreprisesTab({ projectId, lots_list, observations }: {
                         <IntervenantsEntreprise
                           key={nom} lotId={lot.id} entreprise={nom}
                           liste={intervenantsLot.filter(i => i.entreprise === nom)}
+                          dejaSurLot={dejaSurLot}
+                          contacts={contacts} chargerContacts={chargerContacts} onContactCree={ajouterContact}
                           onChange={setIntervenants} onErreur={setErreur}
                         />
                       ))}

@@ -19,16 +19,12 @@ import { ContactsDetailView } from '../components/contacts/ContactsDetailView';
 import { ContactMergeDialog } from '../components/ContactMergeDialog';
 import { SafeMergeDialog } from '../components/contacts/SafeMergeDialog';
 import { contactName, findDuplicateGroups, MERGE_MAX_CONTACTS } from '../lib/contactMerge';
+import { isContactIncomplete } from '../lib/contactIncomplete';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
 type SortOrder = 'asc' | 'desc';
 
-export function isContactIncomplete(c: Contact): boolean {
-  const hasName = !!(c.first_name?.trim() || c.last_name?.trim());
-  const hasPhone = !!(c.phone_mobile?.trim() || c.phone_work?.trim() || c.phone?.trim());
-  const hasEmail = !!(c.email?.trim() || c.email_work?.trim() || c.email_home?.trim());
-  return !hasName || !hasPhone || !hasEmail;
-}
+export { isContactIncomplete };
 
 export default function Contacts() {
   const { t } = useTranslation();

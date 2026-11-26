@@ -272,3 +272,22 @@ describe('POST /api/reports/:reportId/diffuse : intervenants des entreprises', (
     expect(sendMail.mock.calls.map(([m]) => m.to)).not.toContain('etranger@ent.test');
   });
 });
+
+describe('POST /api/reports/:reportId/diffuse : intervenant lié à un contact', () => {
+  it("écrit à l'adresse ACTUELLE de la fiche contact, pas à l'instantané de la ligne", async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const { projectId, reportId } = seedOperation(tenantId);
+    fakeSupabaseAdmin.seed('contacts', [
+      { id: `ci-${tenantId}`, tenant_id: tenantId, first_name: 'Léa', last_name: 'Roux', company_name: 'Maçonnerie Durand', email: 'lea.nouvelle@ent.test' },
+    ]);
+    fakeSupabaseAdmin.seed('lot_intervenants', [
+      { id: `i1-${tenantId}`, tenant_id: tenantId, project_id: projectId, lot_id: `l1-${tenantId}`, entreprise: 'Maçonnerie Durand', contact_id: `ci-${tenantId}`, nom: 'Léa Roux', role: 'Chef de chantier', email: 'lea.ancienne@ent.test' },
+    ]);
+
+    const res = await diffuse(token, reportId, [`intervenant:i1-${tenantId}`]);
+    expect(res.status).toBe(200);
+    expect(res.body.sent.map((s: any) => [s.name, s.email])).toEqual([['Léa Roux', 'lea.nouvelle@ent.test']]);
+    expect(sendMail.mock.calls[0][0].text).toContain('Reprendre le chaînage');
+  });
+});
