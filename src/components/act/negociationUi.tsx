@@ -1,7 +1,8 @@
 // Petits éléments d'interface partagés par les écrans de négociation (module ACT).
-import React from 'react';
+import React, { useState } from 'react';
 import { cn } from '../../lib/utils';
 import { STATUT_LIBELLES, type StatutNegociation } from '../../lib/actNegociation';
+import type { ModeRemise, RemiseCommerciale } from '../../lib/remiseCommerciale';
 
 export const CARTE_STYLE: React.CSSProperties = {
   background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)',
@@ -37,6 +38,43 @@ export function NumInput({ value, onChange, label, placeholder, className, disab
         onChange(n == null || Number.isNaN(n) ? undefined : n);
       }}
     />
+  );
+}
+
+interface RemiseInputProps {
+  remise: RemiseCommerciale | undefined;
+  /** `undefined` : champ vidé, pas de remise saisie. Une valeur 0 est transmise telle quelle (elle retire une remise héritée). */
+  onChange: (remise: RemiseCommerciale | undefined) => void;
+  label: string;
+  placeholder?: string;
+  disabled?: boolean;
+}
+
+/** Remise commerciale : une valeur et son unité, « % » du prix ou « € » HT. */
+export function RemiseInput({ remise, onChange, label, placeholder, disabled }: RemiseInputProps) {
+  // Sans remise saisie, l'unité choisie est mémorisée ici pour que la valeur tapée ensuite la reprenne.
+  const [modeChoisi, setModeChoisi] = useState<ModeRemise>('pourcentage');
+  const mode = remise?.mode ?? modeChoisi;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <NumInput
+        label={label} disabled={disabled} className="w-24" placeholder={placeholder ?? 'aucune'}
+        value={remise?.valeur}
+        onChange={v => onChange(v == null ? undefined : { mode, valeur: Math.max(0, v) })}
+      />
+      <select
+        aria-label={`Unité de la remise, ${label}`} disabled={disabled} value={mode}
+        onChange={e => {
+          const m = e.target.value as ModeRemise;
+          setModeChoisi(m);
+          if (remise) onChange({ mode: m, valeur: remise.valeur });
+        }}
+        className={cn(CHAMP, 'w-14 px-1')}
+      >
+        <option value="pourcentage">%</option>
+        <option value="montant">€</option>
+      </select>
+    </span>
   );
 }
 

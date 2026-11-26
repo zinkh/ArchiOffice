@@ -10,14 +10,15 @@ import type { ProjectLot } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import { cn } from '../../lib/utils';
 import {
-  BASE_KEY, aujourdhui, clesLignes, gainObtenu, montantCourant, montantOuverture,
-  montantVerifie, negociationVide, objectifTotal, remplacerNegociation, reperesLot,
+  BASE_KEY, aujourdhui, baseA, baseBruteCourante, clesLignes, gainObtenu, montantCourant, montantOuverture,
+  montantVerifie, negociationVide, objectifTotal, remiseCourante, remplacerNegociation, reperesLot,
   resteAObtenir, statutNegociation, toursOrdonnes, totalA, trouverNegociation,
   type Negociation, type OffreMontant, type TourNegociation,
 } from '../../lib/actNegociation';
+import { libelleRemise, montantRemise, remiseActive } from '../../lib/remiseCommerciale';
 import { genererFicheNegociation, type ConsultationNegociationExport } from '../../lib/actNegociationExport';
 import LignesOffreEditor from './LignesOffreEditor';
-import { BOUTON, CARTE_STYLE, CHAMP, ENTETE_TH, Ecart, NumInput, StatutPastille, eur } from './negociationUi';
+import { BOUTON, CARTE_STYLE, CHAMP, ENTETE_TH, Ecart, NumInput, RemiseInput, StatutPastille, eur } from './negociationUi';
 
 interface Props {
   lots: ProjectLot[];
@@ -125,6 +126,9 @@ function Fiche({ lot, entreprise, offre, neg, negs, onNegociations, onPdf }: Fic
   const libelle = (cle: string) => (cle === BASE_KEY ? 'Base' : courante.lignes.find(l => l.id === cle)?.libelle ?? cle);
   const tours = toursOrdonnes(courante);
   const reste = resteAObtenir(offre, courante);
+  // La remise en vigueur est celle du dernier tour qui en a saisi une : on retrouve son rang pour l'indiquer.
+  const remiseEnVigueur = remiseCourante(courante);
+  const rangRemise = tours.reduce((rang, t, i) => (t.remise ? i + 1 : rang), 0);
 
   const ajouterTour = () => {
     const tour: TourNegociation = { id: crypto.randomUUID(), date: aujourdhui(), montants: {} };
@@ -182,9 +186,23 @@ function Fiche({ lot, entreprise, offre, neg, negs, onNegociations, onPdf }: Fic
                     onChange={v => majRecord('objectifs', cle, v)}
                   />
                 </td>
-                <td className="px-3 py-2 text-right font-bold">{eur(montantCourant(offre, courante, cle))}</td>
+                <td className="px-3 py-2 text-right font-bold">{eur(cle === BASE_KEY ? baseBruteCourante(offre, courante) : montantCourant(offre, courante, cle))}</td>
               </tr>
             ))}
+            {remiseActive(remiseEnVigueur) && (
+              <>
+                <tr className="text-[var(--tblr-muted)]">
+                  <td className="px-3 py-2 font-medium">Remise commerciale ({libelleRemise(remiseEnVigueur)})</td>
+                  <td colSpan={3} className="px-3 py-2 text-right text-[0.6875rem]">saisie au tour {rangRemise}</td>
+                  <td className="px-3 py-2 text-right font-bold">− {eur(montantRemise(baseBruteCourante(offre, courante), remiseEnVigueur))}</td>
+                </tr>
+                <tr>
+                  <td className="px-3 py-2 font-medium">Base après remise</td>
+                  <td colSpan={3} />
+                  <td className="px-3 py-2 text-right font-bold">{eur(baseA(offre, courante, 'courant'))}</td>
+                </tr>
+              </>
+            )}
             <tr className="font-bold">
               <td className="px-3 py-2">Total base + options</td>
               <td className="px-3 py-2 text-right">{eur(totalA(offre, courante, 'ouverture'))}</td>
@@ -246,6 +264,14 @@ function Fiche({ lot, entreprise, offre, neg, negs, onNegociations, onPdf }: Fic
                   />
                 </label>
               ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[0.6875rem] text-[var(--tblr-muted)]">
+              <span className="font-medium">Remise commerciale sur la base</span>
+              <RemiseInput
+                label={`Remise, tour ${i + 1}`} remise={t.remise} placeholder="inchangée"
+                onChange={r => majTour(t.id, { remise: r })}
+              />
+              <span>Saisissez 0 pour retirer une remise accordée à un tour précédent. Elle s'applique au prix de base, pas aux options.</span>
             </div>
             <input aria-label={`Remarque du tour ${i + 1}`} className={cn(CHAMP, 'w-full')} placeholder="Remarque (arguments, concessions, pièces demandées)"
               value={t.remarque ?? ''} onChange={e => majTour(t.id, { remarque: e.target.value })} />

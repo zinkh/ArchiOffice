@@ -13,13 +13,14 @@ import {
   type Cellule, type Colonne,
 } from './xlsxLetterhead';
 import {
-  BASE_KEY, DECISION_LIBELLES, STATUT_LIBELLES, controleTolerance,
+  BASE_KEY, DECISION_LIBELLES, STATUT_LIBELLES, baseA, baseBruteCourante, controleTolerance,
   formaterPourcent, gainObtenu, lignesSynthese, montantCourant, montantOuverture,
   montantVerifie, objectifTotal, parametresDe, piecesManquantes, piecesOffreDe,
-  resteAObtenir, statutNegociation, toursOrdonnes, totalA, totauxOperation,
+  remiseCourante, resteAObtenir, statutNegociation, toursOrdonnes, totalA, totauxOperation,
   trouverNegociation, type DonneesNegociation, type Etage, type OffreMontant,
   type PieceAttendue,
 } from './actNegociation';
+import { libelleRemise, montantRemise, remiseActive } from './remiseCommerciale';
 
 export interface EntrepriseExport { id: string; nom: string; email?: string; lots_ids?: string[] }
 interface OffreExport extends OffreMontant { motif_nc?: string }
@@ -161,9 +162,22 @@ export async function genererFicheNegociation(
     euros(montantOuverture(offre, neg, cle)),
     euros(montantVerifie(offre, neg, cle)),
     ...tours.map(t => (t.montants[cle] != null ? euros(t.montants[cle]) : '')),
-    euros(montantCourant(offre, neg, cle)),
+    // Le prix de la ligne base est ici AVANT remise : la remise et la base après remise suivent.
+    euros(cle === BASE_KEY ? baseBruteCourante(offre, neg) : montantCourant(offre, neg, cle)),
     neg?.objectifs?.[cle] != null ? euros(neg.objectifs[cle]) : '—',
   ]);
+  const remiseEnVigueur = remiseCourante(neg);
+  if (remiseActive(remiseEnVigueur)) {
+    body.push([
+      `Remise commerciale (${libelleRemise(remiseEnVigueur)})`, '', '',
+      ...tours.map(t => (t.remise ? libelleRemise(t.remise) || 'aucune' : '')),
+      `- ${euros(montantRemise(baseBruteCourante(offre, neg), remiseEnVigueur))}`, '',
+    ]);
+    body.push([
+      'Base après remise', '', '', ...tours.map(() => ''),
+      euros(baseA(offre, neg, 'courant')), '',
+    ]);
+  }
   body.push([
     'Total base + options',
     euros(totalA(offre, neg, 'ouverture')), euros(totalA(offre, neg, 'verifie')),
