@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  GED_ALL, NO_FILTERS, NO_PROJECT, countBy, extensionOf, filterDocs, highlightParts, recentIds, sortDocs,
+  GED_ALL, NO_FILTERS, NO_PROJECT, countBy, extensionOf, filterDocs, highlightParts, recentIds, sortDocs, emetteurKey, emetteurLabels,
   type GedDoc, type GedFilters,
 } from '../gedView';
 
@@ -68,5 +68,39 @@ describe('gedView', () => {
 
   it('compte les documents par clé', () => {
     expect(countBy(docs, d => d.phase || 'Général').get('PRO')).toBe(2);
+  });
+});
+
+describe('classement par émetteur', () => {
+  const docs = [
+    { id: '1', name: 'a.pdf', emetteur: 'COPAS Systèmes' },
+    { id: '2', name: 'b.pdf', emetteur: ' copas  systemes ' },
+    { id: '3', name: 'c.pdf', emetteur: 'COPAS Systèmes' },
+    { id: '4', name: 'd.pdf', emetteur: '' },
+    { id: '5', name: 'e.pdf' },
+  ] as GedDoc[];
+  const ctx = { favs: new Set<string>(), recent: new Set<string>(), projectName: () => '' };
+
+  it('regroupe les graphies d\'un même émetteur (casse, accents, espaces)', () => {
+    expect(emetteurKey(docs[1])).toBe(emetteurKey(docs[0]));
+    const counts = countBy(docs, emetteurKey);
+    expect(counts.get('copas systemes')).toBe(3);
+    expect(counts.get('')).toBe(2);
+  });
+
+  it('affiche la graphie la plus fréquente', () => {
+    expect(emetteurLabels(docs).get('copas systemes')).toBe('COPAS Systèmes');
+    expect(emetteurLabels(docs).has('')).toBe(false);
+  });
+
+  it('filtre par émetteur, « sans émetteur » compris', () => {
+    const by = (value: string) => filterDocs(docs, { kind: 'emetteur', value }, NO_FILTERS, ctx).map(d => d.id);
+    expect(by('copas systemes')).toEqual(['1', '2', '3']);
+    expect(by('')).toEqual(['4', '5']);
+  });
+
+  it('trie par émetteur', () => {
+    const sorted = sortDocs(docs, { key: 'emetteur', dir: 'desc' }, () => '').map(d => d.id);
+    expect(sorted.slice(0, 3).sort()).toEqual(['1', '2', '3']);
   });
 });

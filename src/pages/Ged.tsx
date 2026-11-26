@@ -3,15 +3,18 @@ import { Link } from 'react-router-dom';
 import {
   IconStar, IconStarFilled, IconSearch, IconUpload, IconFolder, IconFolderOpen, IconClock, IconInbox,
   IconLayoutList, IconLayoutGrid, IconTable, IconExternalLink, IconChevronRight, IconChevronDown, IconX, IconFile,
-  IconFolderPlus, IconPlus, IconPencil, IconTrash,
+  IconFolderPlus, IconPlus, IconPencil, IconTrash, IconUser, IconFileSearch,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
-import { openSignedUrl } from '../lib/signedStorageUrl';
+import { openSignedUrl, resolveSignedUrl } from '../lib/signedStorageUrl';
+import {
+  canReadMetadata, emetteurCandidates, readDocumentMetadata, MAX_METADATA_BYTES, type DocumentMetadata,
+} from '../lib/documentMetadata';
 import { useUser } from '../UserContext';
 import type { Document, DocumentVersion, Project } from '../types';
 import {
-  GED_ALL, NO_FILTERS, NO_PROJECT, countBy, extensionOf, filterDocs, highlightParts, phaseOf, recentIds, sortDocs,
+  GED_ALL, NO_FILTERS, NO_PROJECT, countBy, emetteurKey, emetteurLabels, extensionOf, filterDocs, highlightParts, phaseOf, recentIds, sortDocs,
   statutOf, type GedFilters, type GedNav, type GedSort, type GedSortKey,
 } from '../lib/gedView';
 import { DOCUMENT_PHASES, buildFolderTree, folderChoices, folderPath, type DocFolder, type FolderNode } from '../lib/gedFolders';
@@ -74,6 +77,106 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <div className="px-2 pt-3 pb-1 uppercase tracking-wider text-[0.6875rem] font-bold" style={{ color: 'var(--tblr-muted)' }}>{children}</div>;
 }
 
+interface ContactChoice { id: string; label: string }
+
+/** Émetteur lu dans les métadonnées d'un fichier déposé, sans jamais bloquer l'import : vide si rien n'est lisible. */
+async function emetteurOfFile(file: File): Promise<string> {
+  if (!canReadMetadata(file.name) || file.size > MAX_METADATA_BYTES) return '';
+  return emetteurCandidates(await readDocumentMetadata(await file.arrayBuffer(), file.name))[0] || '';
+}
+
+const META_ROWS: [keyof DocumentMetadata, string][] = [
+  ['author', 'Auteur'], ['organization', 'Société'], ['lastModifiedBy', 'Dernier auteur'], ['software', 'Logiciel'], ['title', 'Titre'], ['createdAt', 'Créé le'],
+];
+
+/**
+ * Émetteur d'un document : saisie libre, choix parmi les contacts du cabinet, ou valeur reprise des métadonnées
+ * du fichier (lues à la demande dans le navigateur). Rien n'est enregistré sans un geste de l'utilisateur.
+ */
+function EmetteurEditor({ doc, contacts, onSave }: {
+  doc: Document; contacts: ContactChoice[];
+  onSave: (emetteur: string, contact: ContactChoice | null) => Promise<boolean>;
+}) {
+  const [value, setValue] = useState(doc.emetteur || '');
+  const [busy, setBusy] = useState(false);
+  const [meta, setMeta] = useState<{ state: 'idle' | 'loading' | 'none' | 'ready'; data: DocumentMetadata | null }>({ state: 'idle', data: null });
+  const listId = `ged-contacts-${doc.id}`;
+  const dirty = value.trim() !== (doc.emetteur || '').trim();
+  const muted = { color: 'var(--tblr-muted)' } as const;
+  const field = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' } as const;
+  const canRead = canReadMetadata(doc.name) && !!doc.file_url;
+
+  const save = async (next: string, contact: ContactChoice | null) => {
+    setBusy(true);
+    const ok = await onSave(next.trim(), contact);
+    setBusy(false);
+    if (ok) setValue(next.trim());
+  };
+  const submit = () => {
+    const typed = value.trim();
+    // Un nom saisi qui est exactement celui d'un contact rattache la fiche, sinon le texte reste libre.
+    const match = contacts.find(c => emetteurKeyOf(c.label) === emetteurKeyOf(typed)) || null;
+    void save(typed, match);
+  };
+  const readMeta = async () => {
+    setMeta({ state: 'loading', data: null });
+    try {
+      const res = await fetch(await resolveSignedUrl(doc.file_url));
+      if (!res.ok) throw new Error('download');
+      const data = await readDocumentMetadata(await res.arrayBuffer(), doc.name);
+      setMeta(data ? { state: 'ready', data } : { state: 'none', data: null });
+    } catch { setMeta({ state: 'none', data: null }); }
+  };
+  const candidates = meta.state === 'ready' ? emetteurCandidates(meta.data) : [];
+
+  return (
+    <div className="space-y-2">
+      <form className="flex gap-1.5" onSubmit={e => { e.preventDefault(); if (dirty && !busy) submit(); }}>
+        <input list={listId} aria-label="Émetteur" value={value} maxLength={120} placeholder="Société ou personne"
+          onChange={e => setValue(e.target.value)} className="flex-1 min-w-0 rounded-lg px-2.5 py-2 text-sm min-h-9" style={field} />
+        <datalist id={listId}>{contacts.map(c => <option key={c.id} value={c.label} />)}</datalist>
+        <button type="submit" disabled={!dirty || busy} className="rounded-lg px-3 text-sm font-semibold min-h-9 disabled:opacity-40" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+          {busy ? '…' : 'Enregistrer'}
+        </button>
+      </form>
+      <select aria-label="Choisir l'émetteur parmi les contacts" value="" disabled={busy || contacts.length === 0}
+        onChange={e => { const c = contacts.find(x => x.id === e.target.value); if (c) { setValue(c.label); void save(c.label, c); } }}
+        className="w-full rounded-lg px-2.5 py-2 text-sm min-h-9" style={field}>
+        <option value="">{contacts.length ? 'Choisir dans les contacts…' : 'Aucun contact disponible'}</option>
+        {contacts.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+      </select>
+      {doc.contact_id && doc.emetteur && <p className="text-xs" style={muted}><IconUser size={12} className="inline mr-1" aria-hidden="true" />Rattaché à la fiche contact.</p>}
+
+      {canRead && (
+        <div className="rounded-lg p-2.5 space-y-2" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+          <button type="button" onClick={() => void readMeta()} disabled={meta.state === 'loading'}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold underline disabled:opacity-50">
+            <IconFileSearch size={14} aria-hidden="true" />{meta.state === 'loading' ? 'Lecture…' : 'Lire les métadonnées du fichier'}
+          </button>
+          {meta.state === 'none' && <p className="text-xs" style={muted}>Aucune métadonnée lisible (fichier chiffré, vide, ou inaccessible depuis le navigateur).</p>}
+          {meta.state === 'ready' && meta.data && (
+            <>
+              <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs">
+                {META_ROWS.filter(([k]) => meta.data![k]).map(([k, label]) => (
+                  <div key={k} className="contents"><dt style={muted}>{label}</dt><dd className="break-words">{k === 'createdAt' ? fmtDate(meta.data![k]) : meta.data![k]}</dd></div>
+                ))}
+              </dl>
+              {candidates.length === 0
+                ? <p className="text-xs" style={muted}>Aucun émetteur exploitable dans ces métadonnées.</p>
+                : <div className="flex flex-wrap gap-1.5" role="group" aria-label="Émetteurs proposés par les métadonnées">
+                  {candidates.map(c => <button key={c} type="button" disabled={busy} onClick={() => { setValue(c); void save(c, null); }}
+                    className="rounded-full px-2.5 py-1 text-xs" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' }}>Utiliser « {c} »</button>)}
+                </div>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const emetteurKeyOf = (label: string): string => emetteurKey({ id: '', name: '', emetteur: label });
+
 export default function Ged() {
   const { currentUser } = useUser();
   const [docs, setDocs] = useState<Document[]>([]);
@@ -97,6 +200,7 @@ export default function Ged() {
   const [folderForm, setFolderForm] = useState<{ project: string; phase: string; parent: string; name: string } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [folderBusy, setFolderBusy] = useState(false);
+  const [contacts, setContacts] = useState<ContactChoice[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
@@ -128,6 +232,21 @@ export default function Ged() {
     filterDocs(docs, nav, filters, { favs, recent, projectName, folders }), sort, projectName),
   [docs, nav, filters, favs, recent, projectName, sort, folders]);
   const selected = docs.find(d => d.id === selectedId) || null;
+
+  // Les contacts ne sont chargés qu'à la première ouverture d'un détail : ils ne servent qu'à choisir un émetteur.
+  useEffect(() => {
+    if (!selected || contacts !== null) return;
+    let current = true;
+    apiFetch<any>('/api/contacts')
+      .then(r => {
+        const rows: any[] = Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : [];
+        const choices = rows.map(c => ({ id: String(c.id), label: String(c.company_name || `${c.first_name || ''} ${c.last_name || ''}`).trim() }))
+          .filter(c => c.label).sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+        if (current) setContacts(choices);
+      })
+      .catch(() => { if (current) setContacts([]); });
+    return () => { current = false; };
+  }, [selected?.id, contacts]);
 
   useEffect(() => {
     setVersions(null);
@@ -175,6 +294,26 @@ export default function Ged() {
     } catch { setDocs(previous); flash(false, 'Le classement a échoué.'); }
   };
 
+  // Émetteur d'un document : le serveur réécrit tous les champs du corps (phase, type, nom...), on les renvoie donc
+  // tels qu'ils sont. Un contact choisi rattache la fiche (contact_id), un texte libre la détache.
+  const saveEmetteur = async (doc: Document, emetteur: string, contact: ContactChoice | null): Promise<boolean> => {
+    const previous = docs;
+    setDocs(prev => prev.map(d => d.id === doc.id ? { ...d, emetteur, contact_id: contact?.id || '', contact_name: contact?.label || '' } as Document : d));
+    try {
+      await apiFetch(`/api/documents/${doc.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: doc.name, category: doc.category, description: doc.description || '',
+          emetteur, doc_type: doc.doc_type || '', phase: doc.phase || '',
+          contact_id: contact?.id || '', contact_name: contact?.label || '',
+        }),
+      });
+      flash(true, emetteur ? 'Émetteur enregistré.' : 'Émetteur retiré.');
+      void refresh();
+      return true;
+    } catch { setDocs(previous); flash(false, "L'émetteur n'a pas pu être enregistré."); return false; }
+  };
+
   // Import : le dossier ouvert dans la navigation (affaire, phase) devient la destination.
   const importFiles = async (files: FileList | null) => {
     const list = Array.from(files || []);
@@ -191,7 +330,8 @@ export default function Ged() {
         const form = new FormData();
         form.append('file', file); form.append('name', file.name); form.append('category', 'Other');
         form.append('phase', phase); form.append('description', ''); form.append('uploaded_by', currentUser?.name || 'Unknown');
-        form.append('indice', 'A'); form.append('emetteur', ''); form.append('doc_type', '');
+        form.append('indice', 'A'); form.append('doc_type', '');
+        form.append('emetteur', await emetteurOfFile(file).catch(() => ''));
         if (projectId) form.append('project_id', projectId);
         if (folderId) form.append('folder_id', folderId);
         try {
@@ -275,6 +415,8 @@ export default function Ged() {
   const byPhase = useMemo(() => countBy(docs, phaseOf), [docs]);
   const byType = useMemo(() => countBy(docs, d => d.doc_type || ''), [docs]);
   const byStatut = useMemo(() => countBy(docs, statutOf), [docs]);
+  const byEmetteur = useMemo(() => countBy(docs, emetteurKey), [docs]);
+  const emetteurName = useMemo(() => emetteurLabels(docs), [docs]);
   // Une phase apparaît dès qu'elle a des documents ou des dossiers.
   const projectPhases = (projectId: string) => {
     const m = countBy(docs.filter(d => (d.project_id || NO_PROJECT) === projectId), phaseOf);
@@ -308,6 +450,7 @@ export default function Ged() {
       case 'phase': return `Phase ${nav.value}`;
       case 'type': return nav.value ? nav.value : 'Sans type';
       case 'statut': return STATUTS[nav.value || '']?.label || 'Statut';
+      case 'emetteur': return nav.value ? `Émetteur · ${emetteurName.get(nav.value) || nav.value}` : 'Sans émetteur';
       case 'folder': return `${projectName(nav.project) || 'Projet'} · ${nav.value} · ${folderPath(nav.folder, folders).join(' / ') || 'Dossier'}`;
       case 'project': return `${nav.project === NO_PROJECT ? 'Sans projet' : projectName(nav.project) || 'Projet'}${nav.value ? ` · ${nav.value}` : ''}`;
     }
@@ -385,7 +528,7 @@ export default function Ged() {
         </form>
       )}
 
-      <div className="grid gap-3 lg:grid-cols-[15.5rem_minmax(0,1fr)] xl:grid-cols-[15.5rem_minmax(0,1fr)_21rem] items-start">
+      <div className="grid gap-3 lg:grid-cols-[15.5rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[17rem_minmax(0,1fr)_28rem] items-start">
         {/* Navigation */}
         <nav aria-label="Navigation des documents" className="rounded-xl p-2 lg:sticky lg:top-2 lg:max-h-[calc(100dvh-8rem)] overflow-y-auto" style={surface}>
           <NavButton active={isNav('all')} onClick={() => go(GED_ALL)} icon={<IconFolderOpen size={16} aria-hidden="true" />} count={docs.length}>Tous les documents</NavButton>
@@ -435,6 +578,15 @@ export default function Ged() {
           {[...byType.keys()].sort((a, b) => a.localeCompare(b, 'fr')).map(t => (
             <NavButton key={t || 'none'} active={isNav('type', undefined, t)} onClick={() => go({ kind: 'type', value: t })} count={byType.get(t)}>{t || 'Sans type'}</NavButton>
           ))}
+          <SectionTitle>Par émetteur</SectionTitle>
+          {[...byEmetteur.keys()].filter(k => k).sort((a, b) => (emetteurName.get(a) || a).localeCompare(emetteurName.get(b) || b, 'fr')).map(k => (
+            <NavButton key={k} active={isNav('emetteur', undefined, k)} onClick={() => go({ kind: 'emetteur', value: k })} count={byEmetteur.get(k)}
+              icon={<IconUser size={14} aria-hidden="true" />}>{emetteurName.get(k) || k}</NavButton>
+          ))}
+          {byEmetteur.has('') && (
+            <NavButton active={isNav('emetteur', undefined, '')} onClick={() => go({ kind: 'emetteur', value: '' })} count={byEmetteur.get('')}
+              icon={<IconUser size={14} aria-hidden="true" />}>Sans émetteur</NavButton>
+          )}
           <SectionTitle>Statut qualité</SectionTitle>
           {Object.entries(STATUTS).map(([key, s]) => (
             <NavButton key={key} active={isNav('statut', undefined, key)} onClick={() => go({ kind: 'statut', value: key })} count={byStatut.get(key) || 0}
@@ -516,11 +668,11 @@ export default function Ged() {
 
           {visible.length > 0 && view !== 'grid' && (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[34rem] text-sm">
+              <table className="w-full min-w-[40rem] text-sm">
                 <thead><tr>
                   {sortHead('name', 'Document')}
                   {view === 'details' && sortHead('project', 'Projet')}
-                  {sortHead('phase', 'Phase')}{sortHead('type', 'Type')}
+                  {sortHead('phase', 'Phase')}{sortHead('type', 'Type')}{sortHead('emetteur', 'Émetteur')}
                   {view === 'details' && sortHead('indice', 'Indice')}
                   {view === 'details' && <th scope="col" className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap" style={headStyle}>Dossier</th>}
                   {sortHead('date', 'Déposé le')}
@@ -533,12 +685,13 @@ export default function Ged() {
                       className="cursor-pointer hover:bg-[var(--tblr-surface-2)]"
                       style={{ borderBottom: '1px solid var(--tblr-border)', ...(d.id === selectedId ? { background: 'var(--tblr-primary-lt)' } : {}) }}>
                       <td className="px-3 py-2"><span className="flex items-center gap-2.5 font-semibold min-w-0">
-                        <FileIcon name={d.name} /><span className="truncate max-w-[22rem]"><Highlight text={d.name} query={filters.search} /></span>
+                        <FileIcon name={d.name} /><span className="truncate max-w-[26rem] 2xl:max-w-[40rem]"><Highlight text={d.name} query={filters.search} /></span>
                         {favs.has(d.id) && <IconStarFilled size={13} aria-label="Favori" style={{ color: '#f2b93b' }} />}
                       </span></td>
                       {view === 'details' && <td className="px-3 py-2 whitespace-nowrap">{projectName(d.project_id) || 'Sans projet'}</td>}
                       <td className="px-3 py-2">{phaseOf(d)}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{d.doc_type || '-'}</td>
+                      <td className="px-3 py-2 max-w-[14rem] truncate" title={d.emetteur || undefined}>{d.emetteur || '-'}</td>
                       {view === 'details' && <td className="px-3 py-2">{d.indice || '-'}</td>}
                       {view === 'details' && <td className="px-3 py-2 whitespace-nowrap">{folderPath(d.folder_id, folders).join(' / ') || '-'}</td>}
                       <td className="px-3 py-2 whitespace-nowrap">{fmtDate(d.uploaded_at)}</td>
@@ -604,7 +757,8 @@ export default function Ged() {
                   <dt style={muted}>Indice</dt><dd>{selected.indice || '-'}</dd>
                   <dt style={muted}>Version</dt><dd>{selected.version ?? 1}</dd>
                   <dt style={muted}>Statut</dt><dd><StatutDot statut={statutOf(selected)} /></dd>
-                  <dt style={muted}>Émetteur</dt><dd>{selected.emetteur || '-'}</dd>
+                  <dt style={muted}>Émetteur</dt>
+                  <dd><EmetteurEditor key={selected.id} doc={selected} contacts={contacts || []} onSave={(e, c) => saveEmetteur(selected, e, c)} /></dd>
                   <dt style={muted}>Déposé</dt><dd>{fmtDate(selected.uploaded_at)}<br /><span className="text-xs" style={muted}>{selected.uploaded_by}</span></dd>
                   {selected.description && <><dt style={muted}>Description</dt><dd className="break-words">{selected.description}</dd></>}
                 </dl>

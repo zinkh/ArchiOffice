@@ -315,3 +315,10 @@ Les animations suivent les principes d'interface fluide d'Apple, sans toucher
   toléré que dans une pastille de taille fixe (initiales dans un cercle
   `w-5 h-5`). `--tracking-wider` est ramené à 0,03 em dans `@theme`, et `h1`/
   `h2` sont légèrement resserrés. Les majuscules et couleurs Tabler restent.
+
+### GED (`/documents`) : pleine largeur et émetteur
+
+- **Pleine largeur** : `/documents` échappe au cadre de 1400 px (`isWideRoute`, `App.tsx`) ; les colonnes (navigation, liste, détail) s'élargissent à `xl` et `2xl` (`Ged.tsx`).
+- **Classement « Par émetteur »** : `emetteurKey` / `emetteurLabels` (`src/lib/gedView.ts`) regroupent les graphies d'un même émetteur (casse, accents, espaces) et affichent la plus fréquente ; « Sans émetteur » liste ce qui reste à renseigner. Colonne et tri « Émetteur » dans la liste.
+- **Métadonnées** (`src/lib/documentMetadata.ts`, pur, lu dans le navigateur : PDF par pdf-lib, Office et OpenDocument par jszip) : à l'import depuis la GED, l'émetteur est pré-rempli (société, puis auteur, puis dernier auteur ; valeurs génériques et logiciels écartés). Sur un document existant, « Lire les métadonnées du fichier » les affiche et propose de les reprendre. Rien n'est enregistré sans geste de la personne. Les autres chemins de dépôt (onglet Documents d'une affaire) ne lisent pas encore les métadonnées. Un stockage externe qui refuse la lecture depuis le navigateur donne « aucune métadonnée lisible ».
+- **Choix d'un contact** : saisie libre avec suggestions, ou liste des contacts ; un contact rattache la fiche (`contact_id`, `contact_name`), un texte libre la détache. Le `PUT /api/documents/:id` réécrit nom, catégorie, type et phase : `saveEmetteur` les renvoie tels quels.

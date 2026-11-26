@@ -17,7 +17,7 @@ export interface GedDoc {
   folder_id?: string | null;
 }
 
-export type GedNavKind = 'all' | 'recent' | 'fav' | 'toclass' | 'project' | 'phase' | 'type' | 'statut' | 'folder';
+export type GedNavKind = 'all' | 'recent' | 'fav' | 'toclass' | 'project' | 'phase' | 'type' | 'statut' | 'folder' | 'emetteur';
 
 /**
  * Sélection de la navigation de gauche. `project` vaut un identifiant d'affaire ; `value` un code de phase,
@@ -54,6 +54,27 @@ export function recentIds(docs: readonly GedDoc[], count = RECENT_COUNT): Set<st
   return new Set([...docs].sort((a, b) => timeOf(b) - timeOf(a)).slice(0, count).map(d => d.id));
 }
 
+const fold = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+/** Clé de classement par émetteur : sans accents ni casse ni espaces superflus, '' pour « sans émetteur ». */
+export function emetteurKey(d: GedDoc): string { return fold((d.emetteur || '').trim().replace(/\s+/g, ' ')); }
+
+/** Libellé affiché par clé d'émetteur : la graphie la plus fréquente parmi les documents. */
+export function emetteurLabels(docs: readonly GedDoc[]): Map<string, string> {
+  const spellings = new Map<string, Map<string, number>>();
+  for (const d of docs) {
+    const label = (d.emetteur || '').trim().replace(/\s+/g, ' ');
+    if (!label) continue;
+    const key = emetteurKey(d);
+    const m = spellings.get(key) || new Map<string, number>();
+    m.set(label, (m.get(label) || 0) + 1);
+    spellings.set(key, m);
+  }
+  const out = new Map<string, string>();
+  for (const [key, m] of spellings) out.set(key, [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'))[0][0]);
+  return out;
+}
+
 export function statutOf(d: GedDoc): string { return d.doc_statut || 'en_cours'; }
 export function phaseOf(d: GedDoc): string { return d.phase || 'Général'; }
 
@@ -72,10 +93,9 @@ export function matchesNav(
     case 'phase': return phaseOf(d) === nav.value;
     case 'type': return (d.doc_type || '') === (nav.value || '');
     case 'statut': return statutOf(d) === nav.value;
+    case 'emetteur': return emetteurKey(d) === (nav.value || '');
   }
 }
-
-const fold = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 /** Texte interrogé par la recherche : nom, projet, type, phase, émetteur, description. Accents et casse ignorés. */
 export function searchHaystack(d: GedDoc, projectName: string): string {
@@ -96,7 +116,7 @@ export function filterDocs(
     && (!q || searchHaystack(d, ctx.projectName(d.project_id)).includes(q)));
 }
 
-export type GedSortKey = 'name' | 'project' | 'phase' | 'type' | 'indice' | 'date';
+export type GedSortKey = 'name' | 'project' | 'phase' | 'type' | 'emetteur' | 'indice' | 'date';
 export interface GedSort { key: GedSortKey; dir: 'asc' | 'desc' }
 
 export function sortDocs(docs: readonly GedDoc[], sort: GedSort, projectName: (id?: string | null) => string): GedDoc[] {
@@ -106,6 +126,7 @@ export function sortDocs(docs: readonly GedDoc[], sort: GedSort, projectName: (i
       case 'project': return fold(projectName(d.project_id));
       case 'phase': return phaseOf(d);
       case 'type': return fold(d.doc_type || '');
+      case 'emetteur': return emetteurKey(d);
       case 'indice': return d.indice || '';
       case 'date': return timeOf(d);
     }
