@@ -23,10 +23,11 @@ export function installGuards() {
 /** Barre latérale des pages : sur téléphone elle est repliée derrière le bouton « Pages ». */
 export async function sidebar(page: Page): Promise<Locator> {
   const nav = page.getByRole('navigation', { name: 'Pages de la base de données' });
-  if (!(await nav.isVisible())) {
-    await page.getByRole('button', { name: 'Pages', exact: true }).click();
-    await expect(nav).toBeVisible();
-  }
+  // L'état réel est celui du bouton « Pages » : le volet reste visible un instant pendant son animation de sortie.
+  const toggle = page.getByRole('button', { name: 'Pages', exact: true });
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(nav).toBeVisible();
   return nav;
 }
 

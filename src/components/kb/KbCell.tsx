@@ -77,7 +77,8 @@ export function KbCell({ property, value, disabled, onCommit, onOptionsChange }:
           disabled={disabled}
           value={asText(value).slice(0, 10)}
           onChange={e => onCommit(e.target.value || null)}
-          className="tblr-input w-full"
+          className="w-full bg-transparent outline-none px-1 py-1 rounded focus:bg-[var(--tblr-surface-2)]"
+          style={{ color: 'var(--tblr-text)' }}
         />
       );
     case 'relation':

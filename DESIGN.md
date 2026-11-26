@@ -297,6 +297,17 @@ Sobres et précis : chaque composant se reconnaît à son trait, pas à sa coule
 ### Badges
 - Libellé 11 px en petites capitales, rayon de contrôle, 3 × 8 px ; couleur d'état en fond pâle et texte soutenu.
 
+### Base de données du cabinet : surface épurée (exception)
+
+Exception assumée à « Cards / Containers », « Inputs / Fields » et « Tables », limitée à l'écran `/base-de-donnees` (`src/pages/BaseDeDonnees.tsx`, `src/components/kb/`), pour un rendu dépouillé et vivant dans l'esprit de Coda : la page est une feuille, pas un tableau de bord. Les jetons `--tblr-*`, le thème clair et sombre, les 11 px minimum et les étiquettes colorées restent ceux du système.
+
+- **Pas de cadre ni de carte** : ni `.card`, ni `.tblr-table`, ni bordure autour du tableau. Un filet presque invisible (`--kb-hair`, 9 % du texte) sépare les lignes ; le survol d'une ligne pose un voile (`--kb-wash`, 5 %). Ces deux variables se posent sur `.kb-canvas`.
+- **Outils discrets** : filtre, tri, colonnes, recherche et import sont des icônes `.kb-ghost` dans `.kb-tools`, à demi estompées, pleinement visibles au survol, au focus, quand un filtre est actif, et toujours au doigt. La recherche est un champ replié sur son icône qui s'élargit au focus. Aucun bouton plein dans l'écran : « Nouveau » est la dernière ligne du tableau.
+- **Tableau** : en-têtes en minuscules de 12 px sans fond (`.kb-table`), cellules sans bordure qui se révèlent en champ au focus, première colonne collante pour le défilement horizontal. Actions de ligne (ouvrir, corbeille, menu de colonne) révélées au survol (`.kb-reveal`).
+- **Rayons** : 8 px pour les contrôles fantômes, 12 px pour les fenêtres volantes, au lieu des deux rayons de 4 et 8 px. Les étiquettes gardent 4 px.
+- **Mouvement** (ressort par défaut de `MotionConfig`, « Réduire les animations » respecté) : le volet des pages glisse à l'ouverture et à la fermeture, la page ouverte apparaît en fondu léger, une ligne tout juste ajoutée glisse en place, les fenêtres volantes apparaissent par `.kb-pop`. Jamais de cascade à l'ouverture d'une base.
+- **Page** : colonne de lecture de 46 rem, titre de 2,5 rem (2 rem au téléphone, malgré la règle des champs à 16 px), volet des pages replié par défaut et mémorisé (`localStorage` `kb:nav-open`, confort seulement).
+
 ### Vue Shell Windows
 
 - **Navigation :** arbre natif des projets et phases ; tableau à sélection unique et ligne sélectionnée entière. Colonnes « Document », « Phase », « Type », « Indice », « Version » et « Statut ». Les propriétés présentent les valeurs en texte sélectionnable, dans un champ natif en lecture seule.

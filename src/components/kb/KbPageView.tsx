@@ -92,7 +92,7 @@ export function KbPageView({ page, pages, onOpen, onLocalChange, onTrash }: KbPa
 
   return (
     <article aria-label={title || (t('kb_untitled') as string)}>
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="kb-db flex flex-wrap items-center gap-2 mb-6">
         <nav aria-label={t('kb_breadcrumb') as string} className="flex flex-wrap items-center gap-1 min-w-0 mr-auto text-[0.8125rem]" style={{ color: 'var(--tblr-muted)' }}>
           {crumbs.map((crumb, index) => (
             <span key={crumb.id} className="flex items-center gap-1 min-w-0">
@@ -103,30 +103,31 @@ export function KbPageView({ page, pages, onOpen, onLocalChange, onTrash }: KbPa
             </span>
           ))}
         </nav>
-        <AutosaveIndicator status={status} onRetry={() => void saveNow()} />
-        <button
-          type="button"
-          onClick={() => { onLocalChange({ is_favorite: !listed.is_favorite }); schedule({ is_favorite: !listed.is_favorite }); }}
-          aria-pressed={listed.is_favorite}
-          aria-label={(listed.is_favorite ? t('kb_favorite_remove') : t('kb_favorite_add')) as string}
-          className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)]"
-          style={{ color: 'var(--tblr-muted)' }}
-        >
-          {listed.is_favorite ? <IconStarFilled size={16} aria-hidden /> : <IconStar size={16} aria-hidden />}
-        </button>
-        <button type="button" onClick={() => onTrash(page)} aria-label={t('kb_trash_page') as string} className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)]" style={{ color: 'var(--tblr-muted)' }}>
-          <IconTrash size={16} aria-hidden />
-        </button>
+        <div className="kb-tools flex items-center gap-0.5">
+          <AutosaveIndicator status={status} onRetry={() => void saveNow()} />
+          <button
+            type="button"
+            onClick={() => { onLocalChange({ is_favorite: !listed.is_favorite }); schedule({ is_favorite: !listed.is_favorite }); }}
+            aria-pressed={listed.is_favorite}
+            aria-label={(listed.is_favorite ? t('kb_favorite_remove') : t('kb_favorite_add')) as string}
+            className="kb-ghost !p-1.5"
+          >
+            {listed.is_favorite ? <IconStarFilled size={16} aria-hidden /> : <IconStar size={16} aria-hidden />}
+          </button>
+          <button type="button" onClick={() => onTrash(page)} aria-label={t('kb_trash_page') as string} className="kb-ghost !p-1.5">
+            <IconTrash size={16} aria-hidden />
+          </button>
+        </div>
       </div>
 
-      <div className="flex items-start gap-2 mb-4">
+      <div className="flex items-start gap-2 mb-6">
         <button
           ref={iconAnchor}
           type="button"
           onClick={() => setIconOpen(true)}
           aria-label={t('kb_icon_choose') as string}
           aria-haspopup="dialog"
-          className="shrink-0 w-10 h-10 flex items-center justify-center rounded text-[1.5rem] hover:bg-[var(--tblr-surface-2)]"
+          className="shrink-0 w-12 h-12 flex items-center justify-center rounded-xl text-[2rem] transition-colors hover:bg-[var(--kb-wash)]"
         >
           {listed.icon || <span aria-hidden style={{ color: 'var(--tblr-muted)' }}>＋</span>}
         </button>
@@ -146,7 +147,7 @@ export function KbPageView({ page, pages, onOpen, onLocalChange, onTrash }: KbPa
           placeholder={t('kb_untitled') as string}
           aria-label={t('kb_page_title') as string}
           maxLength={200}
-          className="flex-1 min-w-0 bg-transparent outline-none text-[1.875rem] font-bold leading-tight px-1"
+          className="kb-title flex-1 min-w-0 bg-transparent outline-none font-bold leading-tight tracking-tight px-1"
           style={{ color: 'var(--tblr-text)' }}
         />
       </div>

@@ -85,7 +85,7 @@ export function KbSidebar({ pages, activeId, onOpen, onCreate, onToggleFavorite,
     return next;
   });
 
-  const actionClass = 'p-1 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100 hover:bg-[var(--tblr-surface)]';
+  const actionClass = 'kb-ghost kb-reveal !min-h-0 !p-1';
 
   const renderNode = (node: KbTreeNode, depth: number): React.ReactNode => {
     const { page } = node;
@@ -96,7 +96,7 @@ export function KbSidebar({ pages, activeId, onOpen, onCreate, onToggleFavorite,
     return (
       <li key={page.id}>
         <div
-          className={cn('group flex items-center gap-1 rounded pr-1', isActive ? 'bg-[var(--tblr-primary-lt)]' : 'hover:bg-[var(--tblr-surface-2)]')}
+          className={cn('kb-hover-reveal flex items-center gap-1 rounded-lg pr-1 transition-colors', isActive ? 'bg-[var(--kb-wash)]' : 'hover:bg-[var(--kb-wash)]')}
           style={{ paddingLeft: `${depth * 0.875 + 0.25}rem` }}
         >
           <button
@@ -137,15 +137,15 @@ export function KbSidebar({ pages, activeId, onOpen, onCreate, onToggleFavorite,
     );
   };
 
-  const sectionTitle = 'px-2 pt-3 pb-1 text-[0.6875rem] font-semibold uppercase tracking-wider';
+  const sectionTitle = 'px-2 pt-4 pb-1 text-[0.75rem] font-medium';
 
   return (
-    <nav aria-label={t('kb_sidebar_label') as string} className={cn('flex flex-col gap-2', className)}>
-      <div className="flex gap-2">
-        <button type="button" onClick={() => onCreate('page', null)} className="btn btn-primary flex-1 inline-flex items-center justify-center gap-1.5">
+    <nav aria-label={t('kb_sidebar_label') as string} className={cn('flex flex-col gap-1', className)}>
+      <div className="flex gap-1">
+        <button type="button" onClick={() => onCreate('page', null)} className="kb-ghost flex-1 justify-start" style={{ color: 'var(--tblr-text)' }}>
           <IconPlus size={16} aria-hidden />{t('kb_new_page')}
         </button>
-        <button type="button" onClick={() => onCreate('database', null)} className="btn btn-secondary inline-flex items-center gap-1.5" title={t('kb_new_database') as string} aria-label={t('kb_new_database') as string}>
+        <button type="button" onClick={() => onCreate('database', null)} className="kb-ghost" title={t('kb_new_database') as string} aria-label={t('kb_new_database') as string}>
           <IconDatabase size={16} aria-hidden />
         </button>
       </div>
@@ -153,7 +153,7 @@ export function KbSidebar({ pages, activeId, onOpen, onCreate, onToggleFavorite,
       <label className="relative">
         <span className="sr-only">{t('kb_search_pages')}</span>
         <IconSearch size={14} aria-hidden className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--tblr-muted)' }} />
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder={t('kb_search_pages') as string} className="tblr-input w-full pl-8" />
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder={t('kb_search_pages') as string} className="w-full min-h-8 rounded-lg bg-transparent pl-8 pr-2 text-[0.8125rem] outline-none transition-colors focus:bg-[var(--kb-wash)] placeholder:text-[var(--tblr-muted)]" style={{ color: 'var(--tblr-text)' }} />
       </label>
 
       {results !== null ? (
@@ -201,7 +201,7 @@ export function KbSidebar({ pages, activeId, onOpen, onCreate, onToggleFavorite,
           <ul>
             {trash.length === 0 && <li className="px-2 py-1.5 text-[0.8125rem]" style={{ color: 'var(--tblr-muted)' }}>{t('kb_trash_empty')}</li>}
             {trash.map(page => (
-              <li key={page.id} className="group flex items-center gap-1 px-2 py-1 rounded hover:bg-[var(--tblr-surface-2)]">
+              <li key={page.id} className="kb-hover-reveal flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--kb-wash)]">
                 <PageIcon page={page} />
                 <span className="flex-1 min-w-0 truncate text-[0.875rem]" style={{ color: 'var(--tblr-text)' }}>{page.title || t('kb_untitled')}</span>
                 <button type="button" onClick={() => onRestore(page)} aria-label={`${t('kb_restore')} : ${page.title || t('kb_untitled')}`} className="p-1 rounded hover:bg-[var(--tblr-surface)]" style={{ color: 'var(--tblr-muted)' }}>

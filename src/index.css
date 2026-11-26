@@ -697,6 +697,51 @@ button, [role="button"], [role="tab"], .btn {
 .kb-tag[data-color='brun']     { --kb-bg: var(--kb-brun-bg);     --kb-fg: var(--kb-brun-fg);     --kb-dot: var(--kb-brun-dot); }
 .kb-swatch { display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 50%; background: var(--kb-dot); flex: none; }
 
+/* Surface épurée de la « Base de données » (à la Coda) : pas de cadre ni de carte, filets presque invisibles,
+   outils discrets qui se révèlent au survol et au focus. Exception à DESIGN.md limitée à cette section. */
+.kb-canvas { --kb-hair: color-mix(in srgb, var(--tblr-text) 9%, transparent); --kb-wash: color-mix(in srgb, var(--tblr-text) 5%, transparent); }
+.kb-ghost {
+  display: inline-flex; align-items: center; gap: 0.375rem; min-height: 2rem; padding: 0.25rem 0.625rem;
+  border-radius: 0.5rem; font-size: 0.8125rem; color: var(--tblr-muted);
+  transition: background-color 150ms var(--ease-out), color 150ms var(--ease-out);
+}
+@media (hover: hover) { .kb-ghost:hover { background: var(--kb-wash); color: var(--tblr-text); } }
+.kb-ghost:focus-visible { outline: 2px solid var(--tblr-primary); outline-offset: 1px; color: var(--tblr-text); }
+.kb-tools { opacity: 0.55; transition: opacity 200ms var(--ease-out); }
+.kb-db:hover .kb-tools, .kb-db:focus-within .kb-tools, .kb-tools[data-active='true'] { opacity: 1; }
+@media (pointer: coarse) { .kb-tools { opacity: 1; } }
+.kb-search { position: relative; display: flex; align-items: center; }
+.kb-search > svg { position: absolute; left: 0.625rem; pointer-events: none; color: var(--tblr-muted); }
+.kb-search input {
+  width: 2.25rem; min-height: 2rem; padding: 0 0.5rem 0 2rem; border: 0; border-radius: 0.5rem; background: transparent;
+  font-size: 0.8125rem; color: var(--tblr-text); cursor: pointer; outline: none;
+  transition: width 220ms var(--ease-out), background-color 150ms var(--ease-out);
+}
+.kb-search input::placeholder { color: transparent; }
+.kb-search input:focus, .kb-search input:not(:placeholder-shown) { width: min(14rem, 55vw); background: var(--kb-wash); cursor: text; }
+.kb-search input:focus::placeholder { color: var(--tblr-muted); }
+.kb-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.kb-table th {
+  padding: 0.375rem 0.75rem; text-align: left; font-size: 0.75rem; font-weight: 500; color: var(--tblr-muted);
+  border-bottom: 1px solid var(--kb-hair); white-space: nowrap;
+}
+.kb-table td { padding: 0.25rem 0.75rem; vertical-align: top; border-bottom: 1px solid var(--kb-hair); transition: background-color 120ms var(--ease-out); }
+/* Survol en dégradé uni posé sur le fond : la première colonne reste opaque (collante) quand le tableau défile. */
+@media (hover: hover) { .kb-table tbody tr:hover td { background-image: linear-gradient(var(--kb-wash), var(--kb-wash)); } }
+.kb-table tbody tr:focus-within td { background-image: linear-gradient(var(--kb-wash), var(--kb-wash)); }
+.kb-table th:first-child, .kb-table td:first-child { padding-left: 0.25rem; position: sticky; left: 0; z-index: 1; background-color: var(--tblr-bg); }
+/* Titre de page : la règle « champs à 16 px » du téléphone (plus haut) ne doit pas le rétrécir. */
+.kb-title { font-size: 2.5rem; }
+@media (pointer: coarse) {
+  input.kb-title:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]) { font-size: 2rem; }
+}
+.kb-reveal { opacity: 0; transition: opacity 150ms var(--ease-out); }
+.kb-hover-reveal:hover .kb-reveal, .kb-hover-reveal:focus-within .kb-reveal { opacity: 1; }
+@media (pointer: coarse) { .kb-reveal { opacity: 1; } }
+@keyframes kb-pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+.kb-pop { animation: kb-pop 160ms var(--ease-out); transform-origin: top left; }
+@media (prefers-reduced-motion: reduce) { .kb-pop { animation: none; } }
+
 .kb-content { outline: none; font-size: 0.9375rem; line-height: 1.65; color: var(--tblr-text); }
 .kb-content > * + * { margin-top: 0.5em; }
 .kb-content h1 { font-size: 1.875rem; font-weight: 700; line-height: 1.25; margin-top: 1.4em; }
