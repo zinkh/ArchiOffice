@@ -27,6 +27,9 @@ export interface OffreImportee {
   note_technique: number;
   conforme: boolean;
   motif_nc?: string;
+  /** Remise commerciale et prix avant remise (voir src/lib/remiseCommerciale.ts) : écartées quand un acte d'engagement fixe le prix. */
+  remise?: { mode: 'pourcentage' | 'montant'; valeur: number };
+  montant_brut?: number;
 }
 
 export interface ContactRapprochable {
@@ -113,7 +116,8 @@ export function appliquerActeAuxOffres(
       const ancien = offres[i].montant_base;
       if (ancien === l.prixHT) resumeLots.push({ numero: l.numero, titre: lot.lot_title, prix: l.prixHT, action: 'identique' });
       else {
-        offres[i] = { ...offres[i], montant_base: l.prixHT };
+        // Le prix de l'acte d'engagement est le prix final : une remise saisie auparavant ne s'y applique plus.
+        offres[i] = { ...offres[i], montant_base: l.prixHT, remise: undefined, montant_brut: undefined };
         resumeLots.push({ numero: l.numero, titre: lot.lot_title, prix: l.prixHT, action: 'mise_a_jour', ancien: ancien || undefined });
       }
     } else {

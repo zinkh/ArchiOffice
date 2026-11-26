@@ -67,6 +67,8 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
   const [montrer, setMontrer] = useState<'ecart' | 'total'>('ecart');
   const [filtre, setFiltre] = useState(false);
   const [rattachement, setRattachement] = useState<{ enCours: boolean; erreur: string | null }>({ enCours: false, erreur: null });
+  /** Postes ajoutés cochés pour être rattachés ensemble à un même poste du document (clé « entreprise|poste »). */
+  const [choisis, setChoisis] = useState<Set<string>>(new Set());
 
   const lotId = lotChoisi && lotsComparables.some(l => l.id === lotChoisi) ? lotChoisi : lotsComparables[0]?.id ?? null;
   const lotDoc = documentLots.find(d => d.projectLotId === lotId);
@@ -99,15 +101,33 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
     const ligneId = suggererRattachement(a.titre, articlesPourSuggestion);
     return ligneId ? [{ entrepriseId: a.entrepriseId, posteId: a.id, ligneId }] : [];
   });
-  const rattacher = async (changements: ChangementRattachement[]) => {
-    if (!lotId || !onRattacher || changements.length === 0) return;
+  const rattacher = async (changements: ChangementRattachement[]): Promise<boolean> => {
+    if (!lotId || !onRattacher || changements.length === 0) return false;
     setRattachement({ enCours: true, erreur: null });
     try {
       await onRattacher(lotId, changements);
       setRattachement({ enCours: false, erreur: null });
+      return true;
     } catch (e: any) {
       setRattachement({ enCours: false, erreur: e?.message || 'Le rattachement n’a pas pu être enregistré.' });
+      return false;
     }
+  };
+
+  // Une entreprise qui détaille un poste du document en plusieurs lignes : on coche ses lignes puis on les rattache
+  // toutes au même poste. La sélection reste celle d'UNE entreprise (une proposition se lit dans sa colonne).
+  const cleAjout = (a: { entrepriseId: string; id: string }) => `${a.entrepriseId}|${a.id}`;
+  const selection = libres.filter(a => choisis.has(cleAjout(a)));
+  const entrepriseSelection = selection[0]?.entrepriseId;
+  const basculerChoix = (a: { entrepriseId: string; id: string }) => setChoisis(prev => {
+    const n = new Set(prev);
+    const cle = cleAjout(a);
+    if (n.has(cle)) n.delete(cle); else n.add(cle);
+    return n;
+  });
+  const rattacherSelection = async (ligneId: string) => {
+    const ok = await rattacher(selection.map(a => ({ entrepriseId: a.entrepriseId, posteId: a.id, ligneId })));
+    if (ok) setChoisis(new Set());
   };
 
   /** Propositions rattachées à un article, dans la colonne de l'entreprise qui les a faites. */
@@ -256,6 +276,19 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                               Rattacher les {suggestions.length} suggestion{suggestions.length > 1 ? 's' : ''}
                             </button>
                           )}
+                          {onRattacher && selection.length > 0 && (
+                            <span className="normal-case tracking-normal inline-flex flex-wrap items-center gap-2 text-xs font-semibold">
+                              {selection.length} poste{selection.length > 1 ? 's' : ''} de {selection[0].entrepriseNom} coché{selection.length > 1 ? 's' : ''} :
+                              <select value="" disabled={rattachement.enCours}
+                                aria-label={`Rattacher les ${selection.length} postes cochés à un poste du ${documentLabel}`}
+                                onChange={ev => { if (ev.target.value) void rattacherSelection(ev.target.value); }}
+                                className="max-w-[260px] text-[0.6875rem] font-normal rounded border border-violet-300 dark:border-violet-700 bg-white dark:bg-zinc-900 px-1 py-0.5 disabled:opacity-50">
+                                <option value="">Rattacher la sélection à un poste du {documentLabel}…</option>
+                                {lignesLot.map(l => <option key={l.id} value={l.id}>{l.code} {l.titre.length > 60 ? `${l.titre.slice(0, 60)}…` : l.titre}</option>)}
+                              </select>
+                              <button type="button" onClick={() => setChoisis(new Set())} className="font-semibold underline">Tout décocher</button>
+                            </span>
+                          )}
                           {rattachement.erreur && <span role="alert" className="normal-case tracking-normal font-semibold text-red-600 dark:text-red-400">{rattachement.erreur}</span>}
                         </span>
                       </td>
@@ -266,7 +299,16 @@ export default function ComparatifPrixUnitaires({ lots, documentLots, offres, en
                       return (
                       <tr key={a.id}>
                         <td className="px-3 py-2 text-[var(--tblr-muted)] sticky left-0 bg-[var(--tblr-surface)]">{a.code}</td>
-                        <td className="px-3 py-2">{a.titre}<br /><span className="inline-block mt-0.5 text-[0.6875rem] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200">Ajouté par {a.entrepriseNom}</span>
+                        <td className="px-3 py-2">
+                          {onRattacher && (
+                            <input type="checkbox" className="mr-2 align-middle w-4 h-4 accent-violet-600"
+                              aria-label={`Cocher « ${a.titre} » pour le rattacher avec d'autres postes à un même poste du ${documentLabel}`}
+                              checked={choisis.has(cleAjout(a))}
+                              disabled={rattachement.enCours || (entrepriseSelection != null && entrepriseSelection !== a.entrepriseId)}
+                              title={entrepriseSelection != null && entrepriseSelection !== a.entrepriseId ? 'La sélection ne porte que sur les postes d’une seule entreprise' : undefined}
+                              onChange={() => basculerChoix(a)} />
+                          )}
+                          {a.titre}<br /><span className="inline-block mt-0.5 text-[0.6875rem] font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200">Ajouté par {a.entrepriseNom}</span>
                           {onRattacher && (
                             <span className="mt-1 flex flex-wrap items-center gap-2">
                               <select value="" disabled={rattachement.enCours}

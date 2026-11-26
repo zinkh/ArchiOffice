@@ -9,6 +9,8 @@
 // un statut ne s'écrivent jamais à la main (le tableau Excel d'origine cassait
 // dès qu'une formule pointait une cellule déplacée).
 
+import { netApresRemise, type RemiseCommerciale } from './remiseCommerciale';
+
 /** Clé de la ligne « base » dans les dictionnaires de montants. */
 export const BASE_KEY = 'base';
 
@@ -32,6 +34,11 @@ export interface TourNegociation {
   date: string;
   /** Prix proposé par ligne (BASE_KEY, id d'option ou de variante). Une ligne absente n'a pas bougé. */
   montants: Record<string, number>;
+  /**
+   * Remise commerciale consentie à ce tour, sur le prix de base. La dernière remise saisie s'applique au dernier
+   * prix de base ; une valeur 0 la retire (absent : le tour n'y touche pas). Voir `remiseCourante`.
+   */
+  remise?: RemiseCommerciale;
   remarque?: string;
   auteur?: string;
   /** « Offre finale » : l'entreprise ne descendra plus. */
@@ -135,9 +142,27 @@ export type Etage = 'ouverture' | 'verifie' | 'courant';
 const lecteur = (etage: Etage) =>
   etage === 'ouverture' ? montantOuverture : etage === 'verifie' ? montantVerifie : montantCourant;
 
-/** Base d'une offre à un stade de la négociation. */
+/**
+ * Remise en vigueur : celle du dernier tour qui en a saisi une (un tour sans remise n'y touche pas). L'ouverture
+ * et le prix vérifié n'en ont pas : la remise accordée à l'ouverture est déjà dans le prix de l'offre.
+ */
+export function remiseCourante(neg: Negociation | undefined): RemiseCommerciale | undefined {
+  const tours = toursOrdonnes(neg);
+  for (let i = tours.length - 1; i >= 0; i--) {
+    if (tours[i].remise) return tours[i].remise;
+  }
+  return undefined;
+}
+
+/** Prix de base avant la remise des tours : le dernier prix proposé, sinon le prix vérifié. */
+export function baseBruteCourante(offre: OffreMontant | undefined, neg: Negociation | undefined): number {
+  return montantCourant(offre, neg, BASE_KEY);
+}
+
+/** Base d'une offre à un stade de la négociation. Au prix courant, la remise des tours est déduite. */
 export function baseA(offre: OffreMontant | undefined, neg: Negociation | undefined, etage: Etage): number {
-  return lecteur(etage)(offre, neg, BASE_KEY);
+  const brut = lecteur(etage)(offre, neg, BASE_KEY);
+  return etage === 'courant' ? netApresRemise(brut, remiseCourante(neg)) : brut;
 }
 
 /** Somme des options (jamais des variantes, qui sont des offres de substitution). */

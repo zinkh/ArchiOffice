@@ -28,6 +28,8 @@ import { ContactModal } from './ContactModal';
 import { isEntrepriseContact, CONTACT_CATEGORY_ENTREPRISE } from '../lib/contactCategories';
 import NegociationPhase from './act/NegociationPhase';
 import LignesOffreEditor from './act/LignesOffreEditor';
+import { RemiseInput } from './act/negociationUi';
+import { brutDeOffre, libelleRemise, montantRemise, montantsAvecRemise, remiseActive, type RemiseCommerciale } from '../lib/remiseCommerciale';
 import {
   montantAttribution, offresAuPrixCourant, trouverNegociation,
   type DonneesNegociation,
@@ -163,6 +165,13 @@ interface Offre {
    * référence et montant_base en est déduit. Absent : voir modeEffectif.
    */
   mode_saisie?: ModeSaisie;
+  /**
+   * Remise commerciale consentie sur le prix de l'offre. `montant_base` reste LE prix final (celui que lisent le
+   * classement, la négociation et l'attribution) ; `montant_brut` mémorise le prix avant remise, seulement quand une
+   * remise s'applique (voir src/lib/remiseCommerciale.ts).
+   */
+  remise?: RemiseCommerciale;
+  montant_brut?: number;
 }
 
 interface Attribution {
@@ -820,9 +829,13 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     update({ ...c, offres });
   };
 
+  /** Remise commerciale déjà saisie sur l'offre d'un lot x entreprise (le prix poste par poste est brut, la remise s'y applique). */
+  const remiseDe = (lotId: string, entrepriseId: string): RemiseCommerciale | undefined =>
+    latest.current.consultation.offres.find(o => o.lot_id === lotId && o.entreprise_id === entrepriseId)?.remise;
+
   const changerMode = (lotId: string, entrepriseId: string, mode: ModeSaisie) => {
     if (mode === 'postes') {
-      patchOffre(lotId, entrepriseId, { mode_saisie: 'postes', montant_base: totalPostesLot(lotId, entrepriseId, docs.offres) });
+      patchOffre(lotId, entrepriseId, { mode_saisie: 'postes', ...montantsAvecRemise(totalPostesLot(lotId, entrepriseId, docs.offres), remiseDe(lotId, entrepriseId)) });
     } else {
       // Le dernier total calculé reste dans montant_base : il sert de point de départ à la saisie du total.
       patchOffre(lotId, entrepriseId, { mode_saisie: 'total' });
@@ -838,7 +851,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     const suivantes = await docs.ecrireSaisie({
       entreprise: { id: entreprise.id, nom: entreprise.nom }, lotId: lotDoc.id, idsLot, prix, postesAjoutes: ajouts, quantites, acceptees,
     });
-    patchOffre(lotId, entreprise.id, { mode_saisie: 'postes', montant_base: totalPostesLot(lotId, entreprise.id, suivantes) });
+    patchOffre(lotId, entreprise.id, { mode_saisie: 'postes', ...montantsAvecRemise(totalPostesLot(lotId, entreprise.id, suivantes), remiseDe(lotId, entreprise.id)) });
   };
 
   /**
@@ -987,7 +1000,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     for (const lotId of entreprise.lots_ids) {
       const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
       if (!lotDoc || !aDesPrix(lotDoc, saved.prix)) continue;
-      const patch = { mode_saisie: 'postes' as const, montant_base: totalPostesLot(lotId, entreprise.id, suivantes) };
+      const remise = offresConsultation.find(o => o.lot_id === lotId && o.entreprise_id === entreprise.id)?.remise;
+      const patch = { mode_saisie: 'postes' as const, ...montantsAvecRemise(totalPostesLot(lotId, entreprise.id, suivantes), remise) };
       offresConsultation = offresConsultation.some(o => o.lot_id === lotId && o.entreprise_id === entreprise.id)
         ? offresConsultation.map(o => (o.lot_id === lotId && o.entreprise_id === entreprise.id ? { ...o, ...patch } : o))
         : [...offresConsultation, { id: crypto.randomUUID(), lot_id: lotId, entreprise_id: entreprise.id, note_technique: 0, conforme: true, ...patch }];
@@ -1009,10 +1023,10 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
         const offre = offres.find(o => o.lot_id === lotId && o.entreprise_id === e.id);
         const mode = modeEffectif(offre?.mode_saisie, offre?.montant_base ?? 0, aDesPrix(lotsDocument.find(l => l.projectLotId === lotId)!, prixEntreprise(docs.offres, e.id)));
         if (mode !== 'postes') continue;
-        const total = totalPostesLot(lotId, e.id, docs.offres);
-        if (offre && offre.mode_saisie === 'postes' && offre.montant_base === total) continue;
+        const montants = montantsAvecRemise(totalPostesLot(lotId, e.id, docs.offres), offre?.remise);
+        if (offre && offre.mode_saisie === 'postes' && offre.montant_base === montants.montant_base && offre.montant_brut === montants.montant_brut) continue;
         change = true;
-        const patch = { mode_saisie: 'postes' as const, montant_base: total };
+        const patch = { mode_saisie: 'postes' as const, ...montants };
         offres = offre
           ? offres.map(o => (o === offre ? { ...o, ...patch } : o))
           : [...offres, { id: crypto.randomUUID(), lot_id: lotId, entreprise_id: e.id, note_technique: 0, conforme: true, ...patch }];
@@ -1755,7 +1769,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                               {modeLigne === 'postes' ? (
                                 <div className="text-right">
                                   <div className="font-bold tabular-nums text-sm">{offre.montant_base ? fmt(offre.montant_base) : <span className="text-[var(--tblr-muted)]">·</span>}</div>
-                                  <div className="text-[0.6875rem] text-[var(--tblr-muted)]">calculé d’après les postes</div>
+                                  <div className="text-[0.6875rem] text-[var(--tblr-muted)]">{remiseActive(offre.remise) ? 'après remise, d’après les postes' : 'calculé d’après les postes'}</div>
                                   <div className="flex justify-end gap-1.5 mt-1.5">
                                     <button type="button" onClick={() => setSaisieOuverte({ lotId: lot.id, entreprise })}
                                       className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[var(--tblr-primary)] text-white hover:opacity-90">Saisir les postes</button>
@@ -1765,10 +1779,23 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                                 </div>
                               ) : (
                                 <input type="number" min={0} step={100}
+                                  aria-label={remiseActive(offre.remise) ? `Montant HT avant remise, ${entreprise.nom}` : `Montant HT, ${entreprise.nom}`}
                                   className="w-full text-right px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                                  value={offre.montant_base || ''}
-                                  onChange={e => updateOffre({ montant_base: parseFloat(e.target.value) || 0, mode_saisie: 'total' })}
+                                  value={brutDeOffre(offre) || ''}
+                                  onChange={e => updateOffre({ ...montantsAvecRemise(parseFloat(e.target.value) || 0, offre.remise), mode_saisie: 'total' })}
                                   placeholder="0.00" />
+                              )}
+                              <div className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5 text-[0.6875rem] text-[var(--tblr-muted)]">
+                                <span className="font-medium">Remise commerciale</span>
+                                <RemiseInput
+                                  label={`Remise commerciale, ${entreprise.nom}`} remise={offre.remise}
+                                  onChange={r => updateOffre(montantsAvecRemise(brutDeOffre(offre), r))}
+                                />
+                              </div>
+                              {remiseActive(offre.remise) && offre.montant_brut != null && (
+                                <div className="mt-1 text-right text-[0.6875rem] tabular-nums text-[var(--tblr-muted)]">
+                                  {fmt(offre.montant_brut)} − {fmt(montantRemise(offre.montant_brut, offre.remise))} ({libelleRemise(offre.remise)}) = <span className="font-bold text-[var(--tblr-text)]">{fmt(offre.montant_base)}</span>
+                                </div>
                               )}
                             </td>
                             <td className="px-4 py-3">

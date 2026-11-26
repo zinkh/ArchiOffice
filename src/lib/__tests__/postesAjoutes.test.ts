@@ -128,6 +128,28 @@ describe('rattachement d\'un poste à un article du DPGF', () => {
     expect(lot.articles.find(a => a.ajoute_par)!.titre).toBe('Hors marché');
   });
 
+  it('plusieurs postes d\'une entreprise détaillant un poste se rattachent au même article', () => {
+    const detail = [
+      poste({ id: 'p1', designation: 'Meuble cuisine', prixUnitaire: 1200, articleId: 'a32' }),
+      poste({ id: 'p2', designation: 'Plan de travail', prixUnitaire: 800, articleId: 'a32' }),
+      poste({ id: 'p3', designation: 'Électroménager', prixUnitaire: 500, articleId: 'a32' }),
+    ];
+    const { comparatif } = versComparatif(lotsAvecArticles(), [offre(detail)]);
+    const lot = comparatif[0];
+    const a32 = lot.articles.find(a => a.id === 'a32')!;
+    expect(a32.propositions?.map(p => p.designation)).toEqual(['Meuble cuisine', 'Plan de travail', 'Électroménager']);
+    expect(a32.prix.e1).toBe(1200 + 800 + 500);
+    expect(lot.articles.some(a => a.ajoute_par)).toBe(false);
+    expect(lot.articles.find(a => a.is_subtotal)!.prix.e1).toBe(2500 + 480);
+  });
+
+  it('rattacher une série de postes d\'une même liste ne touche que ceux désignés', () => {
+    const postes = [poste({ id: 'p1' }), poste({ id: 'p2' }), poste({ id: 'p3' })];
+    const lies = ['p1', 'p3'].reduce((liste, id) => rattacherPoste(liste, id, 'a32'), postes);
+    expect(lies.map(p => p.articleId)).toEqual(['a32', undefined, 'a32']);
+    expect(lies[1]).toBe(postes[1]);
+  });
+
   it('retombe sur un poste ajouté ordinaire quand l\'article rattaché a disparu', () => {
     const { comparatif } = versComparatif(lotsAvecArticles(), [offre([poste({ articleId: 'disparu' })])]);
     expect(comparatif[0].articles.some(a => a.ajoute_par)).toBe(true);

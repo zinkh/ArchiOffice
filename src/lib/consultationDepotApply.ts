@@ -22,6 +22,9 @@ export interface OffreApplicable {
   note_technique: number;
   conforme: boolean;
   motif_nc?: string;
+  /** Remise commerciale et prix avant remise (voir src/lib/remiseCommerciale.ts) : écartées quand un dépôt fixe le prix. */
+  remise?: { mode: 'pourcentage' | 'montant'; valeur: number };
+  montant_brut?: number;
 }
 
 export interface ConsultationApplicable {
@@ -94,7 +97,7 @@ export function appliquerSaisie<T extends ConsultationApplicable>(
   const s = depot.payload;
 
   const offres = c.offres.some(o => o.lot_id === lotId && o.entreprise_id === depot.entreprise_id)
-    ? c.offres.map(o => (o.lot_id === lotId && o.entreprise_id === depot.entreprise_id ? { ...o, montant_base: s.montant_base } : o))
+    ? c.offres.map(o => (o.lot_id === lotId && o.entreprise_id === depot.entreprise_id ? { ...o, montant_base: s.montant_base, remise: undefined, montant_brut: undefined } : o))
     : [...c.offres, {
         id: opts.genererId(), lot_id: lotId, entreprise_id: depot.entreprise_id,
         montant_base: s.montant_base, note_technique: 0, conforme: true,
