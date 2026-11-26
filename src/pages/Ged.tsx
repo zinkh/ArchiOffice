@@ -6,6 +6,7 @@ import {
   IconFolderPlus, IconPlus, IconPencil, IconTrash, IconUser, IconFileSearch,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { useDragToZone } from '../hooks/useDragToZone';
 import { getAccessToken } from '../lib/authToken';
 import { openSignedUrl, resolveSignedUrl } from '../lib/signedStorageUrl';
 import {
@@ -294,6 +295,32 @@ export default function Ged() {
     } catch { setDocs(previous); flash(false, 'Le classement a échoué.'); }
   };
 
+  // Glisser un document (souris, ou appui long au doigt) sur la navigation de gauche pour le classer.
+  // Clés de zone : `p:<affaire>` (garde la phase), `p:<affaire>:<phase>` (racine de la phase), `f:<dossier>`, `none` (À classer).
+  const navRef = useRef<HTMLElement>(null);
+  const { drag, itemProps, zoneProps } = useDragToZone<string>({
+    scrollRef: navRef,
+    onDrop: (id, zone) => {
+      const doc = docs.find(d => d.id === id);
+      if (!doc) return;
+      const [kind, key, phase] = zone.split(':');
+      const unchanged = (project: string, ph: string, folder: string) =>
+        (doc.project_id || '') === project && phaseOf(doc) === ph && ((doc as any).folder_id || '') === folder;
+      if (kind === 'none') { if (!unchanged('', phaseOf(doc), '')) void classify(doc, '', phaseOf(doc), ''); return; }
+      if (kind === 'f') {
+        const folder = folders.find(f => f.id === key);
+        if (folder && !unchanged(folder.project_id, folder.phase, folder.id)) void classify(doc, folder.project_id, folder.phase, folder.id);
+        return;
+      }
+      const project = key === NO_PROJECT ? '' : key;
+      const target = phase || phaseOf(doc);
+      if (phase ? !unchanged(project, target, '') : (doc.project_id || '') !== project) void classify(doc, project, target, phase ? '' : undefined);
+    },
+  });
+  const dragging = !!drag;
+  const dropStyle = (key: string): React.CSSProperties => drag?.over === key
+    ? { outline: '2px dashed var(--tblr-primary)', outlineOffset: -2, background: 'var(--tblr-primary-lt)', borderRadius: 8 } : {};
+
   // Émetteur d'un document : le serveur réécrit tous les champs du corps (phase, type, nom...), on les renvoie donc
   // tels qu'ils sont. Un contact choisi rattache la fiche (contact_id), un texte libre la détache.
   const saveEmetteur = async (doc: Document, emetteur: string, contact: ContactChoice | null): Promise<boolean> => {
@@ -403,9 +430,11 @@ export default function Ged() {
   };
   const renderFolders = (nodes: FolderNode[]): React.ReactNode => nodes.map(node => (
     <div key={node.id}>
-      <NavButton indent={2 + node.depth} active={nav.kind === 'folder' && nav.folder === node.id}
-        onClick={() => go({ kind: 'folder', project: node.project_id, value: node.phase, folder: node.id })}
-        icon={<IconFolder size={14} aria-hidden="true" />} count={folderDocCount(node.id)}>{node.name}</NavButton>
+      <div {...zoneProps(`f:${node.id}`)} style={dropStyle(`f:${node.id}`)}>
+        <NavButton indent={2 + node.depth} active={nav.kind === 'folder' && nav.folder === node.id}
+          onClick={() => go({ kind: 'folder', project: node.project_id, value: node.phase, folder: node.id })}
+          icon={<IconFolder size={14} aria-hidden="true" />} count={folderDocCount(node.id)}>{node.name}</NavButton>
+      </div>
       {renderFolders(node.children)}
     </div>
   ));
@@ -530,15 +559,17 @@ export default function Ged() {
 
       <div className="grid gap-3 lg:grid-cols-[15.5rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_24rem] 2xl:grid-cols-[17rem_minmax(0,1fr)_28rem] items-start">
         {/* Navigation */}
-        <nav aria-label="Navigation des documents" className="rounded-xl p-2 lg:sticky lg:top-2 lg:max-h-[calc(100dvh-8rem)] overflow-y-auto" style={surface}>
+        <nav ref={navRef} aria-label="Navigation des documents" className="rounded-xl p-2 lg:sticky lg:top-2 lg:max-h-[calc(100dvh-8rem)] overflow-y-auto" style={surface}>
           <NavButton active={isNav('all')} onClick={() => go(GED_ALL)} icon={<IconFolderOpen size={16} aria-hidden="true" />} count={docs.length}>Tous les documents</NavButton>
           <NavButton active={isNav('recent')} onClick={() => go({ kind: 'recent' })} icon={<IconClock size={16} aria-hidden="true" />}>Récents</NavButton>
           <NavButton active={isNav('fav')} onClick={() => go({ kind: 'fav' })} icon={<IconStar size={16} aria-hidden="true" />} count={favs.size}>Favoris</NavButton>
-          <NavButton active={isNav('toclass')} onClick={() => go({ kind: 'toclass' })} icon={<IconInbox size={16} aria-hidden="true" />} count={byProject.get(NO_PROJECT) || 0}>À classer</NavButton>
+          <div {...zoneProps('none')} style={dropStyle('none')}>
+            <NavButton active={isNav('toclass')} onClick={() => go({ kind: 'toclass' })} icon={<IconInbox size={16} aria-hidden="true" />} count={byProject.get(NO_PROJECT) || 0}>À classer</NavButton>
+          </div>
 
           <SectionTitle>Par projet</SectionTitle>
-          {[...navProjects.map(p => ({ id: p.id, name: p.name })), ...(byProject.has(NO_PROJECT) ? [{ id: NO_PROJECT, name: 'Sans projet' }] : [])].map(p => {
-            const open = expanded.has(p.id);
+          {[...(dragging ? [...projects].sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true })) : navProjects).map(p => ({ id: p.id, name: p.name })), ...(byProject.has(NO_PROJECT) || dragging ? [{ id: NO_PROJECT, name: 'Sans projet' }] : [])].map(p => {
+            const open = expanded.has(p.id) || dragging;
             return (
               <div key={p.id}>
                 <div className="flex items-center">
@@ -546,15 +577,15 @@ export default function Ged() {
                     className="p-1.5 rounded hover:bg-[var(--tblr-surface-2)]" style={muted}>
                     {open ? <IconChevronDown size={14} aria-hidden="true" /> : <IconChevronRight size={14} aria-hidden="true" />}
                   </button>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0" {...zoneProps(`p:${p.id}`)} style={dropStyle(`p:${p.id}`)}>
                     <NavButton active={isNav('project', p.id)} onClick={() => { go({ kind: 'project', project: p.id }); if (!open) toggleExpanded(p.id); }}
                       icon={<IconFolder size={16} aria-hidden="true" />} count={byProject.get(p.id)}>{p.name}</NavButton>
                   </div>
                 </div>
-                {open && projectPhases(p.id).map(([phase, n]) => (
+                {open && (dragging ? PHASES.map(ph => [ph, countBy(docs.filter(d => (d.project_id || NO_PROJECT) === p.id), phaseOf).get(ph) || 0] as const) : projectPhases(p.id)).map(([phase, n]) => (
                   <div key={phase}>
                     <div className="flex items-center">
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0" {...zoneProps(`p:${p.id}:${phase}`)} style={dropStyle(`p:${p.id}:${phase}`)}>
                         <NavButton indent={2} active={isNav('project', p.id, phase)} onClick={() => go({ kind: 'project', project: p.id, value: phase })} count={n}>{phase}</NavButton>
                       </div>
                       {p.id !== NO_PROJECT && (
@@ -680,10 +711,10 @@ export default function Ged() {
                 </tr></thead>
                 <tbody>
                   {visible.map(d => (
-                    <tr key={d.id} tabIndex={0} aria-selected={d.id === selectedId} onClick={() => setSelectedId(d.id)}
+                    <tr key={d.id} tabIndex={0} aria-selected={d.id === selectedId} onClick={() => setSelectedId(d.id)} {...itemProps(d.id, 'doc')}
                       onKeyDown={e => { if (e.key === 'Enter') setSelectedId(d.id); }}
                       className="cursor-pointer hover:bg-[var(--tblr-surface-2)]"
-                      style={{ borderBottom: '1px solid var(--tblr-border)', ...(d.id === selectedId ? { background: 'var(--tblr-primary-lt)' } : {}) }}>
+                      style={{ borderBottom: '1px solid var(--tblr-border)', opacity: drag?.id === d.id ? 0.4 : 1, ...(d.id === selectedId ? { background: 'var(--tblr-primary-lt)' } : {}) }}>
                       <td className="px-3 py-2"><span className="flex items-center gap-2.5 font-semibold min-w-0">
                         <FileIcon name={d.name} /><span className="truncate max-w-[26rem] 2xl:max-w-[40rem]"><Highlight text={d.name} query={filters.search} /></span>
                         {favs.has(d.id) && <IconStarFilled size={13} aria-label="Favori" style={{ color: '#f2b93b' }} />}
@@ -706,9 +737,9 @@ export default function Ged() {
           {visible.length > 0 && view === 'grid' && (
             <div className="grid gap-3 p-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(9.5rem, 1fr))' }}>
               {visible.map(d => (
-                <button key={d.id} type="button" onClick={() => setSelectedId(d.id)} aria-pressed={d.id === selectedId}
+                <button key={d.id} type="button" onClick={() => setSelectedId(d.id)} aria-pressed={d.id === selectedId} {...itemProps(d.id, 'doc')}
                   className="text-left rounded-lg p-3 flex flex-col gap-2 min-w-0"
-                  style={{ border: `1px solid ${d.id === selectedId ? 'var(--tblr-primary)' : 'var(--tblr-border)'}`, background: d.id === selectedId ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface)' }}>
+                  style={{ opacity: drag?.id === d.id ? 0.4 : 1, border: `1px solid ${d.id === selectedId ? 'var(--tblr-primary)' : 'var(--tblr-border)'}`, background: d.id === selectedId ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface)' }}>
                   <span className="grid place-items-center h-16 rounded-md" style={{ background: 'var(--tblr-surface-2)' }}><FileIcon name={d.name} size={34} /></span>
                   <span className="font-semibold text-sm break-words"><Highlight text={d.name} query={filters.search} /></span>
                   <span className="text-xs" style={muted}>{projectName(d.project_id) || 'Sans projet'} · {phaseOf(d)}{d.indice ? ` · ind. ${d.indice}` : ''}</span>
