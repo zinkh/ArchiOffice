@@ -34,6 +34,7 @@ import {
   IconMessageCircle,
   IconMail,
   IconPhone,
+  IconDatabase,
 } from '@tabler/icons-react';
 import { BrandLogo } from './ArchiOfficeLogo';
 import { StorageCartouche } from './StorageCartouche';
@@ -52,6 +53,7 @@ export const NAV_ITEMS = [
   { name: 'invoices',       path: '/invoices',       icon: IconFileInvoice },
   { name: 'tenders',        path: '/tenders',        icon: IconClipboardCheck },
   { name: 'specifications', path: '/specifications', icon: IconBooks },
+  { name: 'kb_nav',         path: '/base-de-donnees', icon: IconDatabase },
   { name: 'gantt',          path: '/gantt',          icon: IconChartBar },
   { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
@@ -110,6 +112,7 @@ export const NAV_SECTIONS = [
     items: [
       { name: 'documents',      path: '/documents',      icon: IconFiles },
       { name: 'specifications', path: '/specifications', icon: IconBooks },
+      { name: 'kb_nav',         path: '/base-de-donnees', icon: IconDatabase },
       { name: 'templates',      path: '/templates',      icon: IconFileSpreadsheet },
       { name: 'document_templates', path: '/document_templates', icon: IconFileDescription },
       { name: 'references',     path: '/references',     icon: IconArchive },

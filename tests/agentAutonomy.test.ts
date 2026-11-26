@@ -63,14 +63,16 @@ describe('périmètre des outils selon les capacités', () => {
     expect(AGENT_DEFAULT_ACTION_SCOPES['comptable']).toContain('invoices');
     // Quatre métiers d'ingénierie n'avaient que la ressource 'specifications'
     // (l'ancienne ressource CCTP, retirée du système — voir CLAUDE.md) comme
-    // défaut : leur périmètre est désormais vide plutôt qu'un remplacement
-    // improvisé, à régler au cas par cas depuis /agents/:id/edit.
-    const emptyByDesign = ['ingenieur-thermique', 'ingenieur-structure', 'ingenieur-fluides', 'acousticien'];
+    // défaut : leur périmètre ne reçoit aucun remplacement improvisé, à régler au
+    // cas par cas depuis /agents/:id/edit. Seule la base de données du cabinet
+    // (kb_pages) est donnée à tous les métiers : c'est donc leur seul périmètre.
+    const engineeringOnly = ['ingenieur-thermique', 'ingenieur-structure', 'ingenieur-fluides', 'acousticien'];
     for (const [metier, scopes] of Object.entries(AGENT_DEFAULT_ACTION_SCOPES)) {
-      if (emptyByDesign.includes(metier)) {
-        expect(scopes.length).toBe(0);
+      expect(scopes, metier).toContain('kb_pages');
+      if (engineeringOnly.includes(metier)) {
+        expect(scopes).toEqual(['kb_pages']);
       } else {
-        expect(scopes.length).toBeGreaterThan(0);
+        expect(scopes.length).toBeGreaterThan(1);
       }
     }
   });

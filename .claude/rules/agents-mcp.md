@@ -138,6 +138,39 @@ reste) ; le numéro n'est jamais écrit par un agent.
 `ChatMarkdown.tsx` rendent titres, listes, tableaux, gras et liens sans HTML brut. Seuls http(s),
 mailto, tel et les chemins relatifs sont des liens ; un lien vers l'application navigue sans recharger.
 
+### Pages de la base de données du cabinet (agents et MCP)
+
+`kb_pages` (`AGENT_RESOURCES`, `types.ts`) donne aux agents et au MCP les pages et notes de la « Base de
+données » du cabinet (écran `/base-de-donnees` ; voir `server/routes/knowledgeBase.ts`, `src/lib/kb.ts`,
+`supabase/migrate_kb_pages.sql`). Ressource ordinaire : `create_record`, `search_records`, `get_record`,
+`update_record` et `delete_record` (hors MCP) en héritent, sans outil écrit à la main.
+
+- **Texte brut seulement.** Un agent écrit `texte` (un paragraphe par ligne) : le serveur le convertit en
+  document Tiptap (`kbTextToContent`) et recalcule le texte indexé. `content` et `properties` ne sont pas
+  des champs connus (`champs_ignores`) : un modèle ne fabrique pas de JSON Tiptap fiable, et les clés de
+  `properties` sont des identifiants de colonnes qu'il ne connaît pas.
+- **Jamais de perte silencieuse.** `PUT` avec `texte` refuse (409 `KB_RICH_CONTENT`) une page qui porte des
+  titres, listes, tableaux, fichiers ou images : la réécrire en texte brut les ferait disparaître. L'agent
+  crée alors une nouvelle page. Une page vide ou faite de simples paragraphes se réécrit (`kbIsPlainContent`).
+- **Lecture par la liste.** `search_records` et `get_record` lisent `GET /api/kb/pages` (`basePath`), puis
+  filtrent en mémoire sur `title` : la route rend les pages hors corbeille, sans le JSON, avec `texte`
+  coupé à 4 000 caractères (`texte_tronque: true`) et 500 pages au plus. La page entière reste à
+  `GET /api/kb/pages/:id`. Pas de `mergeOnUpdate` : le `PUT` est partiel.
+- **Suppression** = corbeille (`DELETE /api/kb/pages/:id`, restaurable depuis l'écran). La suppression
+  définitive (`/permanent`) est réservée à admin, manager et pm, jamais à un agent.
+- **Activée pour tous les agents** (choix du cabinet) : `AGENT_DEFAULT_ACTION_SCOPES` l'ajoute à chaque
+  métier et `supabase/migrate_agent_kb_pages_scope.sql` l'a ajoutée à tous les agents existants (y compris
+  ceux dont le périmètre était réglé à la main : elle ajoute une entrée, n'en retire aucune). Les quatre
+  métiers d'ingénierie n'ont que ce périmètre. Un cabinet la décoche agent par agent depuis `/agents/:id/edit`.
+- **Lien** : `record_url` ouvre `/base-de-donnees/:id` (`recordLinks.ts`). Les pièces jointes passent par
+  `resource_type = kb_pages` (`DOCUMENT_RESOURCE_TYPES`, copie à maintenir avec `ATTACHABLE_RESOURCE_TYPES`).
+- **À ne pas confondre** avec `search_knowledge` (RAG sur les fichiers de `documents`) et `firm_knowledge` :
+  le texte saisi dans une page n'est pas indexé par le RAG (reporté), il se retrouve par `search_records`
+  et par la recherche globale Ctrl+K.
+- Tests : `tests/agentProjectWork.test.ts` (ressource, `texte`, titre obligatoire), `tests/knowledgeBase.test.ts`
+  (liste, `texte`, refus sur page enrichie), `tests/recordLinks.test.ts`, `tests/agentAutonomy.test.ts`
+  (périmètres par défaut), `src/lib/__tests__/kbFilters.test.ts` (conversion).
+
 ### Import de notes dans un CR de chantier (agents et MCP)
 
 `import_site_report_notes` (`packages/archioffice-agents/src/server/siteReportNotesTool.ts`) range
