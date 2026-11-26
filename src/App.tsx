@@ -612,6 +612,9 @@ function ProtectedLayout() {
   // per-column-scroll treatment only makes sense once there's room for the
   // columns to sit side by side (lg+); below that the page falls back to
   // normal, page-level scrolling like every other route.
+  // La GED (/documents) affiche une navigation, une liste et un volet de détail côte à côte : elle prend toute la
+  // largeur disponible au lieu des 1400 px du cadre commun (le fond et les marges restent ceux des autres pages).
+  const isWideRoute = location.pathname === '/documents';
   const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname) || /^\/agents\/[^/]+\/chat$/.test(location.pathname);
 
   // Le cadre et <main> sont en `overflow: hidden` sur ces routes : personne ne doit les faire défiler. Mais un
@@ -652,7 +655,7 @@ function ProtectedLayout() {
         <div className="md:hidden"><ProjectTabsBar variant="strip" /></div>
 
         <main
-          className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 max-w-[1400px] w-full mx-auto'}
+          className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : cn('flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 w-full', isWideRoute ? 'max-w-none' : 'max-w-[1400px] mx-auto')}
           onScroll={isFullBleedRoute ? resetStrayScroll : undefined}
         >
           <Outlet />

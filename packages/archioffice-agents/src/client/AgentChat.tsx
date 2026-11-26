@@ -1,6 +1,6 @@
 import { ChatRequestStatus, ConsultedAgentLinks, type AgentConsultation } from './ChatRequestStatus.js';
 import { AttachedDocChips } from './AttachedDocChips.js';
-import { uploadChatDocument } from './chatUpload.js';
+import { uploadChatDocument, imagesFromClipboard } from './chatUpload.js';
 import { useConversationReset } from './useConversationReset.js';
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -869,6 +869,15 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     files.forEach(uploadAndAttach);
   };
 
+  // Ctrl+V d'une image (capture d'écran...) : elle part en pièce jointe. Un collage de texte,
+  // lui, n'est pas intercepté.
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const images = imagesFromClipboard(e.clipboardData);
+    if (images.length === 0) return;
+    e.preventDefault();
+    images.forEach(uploadAndAttach);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); sendMessage(); }
   };
@@ -1315,6 +1324,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                     if (activeAgentId) saveDraft(activeAgentId, value);
                   }}
                   onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
                   placeholder={t('agent_chat_placeholder')}
                   aria-label={t('agent_chat_message_label')}
                   className="flex-1 min-w-0 resize-none rounded-lg px-3 py-[9px] text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] border transition-colors"
