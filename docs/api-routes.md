@@ -290,11 +290,11 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/leave_requests` | [server/routes/leave.ts:45](../server/routes/leave.ts#L45) |
 | DELETE | `/api/leave_requests/:id` | [server/routes/leave.ts:96](../server/routes/leave.ts#L96) |
 | PATCH | `/api/leave_requests/:id/status` | [server/routes/leave.ts:72](../server/routes/leave.ts#L72) |
-| DELETE | `/api/lot-intervenants/:id` | [server/routes/lotIntervenants.ts:78](../server/routes/lotIntervenants.ts#L78) |
-| PUT | `/api/lot-intervenants/:id` | [server/routes/lotIntervenants.ts:61](../server/routes/lotIntervenants.ts#L61) |
+| DELETE | `/api/lot-intervenants/:id` | [server/routes/lotIntervenants.ts:127](../server/routes/lotIntervenants.ts#L127) |
+| PUT | `/api/lot-intervenants/:id` | [server/routes/lotIntervenants.ts:111](../server/routes/lotIntervenants.ts#L111) |
 | DELETE | `/api/lots/:id` | [server/routes/lots.ts:155](../server/routes/lots.ts#L155) |
 | PUT | `/api/lots/:id` | [server/routes/lots.ts:55](../server/routes/lots.ts#L55) |
-| POST | `/api/lots/:lotId/intervenants` | [server/routes/lotIntervenants.ts:35](../server/routes/lotIntervenants.ts#L35) |
+| POST | `/api/lots/:lotId/intervenants` | [server/routes/lotIntervenants.ts:43](../server/routes/lotIntervenants.ts#L43) |
 | GET | `/api/maf/v1/config` | [server/routes/maf.ts:47](../server/routes/maf.ts#L47) |
 | PUT | `/api/maf/v1/config` | [server/routes/maf.ts:59](../server/routes/maf.ts#L59) |
 | GET | `/api/maf/v1/entries` | [server/routes/maf.ts:72](../server/routes/maf.ts#L72) |
@@ -553,7 +553,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/projects/:projectId/dpgf/versions/:versionId/restore` | [server/routes/dpgf.ts:306](../server/routes/dpgf.ts#L306) |
 | GET | `/api/projects/:projectId/ftm` | [server/routes/travauxModificatifs.ts:97](../server/routes/travauxModificatifs.ts#L97) |
 | POST | `/api/projects/:projectId/ftm` | [server/routes/travauxModificatifs.ts:110](../server/routes/travauxModificatifs.ts#L110) |
-| GET | `/api/projects/:projectId/lot-intervenants` | [server/routes/lotIntervenants.ts:22](../server/routes/lotIntervenants.ts#L22) |
+| GET | `/api/projects/:projectId/lot-intervenants` | [server/routes/lotIntervenants.ts:27](../server/routes/lotIntervenants.ts#L27) |
 | GET | `/api/projects/:projectId/lots` | [server/routes/lots.ts:14](../server/routes/lots.ts#L14) |
 | POST | `/api/projects/:projectId/lots` | [server/routes/lots.ts:28](../server/routes/lots.ts#L28) |
 | PUT | `/api/projects/:projectId/lots/order` | [server/routes/lots.ts:125](../server/routes/lots.ts#L125) |
@@ -657,7 +657,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | PUT | `/api/references/dossier/sheet/:source/:id` | [server/routes/referencesDossier.ts:73](../server/routes/referencesDossier.ts#L73) |
 | GET | `/api/referentiels` | [server/routes/referentiels.ts:64](../server/routes/referentiels.ts#L64) |
 | PUT | `/api/reports/:reportId` | [server/routes/siteReports.ts:154](../server/routes/siteReports.ts#L154) |
-| POST | `/api/reports/:reportId/diffuse` | [server/routes/siteReportDiffusion.ts:66](../server/routes/siteReportDiffusion.ts#L66) |
+| POST | `/api/reports/:reportId/diffuse` | [server/routes/siteReportDiffusion.ts:67](../server/routes/siteReportDiffusion.ts#L67) |
 | GET | `/api/reports/:reportId/notes` | [server/routes/siteReports.ts:117](../server/routes/siteReports.ts#L117) |
 | POST | `/api/reports/:reportId/notes` | [server/routes/siteReports.ts:130](../server/routes/siteReports.ts#L130) |
 | GET | `/api/reports/:reportId/observations` | [server/routes/observations.ts:335](../server/routes/observations.ts#L335) |

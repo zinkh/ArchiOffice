@@ -19,6 +19,7 @@ import { sendEmailLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { handleDocumentUpload } from '../documentUpload';
 import { resolveEmailSender } from '../emailSender';
+import { hydraterIntervenants } from '../lotIntervenantsRead';
 import { sendViaAccount } from '../mailSend';
 import { combinedSendError, sendMailWithSenderFallback } from '../smtpSend';
 import {
@@ -117,8 +118,9 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
       // Intervenants saisis par entreprise dans l'onglet DET > Entreprises. Une instance non migrée n'a pas la table :
       // la diffusion reste celle des fiches contacts, sans erreur.
       const intervenantsRes = await tenantScopedFrom(supabaseAdmin, tenantId, 'lot_intervenants')
-        .select('id, lot_id, entreprise, nom, role, email').eq('project_id', projectId);
-      const intervenants: any[] = intervenantsRes.error ? [] : (intervenantsRes.data || []);
+        .select('id, lot_id, entreprise, nom, role, email, contact_id').eq('project_id', projectId);
+      // Nom et adresse relus sur la fiche contact de chaque intervenant (une fiche corrigée corrige l'envoi).
+      const intervenants: any[] = intervenantsRes.error ? [] : await hydraterIntervenants(supabaseAdmin, tenantId, intervenantsRes.data || []);
 
       const allowed = buildDiffusionRecipients({
         lots, stakeholders, contacts: (contactsRes.data || []) as any[], observations: (observationsRes.data || []) as any[],

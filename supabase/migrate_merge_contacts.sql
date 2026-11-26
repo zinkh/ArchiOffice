@@ -106,6 +106,7 @@ DECLARE
     ['doe_requests','contact_id'],
     ['invoices','billing_contact_id'],
     ['invoices','client_id'],
+    ['lot_intervenants','contact_id'],
     ['marches_entreprises','contact_id'],
     ['marches_entreprises','act_entreprise_id'],
     ['meeting_attendees','contact_id'],
@@ -173,6 +174,7 @@ BEGIN
 
   -- 1. Lignes qui entreraient en conflit d'unicité une fois rattachées.
   PERFORM contact_merge_dedupe('meeting_attendees', 'contact_id', NULL, ARRAY['meeting_id'], p_tenant, p_primary, v_dups);
+  PERFORM contact_merge_dedupe('lot_intervenants', 'contact_id', NULL, ARRAY['lot_id'], p_tenant, p_primary, v_dups);
   PERFORM contact_merge_dedupe('contact_qualifications', 'contact_id', NULL, ARRAY['organisme', 'reference'], p_tenant, p_primary, v_dups);
   PERFORM contact_merge_dedupe('email_links', 'local_id', 'local_type', ARRAY['connection_id', 'external_message_id'], p_tenant, p_primary, v_dups);
   PERFORM contact_merge_dedupe('email_folder_links', 'local_id', 'local_type', ARRAY['connection_id', 'folder_id'], p_tenant, p_primary, v_dups);
