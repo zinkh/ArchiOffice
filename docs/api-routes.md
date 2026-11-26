@@ -99,7 +99,7 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | POST | `/api/ai/suggest-articles` | [server/routes/aiSuggestions.ts:31](../server/routes/aiSuggestions.ts#L31) |
 | POST | `/api/archive/bulk` | [server/routes/projectArchive.ts:237](../server/routes/projectArchive.ts#L237) |
 | GET | `/api/archive/candidates` | [server/routes/projectArchive.ts:201](../server/routes/projectArchive.ts#L201) |
-| POST | `/api/auth/google/token` | [server/routes/contactSync.ts:64](../server/routes/contactSync.ts#L64) |
+| POST | `/api/auth/google/token` | [server/routes/contactSync.ts:65](../server/routes/contactSync.ts#L65) |
 | GET | `/api/automation/api-keys` | [server/routes/automationApiKeys.ts:17](../server/routes/automationApiKeys.ts#L17) |
 | POST | `/api/automation/api-keys` | [server/routes/automationApiKeys.ts:29](../server/routes/automationApiKeys.ts#L29) |
 | DELETE | `/api/automation/api-keys/:id` | [server/routes/automationApiKeys.ts:44](../server/routes/automationApiKeys.ts#L44) |
@@ -762,8 +762,8 @@ Cet index analyse l’AST TypeScript de server.ts, server/ et du serveur du paqu
 | GET | `/api/support/tickets/:id` | [server/routes/support.ts:75](../server/routes/support.ts#L75) |
 | POST | `/api/support/tickets/:id/messages` | [server/routes/support.ts:89](../server/routes/support.ts#L89) |
 | PATCH | `/api/support/tickets/:id/status` | [server/routes/support.ts:125](../server/routes/support.ts#L125) |
-| POST | `/api/sync/carddav` | [server/routes/contactSync.ts:286](../server/routes/contactSync.ts#L286) |
-| POST | `/api/sync/google-contacts` | [server/routes/contactSync.ts:101](../server/routes/contactSync.ts#L101) |
+| POST | `/api/sync/carddav` | [server/routes/contactSync.ts:287](../server/routes/contactSync.ts#L287) |
+| POST | `/api/sync/google-contacts` | [server/routes/contactSync.ts:102](../server/routes/contactSync.ts#L102) |
 | GET | `/api/tasks` | [server/routes/tasks.ts:48](../server/routes/tasks.ts#L48) |
 | POST | `/api/tasks` | [server/routes/tasks.ts:65](../server/routes/tasks.ts#L65) |
 | DELETE | `/api/tasks/:id` | [server/routes/tasks.ts:134](../server/routes/tasks.ts#L134) |
