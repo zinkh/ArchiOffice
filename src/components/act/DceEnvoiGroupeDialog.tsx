@@ -197,6 +197,10 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
 
   const basculer = (id: string) => setCoches(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const lecture = phase !== 'composition';
+  // « Cocher toutes » : toutes les entreprises qui peuvent recevoir le message, y compris celles qui l'ont déjà reçu.
+  const cochables = plan.filter(l => !l.motif);
+  const toutesCochees = cochables.length > 0 && cochables.every(l => coches.has(l.entreprise.id));
+  const toutBasculer = () => setCoches(toutesCochees ? new Set() : new Set(cochables.map(l => l.entreprise.id)));
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
@@ -215,6 +219,14 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
             <p className="text-xs text-[var(--tblr-muted)] mb-2">
               {TEXTES[mode].description}
             </p>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <label className="inline-flex items-center gap-2 text-sm font-semibold">
+                <input type="checkbox" className="w-4 h-4 accent-blue-600" disabled={cochables.length === 0 || lecture}
+                  checked={toutesCochees} onChange={toutBasculer} aria-label="Cocher toutes les entreprises" />
+                Cocher toutes les entreprises
+              </label>
+              <span className="text-xs text-[var(--tblr-muted)]">{aEnvoyer.length} cochée{aEnvoyer.length > 1 ? 's' : ''} sur {cochables.length}</span>
+            </div>
             <ul className="divide-y divide-[var(--tblr-border)] border border-[var(--tblr-border)] rounded-lg">
               {plan.map(l => {
                 const id = l.entreprise.id; const st = statuts[id];

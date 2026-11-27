@@ -187,9 +187,9 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
    */
   /** Dépose un PDF généré et le rattache à sa pièce du DCE (nouvelle version s'il y est déjà). */
   const verserPdf = async (spec: SpecPieceDce, piece: string, blob: Blob) => {
-    // Nom systématique Code_Pièce-Indice ; l'indice est celui que le serveur donnera à ce versement.
+    // Nom systématique « Code Nom Pièce Ind X » ; l'indice est celui que le serveur donnera à ce versement.
     const existant = documentDeLaPiece(consultation.dce_documents, documentsAffaire, spec);
-    const nomFichier = nomFichierDce({ code: nomFichierBase, piece, indice: existant ? indiceSuivant(existant.indice) : 'A' });
+    const nomFichier = nomFichierDce({ code: nomFichierBase, nom: operation.nom, piece, indice: existant ? indiceSuivant(existant.indice) : 'A' });
     const documentId = await deposerFichierDce({ projectId, nomFichier, blob, existantId: existant?.id });
     onVerserAuDce([{ spec, documentId }]);
     setInfoDce(existant

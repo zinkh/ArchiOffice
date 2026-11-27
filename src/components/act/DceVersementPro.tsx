@@ -63,7 +63,7 @@ export default function DceVersementPro({ projectId, projectName, codeAffaire, l
         // Nom systématique Code_Pièce_NumLot-NomLot-Indice : l'indice est celui que le serveur donnera à ce versement.
         const existant = documentDeLaPiece(dce, documentsAffaire, spec);
         const nomFichier = nomFichierDce({
-          code: codeAffaire, piece: spec.typeDoc, lot: { numero: String(lot.numero), titre: lot.titre },
+          code: codeAffaire, nom: projectName, piece: spec.typeDoc, lot: { numero: String(lot.numero), titre: lot.titre },
           indice: existant ? indiceSuivant(existant.indice) : 'A', ext: excel ? 'xlsx' : 'pdf',
         });
         const documentId = await deposerFichierDce({

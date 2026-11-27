@@ -60,8 +60,8 @@ describe('envoi de documents choisis du DCE', () => {
 
 describe('DPGF au format Excel versé au DCE', () => {
   it('se nomme en .xlsx et forme une pièce distincte du DPGF en PDF du même lot', () => {
-    expect(nomFichierDce({ code: '2419', piece: 'DPGF', lot: { numero: '02', titre: 'Charpente bois' }, indice: 'A', ext: 'xlsx' }))
-      .toBe('2419_DPGF_02-Charpente-bois-A.xlsx');
+    expect(nomFichierDce({ code: '2604', nom: 'SELIA', piece: 'DPGF', lot: { numero: '02' }, indice: 'A', ext: 'xlsx' }))
+      .toBe('2604 SELIA DPGF Lot 02 Ind A.xlsx');
     let n = 0;
     const dce = rattacherPieces<EntreePieceDce>([], [
       { spec: { typeDoc: 'DPGF', nom: 'DPGF - Lot 01', lotsIds: ['l1'] }, documentId: 'pdf' },

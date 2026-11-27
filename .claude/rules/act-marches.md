@@ -98,7 +98,11 @@ migration).
   une feuille générale reprend toutes les entreprises consultées. Aucune migration. Tests : `actVisitesDejaVisite.test.ts`.
 - **Versement au DCE depuis l'onglet PRO** (`act/DceVersementPro.tsx`) : CCTP et DPGF, un fichier par lot, **toujours
   sans prix**. Le DPGF existe en PDF (« DPGF (sans prix) ») et en **Excel** (« DPGF Excel (sans prix) », `produireDossier`
-  format `autre`, `avecPrix: false`, nom `Code_DPGF_NumLot-NomLot-Indice.xlsx`, `deposerFichierDce({ mimeType })`). Le
+  format `autre`, `avecPrix: false`, `deposerFichierDce({ mimeType })`). **Nom des fichiers versés** (`nomFichierDce`,
+  RC, CCAP, CCTP, DPGF) : `Code Nom Pièce [Lot NN] Ind X.ext`, par exemple « 2604 SELIA DPGF Ind A.xlsx » ou
+  « 2604 SELIA CCTP Lot 05 Ind B.pdf » (le lot, sans son titre, seulement pour une pièce propre à un lot ; le nom n'est pas
+  répété s'il est le code ; accents et espaces gardés, caractères interdits retirés). La fenêtre d'envoi groupé a une case
+  « Cocher toutes les entreprises » (celles qui peuvent recevoir le message, déjà servies comprises). Le
   classeur est une pièce DISTINCTE du PDF du même lot (intitulé « DPGF (Excel) - Lot xx ») : `documentDeLaPiece` retrouve la
   pièce par type ET intitulé, donc l'Excel n'est jamais pris pour une nouvelle version du PDF (et inversement).
 - **Envoyer des documents choisis** (`act/DceEnvoiDocumentsPanel.tsx`, sous la matrice des pièces du DCE) : un document seul

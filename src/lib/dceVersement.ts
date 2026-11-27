@@ -62,25 +62,25 @@ export function indiceSuivant(indiceActuel?: string | null): string {
   return c >= 'A' && c < 'Z' ? String.fromCharCode(c.charCodeAt(0) + 1) : 'A';
 }
 
-/** Un morceau de nom de fichier : sans accents ni espaces, les mots séparés par « - ». */
+/** Un morceau de nom de fichier : lisible (accents et espaces gardés), sans caractère interdit par les systèmes de fichiers. */
 const morceau = (s: string): string =>
-  s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  s.normalize('NFC').replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 /**
- * Nom systématique d'un fichier du DCE : `Code_Pièce_NumLot-NomLot-Indice.pdf`
- * (« 2419_CCTP_05-Menuiseries-interieures-B.pdf »). Une pièce commune à tous les lots
- * (RC, CCAP, acte d'engagement) n'a pas de lot : `Code_Pièce-Indice.pdf`.
- * Le type de pièce est dans le nom : le CCTP et le DPGF d'un même lot ne se confondent pas au téléchargement.
+ * Nom systématique d'un fichier du DCE : `Code Nom Pièce Ind Indice.ext`
+ * (« 2604 SELIA DPGF Ind A.xlsx »). Une pièce propre à un lot cite son lot après la pièce, pour que les
+ * fichiers des différents lots ne se confondent pas (« 2604 SELIA CCTP Lot 05 Ind B.pdf »). Sans nom d'affaire,
+ * ou si le nom est le code lui-même, il n'est pas répété.
  */
 export function nomFichierDce(opts: {
-  code: string; piece: string; lot?: { numero: string; titre: string }; indice: string; ext?: string;
+  code: string; /** Nom de l'affaire (« SELIA »). */ nom?: string; piece: string;
+  lot?: { numero: string; titre?: string }; indice: string; ext?: string;
 }): string {
   const code = morceau(opts.code) || 'Affaire';
-  const piece = morceau(opts.piece);
-  const indice = morceau(opts.indice);
-  const lot = opts.lot ? morceau(`${opts.lot.numero} ${opts.lot.titre}`) : '';
-  const corps = lot ? `${code}_${piece}_${lot}-${indice}` : `${code}_${piece}-${indice}`;
-  return `${corps}.${opts.ext ?? 'pdf'}`;
+  const nom = morceau(opts.nom ?? '');
+  const lot = opts.lot ? `Lot ${morceau(opts.lot.numero)}` : '';
+  const parties = [code, nom && nom.toLowerCase() !== code.toLowerCase() ? nom : '', morceau(opts.piece), lot, `Ind ${morceau(opts.indice) || 'A'}`];
+  return `${parties.filter(Boolean).join(' ')}.${opts.ext ?? 'pdf'}`;
 }
 
 /** Rattache les documents versés à leur pièce du DCE, créée si elle n'existe pas. Rend un nouveau tableau. */
