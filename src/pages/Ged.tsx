@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconStar, IconStarFilled, IconSearch, IconUpload, IconFolder, IconFolderOpen, IconClock, IconInbox,
   IconLayoutList, IconLayoutGrid, IconTable, IconExternalLink, IconChevronRight, IconChevronDown, IconX, IconFile,
@@ -13,6 +14,11 @@ import {
   canReadMetadata, emetteurCandidates, readDocumentMetadata, MAX_METADATA_BYTES, type DocumentMetadata,
 } from '../lib/documentMetadata';
 import { useUser } from '../UserContext';
+import { desktopBridge } from '../lib/desktopBridge';
+import { canUseLocalFiles, openLocalFile, revealLocalFile } from '../lib/localFiles';
+import { WindowsDrivePreview } from '../components/WindowsDrivePreview';
+import { DriveDocumentActions } from '../components/DriveDocumentActions';
+import { useDriveDocumentStatuses } from '../hooks/useDriveDocumentStatuses';
 import { DiffusionDialog } from '../components/documents/DiffusionDialog';
 import { ContactRecipientPicker } from '../components/ContactRecipientPicker';
 import type { Document, DocumentVersion, Project } from '../types';
@@ -188,7 +194,8 @@ const emetteurKeyOf = (label: string): string => emetteurKey({ id: '', name: '',
  * mêmes arborescence, propriétés, versions, diffusion et dépôt de fichiers depuis le bureau, limités à l'affaire.
  */
 export default function Ged({ projectId }: { projectId?: string } = {}) {
-  const { currentUser } = useUser();
+  const { t } = useTranslation();
+  const { currentUser, activeTenantId } = useUser();
   const [docs, setDocs] = useState<Document[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -245,6 +252,31 @@ export default function Ged({ projectId }: { projectId?: string } = {}) {
     filterDocs(docs, nav, filters, { favs, recent, projectName, folders }), sort, projectName),
   [docs, nav, filters, favs, recent, projectName, sort, folders]);
   const selected = docs.find(d => d.id === selectedId) || null;
+
+  // Lecteur ArchiOffice Drive (client de bureau seulement) : proposé si le composant, le forfait et le service le permettent.
+  // `driveReason` dit pourquoi il ne l'est pas, sinon la zone disparaîtrait sans un mot.
+  const [driveEnabled, setDriveEnabled] = useState(false);
+  const [driveReason, setDriveReason] = useState<'component' | 'plan' | 'unreachable' | null>(null);
+  useEffect(() => {
+    setDriveEnabled(false);
+    setDriveReason(null);
+    const bridge = desktopBridge();
+    if (!bridge) return;
+    if (!bridge.openDriveDocument) { setDriveReason('component'); return; }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let current = true;
+    void apiFetch<{ enabled: boolean; local?: boolean }>('/api/desktop/v1/capabilities', { signal: controller.signal })
+      .then(cap => {
+        if (!current) return;
+        const ok = cap.enabled && cap.local === true;
+        setDriveEnabled(ok);
+        setDriveReason(ok ? null : 'plan');
+      })
+      .catch(() => { if (current) setDriveReason('unreachable'); }).finally(() => clearTimeout(timeout));
+    return () => { current = false; clearTimeout(timeout); controller.abort(); };
+  }, [currentUser?.id, activeTenantId]);
+  const driveTransfers = useDriveDocumentStatuses(visible.map(d => `doc:${d.id}`), driveEnabled ? `${currentUser?.id}:${activeTenantId}` : null);
 
   // Les contacts ne sont chargés qu'à la première ouverture d'un détail : ils ne servent qu'à choisir un émetteur.
   useEffect(() => {
@@ -575,6 +607,14 @@ export default function Ged({ projectId }: { projectId?: string } = {}) {
         {!projectId && <Link to="/settings" className="text-xs underline" style={muted}>Réglages du partage et du lecteur</Link>}
       </div>
 
+      {projectId && driveEnabled && <WindowsDrivePreview key={`${currentUser?.id}:${activeTenantId}`} projectId={projectId} />}
+      {projectId && !driveEnabled && driveReason && (
+        <div className="rounded-lg px-3 py-2 text-xs max-w-prose" role="status" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <strong style={{ color: 'var(--tblr-text)' }}>{t('windows_drive_unavailable_title')}</strong>
+          {' : '}{t(`windows_drive_unavailable_${driveReason}`)}
+        </div>
+      )}
+
       {folderForm && (
         <form aria-label="Nouveau dossier" className="flex flex-wrap items-end gap-2 rounded-xl p-3" style={surface}
           onSubmit={e => { e.preventDefault(); void createFolder(); }}>
@@ -823,9 +863,23 @@ export default function Ged({ projectId }: { projectId?: string } = {}) {
                 </button>
                 <button type="button" aria-label="Fermer le détail" onClick={() => setSelectedId(null)} className="p-1.5 rounded min-h-9 min-w-9 grid place-items-center"><IconX size={16} style={muted} /></button>
               </div>
-              <button type="button" className="inline-flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5" style={controlStyle} onClick={() => setDiffusionDoc(selected)}>
-                <IconSend size={14} aria-hidden="true" />Diffuser
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" className="inline-flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5" style={controlStyle} onClick={() => setDiffusionDoc(selected)}>
+                  <IconSend size={14} aria-hidden="true" />Diffuser
+                </button>
+                {canUseLocalFiles() && selected.file_url && (
+                  <>
+                    <button type="button" className="inline-flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5" style={controlStyle} onClick={() => revealLocalFile(selected.file_url)}>
+                      <IconFolderOpen size={14} aria-hidden="true" />{t('local_file_reveal')}
+                    </button>
+                    <button type="button" className="inline-flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5" style={controlStyle} onClick={() => openLocalFile(selected.file_url)}>
+                      <IconExternalLink size={14} aria-hidden="true" />{t('local_file_open')}
+                    </button>
+                  </>
+                )}
+                {driveEnabled && <DriveDocumentActions key={`${currentUser?.id}:${activeTenantId}:${selected.id}`} documentId={selected.id}
+                  transfer={driveTransfers.statuses[`doc:${selected.id}`]} unavailable={driveTransfers.unavailable} onActivity={driveTransfers.refresh} />}
+              </div>
               <div role="tablist" aria-label="Détail" className="flex gap-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
                 {([['props', 'Propriétés'], ['versions', 'Versions'], ['activity', 'Activité']] as const).map(([k, label]) => (
                   <button key={k} role="tab" type="button" aria-selected={tab === k} onClick={() => setTab(k)} className="py-2 text-sm"

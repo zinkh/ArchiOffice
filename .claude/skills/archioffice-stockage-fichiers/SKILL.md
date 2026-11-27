@@ -190,13 +190,13 @@ plusieurs postes) : `<bucket>/<cabinet>/<code - affaire>/<phase>/<fichier>`.
   fichiers ne sont supprimés que par un geste séparé (simulation puis confirmation), à faire quand tous les
   postes sont à jour : un poste resté sur l'ancienne version a encore besoin des anciens chemins. Les routes
   répondent 404 hors client de bureau.
-- **Explorateur et ouverture** : boutons « Afficher dans l'Explorateur » et « Ouvrir » (`Documents.tsx`,
+- **Explorateur et ouverture** : boutons « Afficher dans l'Explorateur » et « Ouvrir » (panneau de détail de `Ged.tsx`,
   `src/lib/localFiles.ts`). Le renderer ne fournit jamais de chemin de disque : le serveur
   (`GET /api/storage/local-file`) vérifie l'appartenance au cabinet et rend une clé `{bucket, path}` ; le
   processus principal (`electron/fileAccess.cjs`, IPC `desktop:reveal-file` / `desktop:open-file`) reconstruit
   le chemin (realpath, rejet des liens symboliques et de `..`) et n'ouvre qu'une liste blanche d'extensions.
 - **Limites connues** : seuls `documents` et `plans` sont rangés ; `meeting-photos` et autres buckets, ainsi que
-  `receptions.document_url`, ne sont pas migrés ; boutons seulement dans `Documents.tsx`. Comportement sous
+  `receptions.document_url`, ne sont pas migrés ; boutons seulement dans `Ged.tsx`. Comportement sous
   Windows/NAS réel et acceptation par Supabase Storage des noms avec espaces non vérifiés ici.
 - Tests : `localTreePath`, `readableTreeStorage`, `storageTreeMigration`, `desktopStorageRoutes`,
   `electronFileAccess`, `src/lib/__tests__/localFiles.test.ts`.

@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { IconX, IconAlertTriangle, IconLoader2, IconTrash, IconChecklist, IconExternalLink, IconPhoneCall } from '@tabler/icons-react';
 import { launchOriginRef } from '../../lib/launchOrigin';
 import { ContactAutocomplete } from '../ContactAutocomplete';
+import { ContactModal } from '../ContactModal';
 import { PHONE_CALL_DIRECTIONS, PHONE_CALL_STATUSES, PHONE_CALL_PRIORITIES } from '../../schemas/phoneCall.schema';
 import { fromLocalInputValue, telHref, toLocalInputValue } from '../../lib/phoneCalls';
 import type { Contact, PhoneCall, Project, TeamMember } from '../../types';
@@ -63,9 +64,14 @@ export function PhoneCallFormModal({ initial, projects, team, contacts, onClose,
 
   // Choisir une fiche contact préremplit l'identité de l'interlocuteur, sans
   // jamais écraser ce que la personne vient de saisir.
+  // Contacts créés depuis ce formulaire : proposés tout de suite, sans attendre le rechargement de la liste.
+  const [created, setCreated] = useState<Contact[]>([]);
+  const [createWith, setCreateWith] = useState<string | null>(null);
+  const allContacts = [...created, ...contacts];
+
   function pickContact(contactIdValue: string) {
     setContactId(contactIdValue);
-    const contact = contacts.find(c => c.id === contactIdValue);
+    const contact = allContacts.find(c => c.id === contactIdValue);
     if (!contact) return;
     if (!callerName.trim()) setCallerName([contact.first_name, contact.last_name].filter(Boolean).join(' '));
     if (!callerCompany.trim() && contact.company_name) setCallerCompany(contact.company_name);
@@ -166,7 +172,13 @@ export function PhoneCallFormModal({ initial, projects, team, contacts, onClose,
 
           <div>
             <span className={labelCls} style={labelStyle}>{t('phonecalls_field_contact')}</span>
-            <ContactAutocomplete contacts={contacts} value={contactId} onChange={pickContact} placeholder={t('phonecalls_contact_none') as string} />
+            <ContactAutocomplete contacts={allContacts} value={contactId} onChange={pickContact} onAddNew={query => setCreateWith(query)} addNewLabel="Créer un nouveau contact" placeholder={t('phonecalls_contact_none') as string} />
+            <ContactModal
+              isOpen={createWith !== null}
+              onClose={() => setCreateWith(null)}
+              initialData={createWith ? { last_name: createWith } : undefined}
+              onSuccess={c => { setCreated(prev => [c, ...prev]); setCreateWith(null); pickContact(c.id); }}
+            />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 [&>div]:min-w-0">
