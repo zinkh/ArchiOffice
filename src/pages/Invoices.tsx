@@ -21,6 +21,7 @@ import { contactEmail, missingBuyerMentions } from '../lib/invoiceLegalMentions'
 import { isClientContact } from '../lib/contactCategories';
 import { canWriteInvoices } from '../lib/invoicePermissions';
 import { useUser } from '../UserContext';
+import { ContactRecipientPicker } from '../components/ContactRecipientPicker';
 
 // Une facture sans échéance (avant que le délai de paiement par défaut du
 // cabinet ne s'applique systématiquement côté serveur, voir server/
@@ -1604,6 +1605,7 @@ export default function Invoices() {
               <form onSubmit={handleSendInvoice} className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_send_to_label')}</label>
+                  <ContactRecipientPicker className="mb-2" initialCategory="Client" onPick={c => { if (c.email) setSendForm(f => ({ ...f, to: c.email as string })); }} />
                   <input
                     type="email" required
                     className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"

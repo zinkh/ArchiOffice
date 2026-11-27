@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   IconStar, IconStarFilled, IconSearch, IconUpload, IconFolder, IconFolderOpen, IconClock, IconInbox,
   IconLayoutList, IconLayoutGrid, IconTable, IconExternalLink, IconChevronRight, IconChevronDown, IconX, IconFile,
-  IconFolderPlus, IconPlus, IconPencil, IconTrash, IconUser, IconFileSearch,
+  IconFolderPlus, IconPlus, IconPencil, IconTrash, IconUser, IconFileSearch, IconSend,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { useDragToZone } from '../hooks/useDragToZone';
@@ -13,6 +13,8 @@ import {
   canReadMetadata, emetteurCandidates, readDocumentMetadata, MAX_METADATA_BYTES, type DocumentMetadata,
 } from '../lib/documentMetadata';
 import { useUser } from '../UserContext';
+import { DiffusionDialog } from '../components/documents/DiffusionDialog';
+import { ContactRecipientPicker } from '../components/ContactRecipientPicker';
 import type { Document, DocumentVersion, Project } from '../types';
 import {
   GED_ALL, NO_FILTERS, NO_PROJECT, countBy, emetteurKey, emetteurLabels, extensionOf, filterDocs, highlightParts, phaseOf, recentIds, sortDocs,
@@ -145,12 +147,10 @@ function EmetteurEditor({ doc, contacts, onSave }: {
           {busy ? '…' : 'Enregistrer'}
         </button>
       </form>
-      <select aria-label="Choisir l'émetteur parmi les contacts" value="" disabled={busy || contacts.length === 0}
-        onChange={e => { const c = contacts.find(x => x.id === e.target.value); if (c) { setValue(c.label); void save(c.label, c); } }}
-        className="w-full rounded-lg px-2.5 py-2 text-sm min-h-9" style={field}>
-        <option value="">{contacts.length ? 'Choisir dans les contacts…' : 'Aucun contact disponible'}</option>
-        {contacts.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-      </select>
+      <ContactRecipientPicker placeholder="Choisir ou créer dans les contacts…" onPick={c => {
+        const label = String(c.company_name || `${c.first_name || ''} ${c.last_name || ''}`).trim();
+        if (label) { setValue(label); void save(label, { id: String(c.id), label }); }
+      }} />
       {doc.contact_id && doc.emetteur && <p className="text-xs" style={muted}><IconUser size={12} className="inline mr-1" aria-hidden="true" />Rattaché à la fiche contact.</p>}
 
       {canRead && (
@@ -183,13 +183,17 @@ function EmetteurEditor({ doc, contacts, onSave }: {
 
 const emetteurKeyOf = (label: string): string => emetteurKey({ id: '', name: '', emetteur: label });
 
-export default function Ged() {
+/**
+ * GED générale (`/documents`) ou, avec `projectId`, GED d'une seule affaire (onglet Documents de la fiche) :
+ * mêmes arborescence, propriétés, versions, diffusion et dépôt de fichiers depuis le bureau, limités à l'affaire.
+ */
+export default function Ged({ projectId }: { projectId?: string } = {}) {
   const { currentUser } = useUser();
   const [docs, setDocs] = useState<Document[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [nav, setNav] = useState<GedNav>(GED_ALL);
+  const [nav, setNav] = useState<GedNav>(projectId ? { kind: 'project', project: projectId } : GED_ALL);
   const [filters, setFilters] = useState<GedFilters>(NO_FILTERS);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [view, setView] = useState<View>('list');
@@ -197,8 +201,9 @@ export default function Ged() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<'props' | 'versions' | 'activity'>('props');
   const [favs, setFavs] = useState<Set<string>>(readFavs);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(projectId ? [projectId] : []));
   const [versions, setVersions] = useState<DocumentVersion[] | null>(null);
+  const [diffusionDoc, setDiffusionDoc] = useState<Document | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [folders, setFolders] = useState<DocFolder[]>([]);
@@ -209,9 +214,11 @@ export default function Ged() {
   const [contacts, setContacts] = useState<ContactChoice[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Dans une affaire, seules les données de cette affaire sont gardées : navigation, comptes et recherche s'y limitent.
+  const inScope = <T extends { project_id?: string | null }>(rows: T[]): T[] => (projectId ? rows.filter(r => r.project_id === projectId) : rows);
   const refresh = async () => {
     const data = await apiFetch<Document[]>('/api/documents');
-    setDocs(Array.isArray(data) ? data : []);
+    setDocs(inScope(Array.isArray(data) ? data : []));
   };
   useEffect(() => {
     let current = true;
@@ -221,7 +228,7 @@ export default function Ged() {
       apiFetch<DocFolder[]>('/api/document-folders').catch(() => [] as DocFolder[]),
     ]).then(([d, p, f]) => {
       if (!current) return;
-      setDocs(Array.isArray(d) ? d : []); setProjects(Array.isArray(p) ? p : []); setFolders(Array.isArray(f) ? f : []);
+      setDocs(inScope(Array.isArray(d) ? d : [])); setProjects((Array.isArray(p) ? p : []).filter(x => !projectId || x.id === projectId)); setFolders(inScope(Array.isArray(f) ? f : []));
     })
       .catch(() => { if (current) setError('Les documents sont indisponibles pour le moment.'); })
       .finally(() => { if (current) setLoading(false); });
@@ -392,7 +399,7 @@ export default function Ged() {
     const list = Array.from(files || []);
     if (!list.length) return;
     const inProject = nav.kind === 'project' || nav.kind === 'folder';
-    const projectId = to ? to.projectId : inProject && nav.project !== NO_PROJECT ? nav.project || '' : '';
+    const targetProject = to ? to.projectId : inProject && nav.project !== NO_PROJECT ? nav.project || '' : (projectId || '');
     const phase = to ? to.phase : inProject && nav.value ? nav.value : 'Général';
     const folderId = to ? to.folderId : nav.kind === 'folder' ? nav.folder || '' : '';
     setUploading(true);
@@ -405,7 +412,7 @@ export default function Ged() {
         form.append('phase', phase); form.append('description', ''); form.append('uploaded_by', currentUser?.name || 'Unknown');
         form.append('indice', 'A'); form.append('doc_type', '');
         form.append('emetteur', await emetteurOfFile(file).catch(() => ''));
-        if (projectId) form.append('project_id', projectId);
+        if (targetProject) form.append('project_id', targetProject);
         if (folderId) form.append('folder_id', folderId);
         try {
           const res = await fetch('/api/documents', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
@@ -425,7 +432,7 @@ export default function Ged() {
   const currentFolder = nav.kind === 'folder' ? folders.find(f => f.id === nav.folder) : undefined;
   const refreshFolders = async () => {
     const data = await apiFetch<DocFolder[]>('/api/document-folders').catch(() => null);
-    if (Array.isArray(data)) setFolders(data);
+    if (Array.isArray(data)) setFolders(inScope(data));
   };
   const createFolder = async () => {
     if (!folderForm || folderBusy) return;
@@ -565,7 +572,7 @@ export default function Ged() {
           })}>
           <IconFolderPlus size={16} aria-hidden="true" />Nouveau dossier
         </button>
-        <Link to="/settings" className="text-xs underline" style={muted}>Réglages du partage et du lecteur</Link>
+        {!projectId && <Link to="/settings" className="text-xs underline" style={muted}>Réglages du partage et du lecteur</Link>}
       </div>
 
       {folderForm && (
@@ -609,9 +616,11 @@ export default function Ged() {
           <NavButton active={isNav('all')} onClick={() => go(GED_ALL)} icon={<IconFolderOpen size={16} aria-hidden="true" />} count={docs.length}>Tous les documents</NavButton>
           <NavButton active={isNav('recent')} onClick={() => go({ kind: 'recent' })} icon={<IconClock size={16} aria-hidden="true" />}>Récents</NavButton>
           <NavButton active={isNav('fav')} onClick={() => go({ kind: 'fav' })} icon={<IconStar size={16} aria-hidden="true" />} count={favs.size}>Favoris</NavButton>
+          {!projectId && (
           <div {...zoneProps('none')} {...fileDrop('none')} style={dropMark('none')}>
             <NavButton active={isNav('toclass')} onClick={() => go({ kind: 'toclass' })} icon={<IconInbox size={16} aria-hidden="true" />} count={byProject.get(NO_PROJECT) || 0}>À classer</NavButton>
           </div>
+          )}
 
           <SectionTitle>Par projet</SectionTitle>
           {[...(dragging ? [...projects].sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true })) : navProjects).map(p => ({ id: p.id, name: p.name })), ...(byProject.has(NO_PROJECT) || dragging ? [{ id: NO_PROJECT, name: 'Sans projet' }] : [])].map(p => {
@@ -814,6 +823,9 @@ export default function Ged() {
                 </button>
                 <button type="button" aria-label="Fermer le détail" onClick={() => setSelectedId(null)} className="p-1.5 rounded min-h-9 min-w-9 grid place-items-center"><IconX size={16} style={muted} /></button>
               </div>
+              <button type="button" className="inline-flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5" style={controlStyle} onClick={() => setDiffusionDoc(selected)}>
+                <IconSend size={14} aria-hidden="true" />Diffuser
+              </button>
               <div role="tablist" aria-label="Détail" className="flex gap-4" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
                 {([['props', 'Propriétés'], ['versions', 'Versions'], ['activity', 'Activité']] as const).map(([k, label]) => (
                   <button key={k} role="tab" type="button" aria-selected={tab === k} onClick={() => setTab(k)} className="py-2 text-sm"
@@ -875,6 +887,8 @@ export default function Ged() {
             </>
           )}
         </aside>
+
+        {diffusionDoc && <DiffusionDialog doc={diffusionDoc} onClose={() => setDiffusionDoc(null)} />}
       </div>
     </div>
   );

@@ -15,7 +15,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { useTranslation } from 'react-i18next';
-import { Document, DocumentPhase, DocumentDiffusion, Project } from '../types';
+import { Document, DocumentPhase, Project } from '../types';
+import { DiffusionDialog } from '../components/documents/DiffusionDialog';
 import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
@@ -152,12 +153,6 @@ export default function Documents({ projectId, embedded = false }: { projectId?:
   const [editDocType, setEditDocType] = useState('');
   const [editFile, setEditFile] = useState<File | null>(null);
   const editFileInputRef = useRef<HTMLInputElement>(null);
-
-  // Diffusion form
-  const [diffusions, setDiffusions] = useState<DocumentDiffusion[]>([]);
-  const [newDiffName, setNewDiffName] = useState('');
-  const [newDiffEmail, setNewDiffEmail] = useState('');
-  const [isDiffSending, setIsDiffSending] = useState(false);
 
   // Navigation
   const [activeProject, setActiveProject] = useState<string | null>(projectId ?? null);
@@ -405,42 +400,7 @@ export default function Documents({ projectId, embedded = false }: { projectId?:
   };
 
   // Diffusion
-  const openDiffusion = async (doc: Document) => {
-    setDiffusionDoc(doc);
-    const data = await apiFetch<DocumentDiffusion[]>(`/api/documents/${doc.id}/diffusions`);
-    setDiffusions(data || []);
-  };
-
-  const handleSendDiffusion = async () => {
-    if (!diffusionDoc || !newDiffName.trim()) return;
-    setIsDiffSending(true);
-    try {
-      await apiFetch(`/api/documents/${diffusionDoc.id}/diffusions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contact_name: newDiffName, contact_email: newDiffEmail || null }),
-      });
-      const data = await apiFetch<DocumentDiffusion[]>(`/api/documents/${diffusionDoc.id}/diffusions`);
-      setDiffusions(data || []);
-      setNewDiffName('');
-      setNewDiffEmail('');
-    } catch (e) {
-      alert(t('documents_diffusion_error', { error: e }));
-    } finally {
-      setIsDiffSending(false);
-    }
-  };
-
-  const handleAcknowledge = async (diffId: string) => {
-    if (!diffusionDoc) return;
-    try {
-      await apiFetch(`/api/documents/${diffusionDoc.id}/diffusions/${diffId}/acknowledge`, { method: 'PATCH' });
-      const data = await apiFetch<DocumentDiffusion[]>(`/api/documents/${diffusionDoc.id}/diffusions`);
-      setDiffusions(data || []);
-    } catch (e) {
-      alert(t('documents_error', { error: e }));
-    }
-  };
+  const openDiffusion = (doc: Document) => setDiffusionDoc(doc);
 
   // History
   const openHistory = async (doc: Document) => {
@@ -994,76 +954,8 @@ export default function Documents({ projectId, embedded = false }: { projectId?:
           </div>
         )}
 
-        {/* Diffusion modal */}
-        {diffusionDoc && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-              className="p-6 rounded-3xl w-full max-w-lg shadow-2xl max-h-[90dvh] overflow-y-auto"
-              style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
-            >
-              <div className="flex justify-between items-center mb-4">
-                <div>
-                  <h2 className="text-lg font-bold">Diffusion maîtrisée</h2>
-                  <p className="text-xs mt-0.5 truncate max-w-[300px]" style={{ color: 'var(--tblr-muted)' }}>{diffusionDoc.name} — Ind.{diffusionDoc.indice || 'A'}</p>
-                </div>
-                <button onClick={() => setDiffusionDoc(null)} className="p-2 rounded-full" style={{ color: 'var(--tblr-muted)' }}><IconX size={20} /></button>
-              </div>
-
-              {/* Add recipient */}
-              <div className="p-3 rounded-xl mb-4" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-                <p className="text-xs font-bold mb-2" style={{ color: 'var(--tblr-muted)' }}>AJOUTER UN DESTINATAIRE</p>
-                <div className="flex gap-2 mb-2">
-                  <input className={inputCls + ' flex-1'} style={inputStyle} value={newDiffName} onChange={e => setNewDiffName(e.target.value)} placeholder="Nom / Entreprise *" />
-                  <input className={inputCls + ' flex-1'} style={inputStyle} value={newDiffEmail} onChange={e => setNewDiffEmail(e.target.value)} placeholder="Email (optionnel)" type="email" />
-                </div>
-                <button
-                  onClick={handleSendDiffusion}
-                  disabled={!newDiffName.trim() || isDiffSending}
-                  className="w-full py-2 rounded-lg font-bold text-sm transition disabled:opacity-40"
-                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-                >
-                  <IconSend size={14} className="inline mr-1.5" />
-                  {isDiffSending ? 'Envoi...' : 'Enregistrer la diffusion'}
-                </button>
-              </div>
-
-              {/* Diffusion list */}
-              <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>Historique des diffusions ({diffusions.length})</p>
-              {diffusions.length === 0 ? (
-                <p className="text-sm text-center py-6" style={{ color: 'var(--tblr-muted)' }}>Aucune diffusion enregistrée</p>
-              ) : (
-                <div className="space-y-2">
-                  {diffusions.map(d => (
-                    <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ background: d.acknowledged_at ? '#d3f9d8' : '#fff4e6', color: d.acknowledged_at ? '#2f9e44' : '#f76707' }}
-                      >
-                        {d.acknowledged_at ? <IconCheck size={16} /> : <IconEye size={16} />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{d.contact_name}</p>
-                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
-                          Envoyé le {new Date(d.sent_at).toLocaleDateString('fr-FR')}
-                          {d.acknowledged_at && ` · AR le ${new Date(d.acknowledged_at).toLocaleDateString('fr-FR')}`}
-                        </p>
-                      </div>
-                      {!d.acknowledged_at && (
-                        <button
-                          onClick={() => handleAcknowledge(d.id)}
-                          className="text-[0.6875rem] font-bold px-2 py-1 rounded-lg shrink-0"
-                          style={{ background: '#d3f9d8', color: '#2f9e44' }}
-                        >
-                          Marquer AR
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
+        {/* Diffusion maîtrisée : contacts de l'agence, création sur place */}
+        {diffusionDoc && <DiffusionDialog doc={diffusionDoc} onClose={() => setDiffusionDoc(null)} onChanged={() => { void refreshDocuments(); }} />}
 
         {/* Version history modal */}
         {historyDoc && (
