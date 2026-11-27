@@ -45,6 +45,7 @@ import { marquageEnvoi } from '../lib/dceEnvoiGroupe';
 import { entreprisesDeLaReponse, marquerDiffusee, questionsAReprendre, reponseDiffusable, type QuestionRecue } from '../lib/depotQuestions';
 import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
 import DceAdditifPanel from './act/DceAdditifPanel';
+import DceEnvoiDocumentsPanel from './act/DceEnvoiDocumentsPanel';
 import { marquerRevisionNotifiee, type DceRevision } from '../lib/dceRevisions';
 import {
   ecartsQuantites, quantitesAcceptees, quantitesEntreprise, totalLotQuantites, type BaseQuantites,
@@ -1212,6 +1213,15 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
                 }}
               />
             </div>
+            <DceEnvoiDocumentsPanel
+              pieces={consultation.dce_documents.map(d => ({
+                id: d.id, libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
+                tous_lots: d.tous_lots, lots_ids: d.lots_ids, document_ids: d.document_ids, partage: d.partage,
+              }))}
+              documents={documentsAffaire}
+              entreprises={consultation.entreprises}
+              contexte={{ projectId, projectName, lots, pieces: dcePieces, documents: documentsAffaire, depotActif: false }}
+            />
             <DceAdditifPanel
               projectId={projectId}
               pieces={consultation.dce_documents.map(d => ({
@@ -1303,6 +1313,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               onInviterDepot={e => setInviterPour(e.id)}
               entreprises={consultation.entreprises}
               creneauxVisite={consultation.creneaux_visite || []}
+              settings={settings}
               onChangeCreneaux={creneaux_visite => update({ ...consultation, creneaux_visite })}
               visiteSite={consultation.visite_site}
               onChangeVisiteSite={visite_site => update({ ...consultation, visite_site })}

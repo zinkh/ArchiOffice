@@ -3,18 +3,19 @@
 // message). Ce module décide, sans rien envoyer, quelles entreprises peuvent recevoir le
 // message et pourquoi les autres sont écartées, puis ce qu'il faut enregistrer après l'envoi.
 import { destinatairesEntreprise, type EntrepriseSuivi } from './actEntreprises';
-import { visiteNotifiee } from './actVisites';
+import { aDejaVisite, visiteNotifiee } from './actVisites';
 
 /** `dce` : envoi du dossier ; `visite` : convocation à la visite ; `reponse` : diffusion d'une réponse publique ; `additif` : modification du DCE ; `quantites` : demande de confirmation des quantités. */
-export type ModeEnvoi = 'dce' | 'visite' | 'reponse' | 'additif' | 'quantites';
+export type ModeEnvoi = 'dce' | 'visite' | 'reponse' | 'additif' | 'quantites' | 'documents';
 
-export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot' | 'sans_creneau';
+export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot' | 'sans_creneau' | 'deja_visite';
 
 export const LIBELLE_MOTIF: Record<MotifExclusion, string> = {
   ne_repond_pas: 'Marquée « ne répond pas »',
   sans_adresse: 'Aucune adresse e-mail',
   sans_lot: 'Aucun lot assigné',
   sans_creneau: 'Aucun créneau de visite affecté',
+  deja_visite: 'A déjà effectué la visite',
 };
 
 export interface LigneEnvoiGroupe {
@@ -39,6 +40,7 @@ export function planEnvoiGroupe(
       : destinataires.length === 0 ? 'sans_adresse'
       : mode === 'dce' && entreprise.lots_ids.length === 0 ? 'sans_lot'
       : mode === 'visite' && !entreprise.visite_creneau_id ? 'sans_creneau'
+      : mode === 'visite' && aDejaVisite(entreprise) ? 'deja_visite'
       : undefined;
     const dejaEnvoye = mode === 'dce' ? !!entreprise.dce_transmis_le : mode === 'visite' ? visiteNotifiee(entreprise)
       : mode === 'quantites' ? !!entreprise.quantites_demandees_le : dejaDiffusee.has(entreprise.id);
@@ -61,9 +63,20 @@ export function entreprisesDceAEnvoyer<E extends EntrepriseSuivi>(entreprises: E
   return entreprises.filter(e => e.envoyer_dce && !e.dce_transmis_le && !e.ne_repond_pas && !e.offre_recue_le);
 }
 
+/**
+ * Entreprises que des pièces du DCE concernent : une pièce « tous lots », ou l'un des lots de l'entreprise.
+ * Contrairement à l'additif, l'entreprise n'a pas besoin d'avoir déjà reçu le DCE (envoi de documents choisis).
+ */
+export function entreprisesConcerneesParPieces<E extends EntrepriseSuivi>(
+  pieceIds: readonly string[], piecesDce: Array<{ id?: string; tous_lots: boolean; lots_ids: string[] }>, entreprises: E[],
+): E[] {
+  const touchees = piecesDce.filter(p => !!p.id && pieceIds.includes(p.id));
+  return entreprises.filter(e => touchees.some(p => p.tous_lots || p.lots_ids.some(id => e.lots_ids.includes(id))));
+}
+
 /** Entreprises à convoquer : un créneau leur est affecté et elles n'en ont pas encore été prévenues. */
 export function entreprisesAConvoquer<E extends EntrepriseSuivi>(entreprises: E[]): E[] {
-  return entreprises.filter(e => !!e.visite_creneau_id && !e.ne_repond_pas && !visiteNotifiee(e));
+  return entreprises.filter(e => !!e.visite_creneau_id && !e.ne_repond_pas && !aDejaVisite(e) && !visiteNotifiee(e));
 }
 
 /**
@@ -74,7 +87,8 @@ export function marquageEnvoi(e: EntrepriseSuivi, mode: ModeEnvoi, aujourdhui: s
   const convocation: Partial<EntrepriseSuivi> = e.visite_creneau_id && creneauCite
     ? { visite_convoquee_creneau_id: e.visite_creneau_id, visite_convoquee_le: aujourdhui }
     : {};
-  if (mode === 'reponse' || mode === 'additif') return {};
+  // Un envoi de documents choisis ne vaut pas transmission du DCE : rien n'est enregistré sur l'entreprise.
+  if (mode === 'reponse' || mode === 'additif' || mode === 'documents') return {};
   if (mode === 'quantites') return { quantites_demandees_le: aujourdhui };
   if (mode === 'visite') return convocation;
   return { dce_transmis_le: e.dce_transmis_le || aujourdhui, envoyer_dce: true, ne_repond_pas: false, ...convocation };

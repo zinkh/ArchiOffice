@@ -2,11 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { documentDejaVerse, documentDeLaPiece, indiceSuivant, nomFichierDce, rattacherPieces, type EntreePieceDce } from '../dceVersement';
 
 describe('nommage systématique des fichiers du DCE', () => {
-  it('Code_Pièce_NumLot-NomLot-Indice, sans accent ni espace', () => {
-    expect(nomFichierDce({ code: '2419', piece: 'CCTP', lot: { numero: '05', titre: 'Menuiseries intérieures' }, indice: 'A' }))
-      .toBe('2419_CCTP_05-Menuiseries-interieures-A.pdf');
-    expect(nomFichierDce({ code: '2419', piece: 'DPGF', lot: { numero: '09', titre: 'CHAUFFAGE - VENTILATION - CLIMATISATION' }, indice: 'C' }))
-      .toBe('2419_DPGF_09-CHAUFFAGE-VENTILATION-CLIMATISATION-C.pdf');
+  it('« Code Nom Pièce Ind X » : 2604 SELIA DPGF Ind A.xlsx', () => {
+    expect(nomFichierDce({ code: '2604', nom: 'SELIA', piece: 'DPGF', indice: 'A', ext: 'xlsx' })).toBe('2604 SELIA DPGF Ind A.xlsx');
+    expect(nomFichierDce({ code: '2604', nom: 'SELIA', piece: 'RC', indice: 'B' })).toBe('2604 SELIA RC Ind B.pdf');
+  });
+
+  it('une pièce propre à un lot cite son lot, sans titre, pour que les lots ne se confondent pas', () => {
+    expect(nomFichierDce({ code: '2419', nom: 'SELIA', piece: 'CCTP', lot: { numero: '05', titre: 'Menuiseries intérieures' }, indice: 'A' }))
+      .toBe('2419 SELIA CCTP Lot 05 Ind A.pdf');
+    expect(nomFichierDce({ code: '2419', nom: 'SELIA', piece: 'DPGF', lot: { numero: '09', titre: 'CHAUFFAGE - VENTILATION' }, indice: 'C' }))
+      .toBe('2419 SELIA DPGF Lot 09 Ind C.pdf');
+  });
+
+  it('ne répète pas le nom quand il est le code, et retire les caractères interdits', () => {
+    expect(nomFichierDce({ code: 'SELIA', nom: 'selia', piece: 'RC', indice: 'A' })).toBe('SELIA RC Ind A.pdf');
+    expect(nomFichierDce({ code: '2604', nom: 'Salle/Mairie : phase 1', piece: 'CCAP', indice: 'A' })).toBe('2604 Salle Mairie phase 1 CCAP Ind A.pdf');
   });
 
   it('le CCTP et le DPGF d\'un même lot ne portent jamais le même nom', () => {
@@ -16,7 +26,7 @@ describe('nommage systématique des fichiers du DCE', () => {
   });
 
   it('une pièce commune à tous les lots n\'a pas de lot dans son nom', () => {
-    expect(nomFichierDce({ code: '2419', piece: 'RC', indice: 'B' })).toBe('2419_RC-B.pdf');
+    expect(nomFichierDce({ code: '2419', nom: 'SELIA', piece: 'RC', indice: 'B' })).toBe('2419 SELIA RC Ind B.pdf');
   });
 
   it('l\'indice suit le serveur : A au premier versement, puis la lettre suivante', () => {

@@ -81,6 +81,25 @@ export const MODELE_CORPS_ADDITIF = [
   'Cordialement,',
 ].join('\n');
 
+/** Envoi de documents choisis (un ou plusieurs, mis à jour) : seuls ceux qui concernent les lots de l'entreprise sont joints. */
+export const MODELE_SUJET_DOCUMENTS = 'Documents du DCE : {{operation}}{{lots_courts}}';
+
+export const MODELE_CORPS_DOCUMENTS = [
+  'Bonjour,',
+  '',
+  'Dans le cadre de la consultation des entreprises pour l\'opération « {{operation}} », nous vous transmettons les documents suivants{{lots}}',
+  '',
+  '{{pieces_dossier}}',
+  '',
+  'Ces documents sont joints à ce message. Lorsqu\'ils portent un indice supérieur à celui déjà reçu, ils remplacent les versions précédentes : merci d\'en tenir compte pour votre offre.',
+  '',
+  '{{avertissements}}',
+  '',
+  'Nous restons à votre disposition pour toute précision.',
+  '',
+  'Cordialement,',
+].join('\n');
+
 /** Réponse à une question, diffusée à toutes les entreprises concernées sans citer l'auteur de la question. */
 export const MODELE_SUJET_REPONSE = 'Réponse à une question : {{operation}}';
 
