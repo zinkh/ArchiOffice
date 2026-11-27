@@ -1557,6 +1557,8 @@ export interface Observation {
   lot_ids?: string[] | null;
   /** Tout corps d'état : l'observation vise tous les lots (`lot_id` nul). */
   tce?: boolean | null;
+  /** Autres intervenants (fiches contact) qui reçoivent l'observation à la diffusion, en plus des entreprises des lots. */
+  contact_ids?: string[] | null;
   texte: string;
   statut: 'À faire' | 'En cours' | 'Levée' | 'Urgent' | 'Refusée';
   due_date?: string;

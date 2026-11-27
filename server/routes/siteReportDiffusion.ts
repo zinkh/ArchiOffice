@@ -20,8 +20,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { handleDocumentUpload } from '../documentUpload';
 import { resolveEmailSender } from '../emailSender';
 import { hydraterIntervenants } from '../lotIntervenantsRead';
-import { sendViaAccount } from '../mailSend';
-import { combinedSendError, sendMailWithSenderFallback } from '../smtpSend';
+import { hasOwnSmtp, sendViaBestRoute } from '../mailRoute';
 import {
   buildDiffusionMail, buildDiffusionRecipients, MAX_DIFFUSION_RECIPIENTS,
   type DiffusionRecipient,
@@ -54,6 +53,12 @@ const parseContactIds = (raw: unknown): string[] => {
     return [];
   }
 };
+
+const MAX_SUBJECT_CHARS = 300;
+const MAX_NOTE_CHARS = 4000;
+
+/** Texte saisi par la personne (objet, remarque) : chaîne tronquée, vide si absente ou d'un autre type. */
+const cleanText = (raw: unknown, max: number): string => (typeof raw === 'string' ? raw.slice(0, max).trim() : '');
 
 const safeFilename = (name: unknown, fallback: string): string => {
   const base = typeof name === 'string' ? name.replace(/[\r\n\\/"]/g, '_').trim() : '';
@@ -142,6 +147,7 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
       const { data: defaultAccount } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
         .select('*').eq('user_id', req.user.id).eq('is_default', true).maybeSingle();
       const smtpConfigured = !!(smtpHost && smtpUser && smtpPass);
+      const ownSmtp = hasOwnSmtp(settings);
       if (!defaultAccount && !smtpConfigured) {
         return res.status(500).json({ error: 'Aucun moyen d\'envoi : connectez votre boîte mail (Gmail, Outlook) dans la messagerie, ou renseignez le serveur SMTP dans les réglages du cabinet.' });
       }
@@ -172,6 +178,11 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
         projectAddress: project.address,
         agencyName: settings.agency_name,
         signature: (profileRes.data as any)?.mail_signature,
+        // Modèles du cabinet (Réglages > E-mail), puis objet et remarque saisis pour CETTE diffusion.
+        subjectTemplate: settings.cr_mail_subject_template,
+        bodyTemplate: settings.cr_mail_body_template,
+        subject: cleanText(req.body?.subject, MAX_SUBJECT_CHARS),
+        note: cleanText(req.body?.note, MAX_NOTE_CHARS),
       };
 
       const sent: { contact_id: string; name: string; email: string; observations: number }[] = [];
@@ -183,31 +194,12 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
         const mail = buildDiffusionMail(r, ctx);
         const attachments = [{ filename, content: file.buffer, contentType: 'application/pdf' }];
         try {
-          // Le SMTP du cabinet d'abord : le message part de l'adresse de l'agence. La boîte connectée de la
-          // personne (dont l'adresse est la sienne) ne sert qu'en repli, ou quand le cabinet n'a pas de SMTP.
-          let smtpError: unknown = null;
-          let sentBySmtp = false;
-          if (transporter) {
-            try {
-              await sendMailWithSenderFallback(transporter, {
-                from, replyTo, to: r.email,
-                subject: mail.subject, text: mail.text, html: mail.html,
-                attachments,
-              }, smtpUser);
-              sentBySmtp = true;
-            } catch (err) {
-              console.warn('[POST /api/reports/:reportId/diffuse] envoi par le SMTP du cabinet impossible', (err as any)?.message);
-              smtpError = err;
-              if (!defaultAccount) throw err;
-            }
-          }
-          if (!sentBySmtp) {
-            try {
-              await sendViaAccount(supabaseAdmin, defaultAccount, { to: r.email, subject: mail.subject, text: mail.text, html: mail.html, attachments });
-            } catch (accountErr) {
-              throw smtpError ? new Error(combinedSendError(defaultAccount, accountErr, smtpError)) : accountErr;
-            }
-          }
+          // SMTP propre au cabinet d'abord, sinon la boîte connectée de la personne : jamais l'adresse du SMTP
+          // de la plateforme tant qu'une boîte est connectée (server/mailRoute.ts).
+          await sendViaBestRoute(
+            { supabaseAdmin, transporter, smtpUser, defaultAccount, ownSmtp, from, replyTo },
+            { to: r.email, subject: mail.subject, text: mail.text, html: mail.html, attachments },
+          );
           sent.push({ contact_id: r.contactId, name: r.name, email: r.email, observations: r.observations.length + r.previousObservations.length });
         } catch (err: any) {
           console.error('[POST /api/reports/:reportId/diffuse] envoi impossible', r.contactId, err?.message);

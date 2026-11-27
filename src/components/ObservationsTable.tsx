@@ -249,11 +249,12 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     const lot = lots.find(l => l.id === choice.lot_id);
     updateLocal(id, {
       lot_id: choice.lot_id ?? undefined, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id ?? undefined,
+      ...(choice.contact_ids ? { contact_ids: choice.contact_ids } : {}),
       lot: lot ? { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } : undefined,
     });
     queuedJsonRequest({
       entity: 'observation', id: crypto.randomUUID(), method: 'PUT', url: `/api/observations/${id}`,
-      body: { lot_id: choice.lot_id, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id },
+      body: { lot_id: choice.lot_id, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id, ...(choice.contact_ids ? { contact_ids: choice.contact_ids } : {}) },
     }).then(() => { setSaveError(false); onChangedRef.current?.(); }).catch(err => { console.error(err); setSaveError(true); });
   }, [lots, updateLocal]);
 

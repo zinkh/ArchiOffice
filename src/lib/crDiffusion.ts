@@ -14,7 +14,13 @@ export interface LotIntervenantInput {
   nom: string;
   role?: string | null;
   email?: string | null;
+  /** Fiche contact de la personne (celle qu'une observation peut désigner nommément). */
+  contact_id?: string | null;
 }
+
+/** Vrai si l'observation désigne nommément cette fiche contact (maîtrise d'ouvrage, bureau de contrôle, BET...). */
+export const observationNamesContact = (o: Pick<Observation, 'contact_ids'>, contactId: string): boolean =>
+  Array.isArray(o.contact_ids) && o.contact_ids.includes(contactId);
 
 /** Préfixe de la clé d'un destinataire qui est un intervenant de lot et non une fiche contact. */
 export const INTERVENANT_KEY_PREFIX = 'intervenant:';
@@ -48,6 +54,61 @@ export interface DiffusionMailContext {
   agencyName?: string | null;
   /** Signature personnelle de l'expéditeur (profiles.mail_signature). */
   signature?: string | null;
+  /** Modèle d'objet du cabinet (settings.cr_mail_subject_template), vide = modèle par défaut. */
+  subjectTemplate?: string | null;
+  /** Modèle du texte d'introduction du cabinet (settings.cr_mail_body_template), vide = modèle par défaut. */
+  bodyTemplate?: string | null;
+  /** Objet saisi à l'envoi : remplace le modèle pour cette diffusion (les variables y sont remplacées aussi). */
+  subject?: string | null;
+  /** Remarque particulière saisie à l'envoi, ajoutée sous l'introduction de chaque message. */
+  note?: string | null;
+}
+
+/** Objet par défaut : l'opération d'abord, puis l'intitulé du compte-rendu. */
+export const DEFAULT_CR_SUBJECT_TEMPLATE = '{operation}, compte rendu de chantier n° {numero} du {date}';
+/** Introduction par défaut du message. */
+export const DEFAULT_CR_BODY_TEMPLATE = "Veuillez trouver ci-joint le compte rendu de chantier n° {numero} du {date} de l'opération {operation} ({adresse}).";
+
+/** Variables acceptées entre accolades dans l'objet et le texte d'introduction. */
+export const CR_TEMPLATE_VARIABLES: { key: string; label: string }[] = [
+  { key: 'operation', label: "Code et nom de l'opération" },
+  { key: 'code', label: "Code de l'opération" },
+  { key: 'projet', label: "Nom de l'opération" },
+  { key: 'adresse', label: "Adresse de l'opération" },
+  { key: 'numero', label: 'Numéro du compte rendu' },
+  { key: 'date', label: 'Date du compte rendu' },
+  { key: 'prochaine_reunion', label: 'Prochaine réunion' },
+  { key: 'destinataire', label: 'Nom du destinataire' },
+  { key: 'cabinet', label: 'Nom du cabinet' },
+];
+
+/**
+ * Remplace les variables `{nom}` d'un modèle. Une variable inconnue reste telle quelle ; une valeur vide
+ * ne laisse ni « du » orphelin (date absente) ni parenthèses vides (adresse absente).
+ */
+export function applyCrTemplate(template: string, values: Record<string, string>): string {
+  return template
+    .replace(/\{(\w+)\}/g, (whole, key: string) => (key in values ? values[key] : whole))
+    .replace(/\s+du\s*(?=[,.;)]|$)/gi, '')
+    .replace(/[ \t]*\(\s*\)/g, '')
+    .replace(/[ \t]{2,}/g, ' ');
+}
+
+/** Valeurs des variables d'un modèle pour un destinataire. */
+export function crTemplateValues(ctx: DiffusionMailContext, recipientName = ''): Record<string, string> {
+  const code = (ctx.projectCode || '').trim();
+  const projet = (ctx.projectName || '').trim();
+  return {
+    operation: [code, projet].filter(Boolean).join(' '),
+    code,
+    projet,
+    adresse: (ctx.projectAddress || '').trim(),
+    numero: String(ctx.reportNumber ?? ''),
+    date: fmtDate(ctx.reportDate),
+    prochaine_reunion: (ctx.nextMeeting || '').trim(),
+    destinataire: recipientName,
+    cabinet: (ctx.agencyName || '').trim(),
+  };
 }
 
 export interface DiffusionMail {
@@ -136,7 +197,7 @@ export function buildDiffusionRecipients(input: {
     // Une observation revient à l'entreprise d'un des lots visés (un seul, plusieurs, ou tous : TCE,
     // auquel cas toutes les entreprises titulaires d'un lot la reçoivent), ou à la personne désignée.
     const concerns = (o: Observation) =>
-      [...entry.lotIds].some(lotId => observationTargetsLot(o, lotId)) || o.contact_id === contactId;
+      [...entry.lotIds].some(lotId => observationTargetsLot(o, lotId)) || o.contact_id === contactId || observationNamesContact(o, contactId);
     return {
       contactId,
       name: contactLabel(contact),
@@ -180,7 +241,9 @@ function intervenantRecipients(
   return [...groups.values()].map(({ people, email }) => {
     const first = people[0];
     const lotIds = new Set(people.map(p => p.lot_id));
-    const concerns = (o: Observation) => [...lotIds].some(lotId => observationTargetsLot(o, lotId));
+    const contactIds = new Set(people.map(p => p.contact_id).filter((v): v is string => !!v));
+    const concerns = (o: Observation) =>
+      [...lotIds].some(lotId => observationTargetsLot(o, lotId)) || [...contactIds].some(id => observationNamesContact(o, id));
     const roles: string[] = [];
     for (const p of people) {
       const lot = lotById.get(p.lot_id)!;
@@ -221,16 +284,22 @@ function observationLine(o: Observation): string {
   return `${parts[0]} (${details.join(', ')})`;
 }
 
+/** Texte libre en paragraphes HTML : ligne vide = nouveau paragraphe, retour à la ligne = `<br>`. */
+const paragraphsHtml = (text: string): string[] =>
+  text.split(/\r?\n\s*\r?\n/).map(p => p.trim()).filter(Boolean)
+    .map(p => `<p>${escapeHtml(p).replace(/\r?\n/g, '<br>')}</p>`);
+
 /** Sujet sur une seule ligne : un retour à la ligne y serait une injection d'en-tête. */
 const oneLine = (s: string): string => s.replace(/[\r\n]+/g, ' ').trim();
 
 /** Message adressé à UN destinataire : le compte-rendu en pièce jointe, et SES observations dans le corps. */
 export function buildDiffusionMail(recipient: DiffusionRecipient, ctx: DiffusionMailContext): DiffusionMail {
-  const operation = [ctx.projectCode, ctx.projectName].filter(Boolean).join(' ');
-  const date = fmtDate(ctx.reportDate);
-  const subject = oneLine(`Compte rendu de chantier n° ${ctx.reportNumber}${date ? ` du ${date}` : ''}, ${operation}`);
+  const values = crTemplateValues(ctx, recipient.name);
+  const subjectSource = (ctx.subject || '').trim() || (ctx.subjectTemplate || '').trim() || DEFAULT_CR_SUBJECT_TEMPLATE;
+  const subject = oneLine(applyCrTemplate(subjectSource, values));
 
-  const intro = `Veuillez trouver ci-joint le compte rendu de chantier n° ${ctx.reportNumber}${date ? ` du ${date}` : ''} de l'opération ${operation}${ctx.projectAddress ? ` (${ctx.projectAddress})` : ''}.`;
+  const intro = applyCrTemplate((ctx.bodyTemplate || '').trim() || DEFAULT_CR_BODY_TEMPLATE, values).trim();
+  const note = (ctx.note || '').trim();
   const count = recipient.observations.length;
   const heading = count > 0
     ? `Observations vous concernant (${count}) :`
@@ -247,6 +316,7 @@ export function buildDiffusionMail(recipient: DiffusionRecipient, ctx: Diffusion
     'Bonjour,',
     '',
     intro,
+    ...(note ? ['', note] : []),
     '',
     heading,
     ...lines.map(l => `- ${l}`),
@@ -259,7 +329,8 @@ export function buildDiffusionMail(recipient: DiffusionRecipient, ctx: Diffusion
 
   const html = [
     '<p>Bonjour,</p>',
-    `<p>${escapeHtml(intro)}</p>`,
+    ...paragraphsHtml(intro),
+    ...(note ? paragraphsHtml(note) : []),
     `<p><strong>${escapeHtml(heading)}</strong></p>`,
     ...(count > 0 ? [`<ul>${lines.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`] : []),
     ...(previousCount > 0 ? [`<p><strong>${escapeHtml(previousHeading)}</strong></p>`, `<ul>${previousLines.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`] : []),

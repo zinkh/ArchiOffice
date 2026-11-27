@@ -61,6 +61,32 @@ describe('buildDiffusionRecipients', () => {
     expect(byId).toEqual({ c1: ['o1'], c2: ['o2'] });
   });
 
+  it("adresse une observation aux autres intervenants qu'elle désigne, en plus de l'entreprise du lot", () => {
+    const recipients = buildDiffusionRecipients({
+      lots: [lot('l1', '02', 'Gros œuvre', 'c1')],
+      stakeholders: [stakeholder('s1', 'Maîtrise d\'ouvrage', 'c2')],
+      contacts,
+      observations: [
+        obs('o1', { lot_id: 'l1', contact_ids: ['c2'] }),
+        obs('o2', { lot_id: 'l1' }),
+      ],
+    });
+    const byId = Object.fromEntries(recipients.map(r => [r.contactId, r.observations.map(o => o.id)]));
+    expect(byId).toEqual({ c1: ['o1', 'o2'], c2: ['o1'] });
+  });
+
+  it("adresse aussi l'observation à une personne saisie dans l'onglet Entreprises, par sa fiche contact", () => {
+    const recipients = buildDiffusionRecipients({
+      lots: [lot('l1', '02', 'Gros œuvre', 'c1')],
+      stakeholders: [],
+      contacts,
+      observations: [obs('o1', { lot_id: 'l-autre', contact_ids: ['c9'] })],
+      intervenants: [{ id: 'i1', lot_id: 'l1', entreprise: 'Maçonnerie Durand', nom: 'Paul Durand', email: 'paul@durand.test', contact_id: 'c9' }],
+    });
+    const personne = recipients.find(r => r.contactId === 'intervenant:i1');
+    expect(personne?.observations.map(o => o.id)).toEqual(['o1']);
+  });
+
   it("n'invente aucun destinataire pour un lot ou un intervenant sans fiche contact", () => {
     const recipients = buildDiffusionRecipients({
       lots: [lot('l1', '02', 'Gros œuvre'), lot('l2', '03', 'Charpente', 'inconnu')],
@@ -91,12 +117,44 @@ describe('buildDiffusionMail', () => {
       observations: [obs('o1', { number: 3, type: 'reserve', texte: 'Reprendre l\'enduit', statut: 'Urgent', urgence: 'bloquant', due_date: '2026-03-20' })],
       previousObservations: [],
     }, ctx);
-    expect(mail.subject).toBe('Compte rendu de chantier n° 12 du 12/03/2026, 26014 Villa Martin');
+    expect(mail.subject).toBe('26014 Villa Martin, compte rendu de chantier n° 12 du 12/03/2026');
     expect(mail.text).toContain('Observations vous concernant (1) :');
     expect(mail.text).toContain('- 3. [À lever] Reprendre l\'enduit (Statut : Urgent, Urgence : bloquant, Délai : 20/03/2026)');
     expect(mail.text).toContain('Prochaine réunion : 19/03/2026 à 9 h');
     expect(mail.text).toContain('AAZS');
     expect(mail.text).not.toContain('—');
+  });
+
+  const recipient = { contactId: 'c1', name: 'Durand', roles: [], email: 'd@e.fr', observations: [], previousObservations: [] };
+
+  it("applique les modèles d'objet et d'introduction du cabinet, avec les variables", () => {
+    const mail = buildDiffusionMail(recipient, {
+      ...ctx,
+      subjectTemplate: 'CR {numero} - {projet} ({code})',
+      bodyTemplate: 'Bonjour {destinataire}, voici le CR du {date}.',
+    });
+    expect(mail.subject).toBe('CR 12 - Villa Martin (26014)');
+    expect(mail.text).toContain('Bonjour Durand, voici le CR du 12/03/2026.');
+  });
+
+  it("l'objet saisi à l'envoi remplace le modèle, sans jamais s'étendre sur plusieurs lignes", () => {
+    const mail = buildDiffusionMail(recipient, { ...ctx, subjectTemplate: 'Modèle', subject: 'Urgent {numero}\r\nBcc: x@y.fr' });
+    expect(mail.subject).toBe('Urgent 12 Bcc: x@y.fr');
+    expect(mail.subject).not.toMatch(/[\r\n]/);
+  });
+
+  it("ne laisse ni « du » orphelin ni parenthèses vides quand la date ou l'adresse manque", () => {
+    const mail = buildDiffusionMail(recipient, { ...ctx, reportDate: null, projectAddress: '' });
+    expect(mail.subject).toBe('26014 Villa Martin, compte rendu de chantier n° 12');
+    expect(mail.text).toContain("de l'opération 26014 Villa Martin.");
+  });
+
+  it("ajoute la remarque particulière sous l'introduction, échappée dans la version HTML", () => {
+    const mail = buildDiffusionMail(recipient, { ...ctx, note: 'Merci de venir <b>lundi</b>.\n\nSecond paragraphe.' });
+    const lignes = mail.text.split('\n');
+    expect(lignes.indexOf('Merci de venir <b>lundi</b>.')).toBeGreaterThan(lignes.findIndex(l => l.startsWith('Veuillez trouver')));
+    expect(mail.html).toContain('<p>Merci de venir &lt;b&gt;lundi&lt;/b&gt;.</p>');
+    expect(mail.html).toContain('<p>Second paragraphe.</p>');
   });
 
   it("dit explicitement quand aucune observation ne concerne le destinataire", () => {

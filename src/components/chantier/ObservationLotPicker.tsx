@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { apiFetch } from '../../lib/api';
 import { AnimatePresence } from 'motion/react';
 import { IconBuilding, IconChevronDown } from '@tabler/icons-react';
 import { ModalShell } from '../ui/ModalShell';
@@ -13,7 +14,12 @@ import { TOUCH_TARGET } from './fields';
 export type LotChoice = LotSelectionFields & {
   /** Entreprise désignée : celle du lot quand il n'y en a qu'un, effacée pour plusieurs lots ou TCE (les lots portent alors les entreprises). */
   contact_id: string | null;
+  /** Autres intervenants désignés (fiches contact). Absent : la liste enregistrée n'est pas modifiée. */
+  contact_ids?: string[];
 };
+
+/** Intervenant de l'opération (hors entreprises de lot) auquel une observation peut être adressée. */
+interface PickerIntervenant { contactId: string; name: string; role: string }
 
 type PickerLot = Pick<ProjectLot, 'id' | 'lot_number' | 'lot_title'> & { contact_name?: string | null; contact_id?: string | null };
 
@@ -35,13 +41,37 @@ export function ObservationLotPicker({ obs, lots, onApply, className }: {
   const [tce, setTce] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
+  const [intervenants, setIntervenants] = useState<PickerIntervenant[] | null>(null);
+  const [selectedContacts, setSelectedContacts] = useState<Set<string>>(new Set());
 
   const openPicker = () => {
     setTce(!!obs.tce);
     setSelected(new Set(observationSelectedLotIds(obs)));
+    setSelectedContacts(new Set(obs.contact_ids ?? []));
     setQuery('');
     setOpen(true);
+    // Intervenants de l'opération ayant une fiche contact : lecture en ligne seulement, sans elle la section
+    // reste masquée et la liste déjà enregistrée n'est pas touchée.
+    setIntervenants(null);
+    apiFetch<{ stakeholders_list?: { name: string; role: string; contact_id?: string | null }[] }>(`/api/projects/${obs.project_id}`)
+      .then(project => {
+        const seen = new Set<string>();
+        const list: PickerIntervenant[] = [];
+        for (const s of project?.stakeholders_list ?? []) {
+          if (!s.contact_id || seen.has(s.contact_id)) continue;
+          seen.add(s.contact_id);
+          list.push({ contactId: s.contact_id, name: s.name, role: s.role });
+        }
+        setIntervenants(list);
+      })
+      .catch(() => setIntervenants(null));
   };
+
+  const toggleContact = (id: string) => setSelectedContacts(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const visible = useMemo(() => {
     const q = norm(query.trim());
@@ -61,7 +91,7 @@ export function ObservationLotPicker({ obs, lots, onApply, className }: {
   const apply = () => {
     const fields = selectionToFields([...selected], lots, tce);
     const only = !fields.tce && fields.lot_ids.length === 0 ? lots.find(l => l.id === fields.lot_id) : undefined;
-    onApply({ ...fields, contact_id: only?.contact_id ?? null });
+    onApply({ ...fields, contact_id: only?.contact_id ?? null, ...(intervenants ? { contact_ids: [...selectedContacts] } : {}) });
     setOpen(false);
   };
 
@@ -130,6 +160,21 @@ export function ObservationLotPicker({ obs, lots, onApply, className }: {
                 ))}
               </fieldset>
               {!tce && selected.size === 0 && <p className="text-xs text-[var(--tblr-muted)]">Sans lot coché, l'observation n'est rattachée à aucun lot.</p>}
+              {intervenants && intervenants.length > 0 && (
+                <fieldset className="space-y-1 border-t border-[var(--tblr-border)] pt-3">
+                  <legend className="mb-1 text-xs font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Autres intervenants destinataires</legend>
+                  <p className="text-xs text-[var(--tblr-muted)]">Maîtrise d'ouvrage, bureau de contrôle, BET... : ils reçoivent cette observation à la diffusion du compte-rendu, en plus des entreprises des lots.</p>
+                  {intervenants.map(i => (
+                    <label key={i.contactId} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 hover:bg-[var(--tblr-surface-2)]">
+                      <input type="checkbox" className="size-4" checked={selectedContacts.has(i.contactId)} onChange={() => toggleContact(i.contactId)} />
+                      <span className="min-w-0">
+                        <span className="block truncate font-semibold">{i.name}</span>
+                        {i.role && <span className="block truncate text-xs text-[var(--tblr-muted)]">{i.role}</span>}
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
             </div>
           </ModalShell>
         )}

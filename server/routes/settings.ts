@@ -60,6 +60,8 @@ const toSnake: Record<string, string> = {
   carddavSyncCategories: 'carddav_sync_categories',
   mailTriageAgentId: 'mail_triage_agent_id',
   mailInboxDomain: 'mail_inbox_domain',
+  crMailSubjectTemplate: 'cr_mail_subject_template',
+  crMailBodyTemplate: 'cr_mail_body_template',
 };
 const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
 
@@ -130,6 +132,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'tender_boamp_enabled', 'tender_ted_enabled',
         'google_contacts_sync_categories', 'carddav_sync_categories',
         'mail_triage_agent_id', 'mail_inbox_domain',
+        'cr_mail_subject_template', 'cr_mail_body_template',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits', 'invoice_payment_terms_days', 'archive_retention_years']);
       const filteredData: any = Object.fromEntries(
