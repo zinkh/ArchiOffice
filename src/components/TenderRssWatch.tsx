@@ -15,6 +15,7 @@ import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { useSettings } from '../hooks/useSettings';
 import { MatchDetailContent, StatusBadge, type TFn } from './tenderRss/MatchDetailContent';
 import type { TenderRssSource, TenderRssMatch, TenderSourceType, BoampTypeMarche } from '../types';
+import { FRENCH_REGIONS, regionIdForDepartements, regionIdForNuts } from '../lib/frenchRegions';
 
 // MapLibre est lourd : la carte de situation ne se charge qu'à la première annonce ouverte.
 const MatchLocationMap = lazy(() => import('./tenderRss/MatchLocationMap'));
@@ -22,10 +23,7 @@ const MatchLocationMap = lazy(() => import('./tenderRss/MatchLocationMap'));
 const DISMISS_UNDO_MS = 10000;
 const WATCH_UNDO_MS = 10000;
 
-const GRAND_EST_DEPARTEMENTS = ['08', '10', '51', '52', '54', '55', '57', '67', '68', '88'];
 const BOAMP_TYPES: BoampTypeMarche[] = ['TRAVAUX', 'SERVICES', 'FOURNITURES'];
-// NUTS 2 du Grand Est ; ses NUTS 3 (FRF11 Bas-Rhin, FRF31 Meurthe-et-Moselle...) commencent tous par FRF.
-const GRAND_EST_NUTS = 'FRF';
 // Miroir de TED_CPV_ARCHITECTURE (server/tenderTedConnector.ts) : services
 // d'architecture, d'ingénierie et d'urbanisme.
 const TED_CPV_ARCHITECTURE = [
@@ -703,10 +701,10 @@ export function TenderRssWatch() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="rounded-lg shadow-xl w-full max-w-md overflow-hidden"
+              className="rounded-lg shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90dvh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+              <div className="p-6 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
                 <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
                   {editingSource ? t('tender_rss_edit_source_title') : t('tender_rss_create_source_title')}
                 </h3>
@@ -714,7 +712,8 @@ export function TenderRssWatch() {
                   <IconX size={20} />
                 </button>
               </div>
-              <form onSubmit={handleSaveSource} className="p-6 space-y-4">
+              <form onSubmit={handleSaveSource} className="flex flex-col min-h-0 flex-1">
+                <div className="p-6 space-y-4 overflow-y-auto flex-1">
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tender_rss_source_type')}</label>
                   <select
@@ -775,14 +774,19 @@ export function TenderRssWatch() {
                           value={sourceForm.boampDepartementsText}
                           onChange={e => setSourceForm({ ...sourceForm, boampDepartementsText: e.target.value })}
                         />
-                        <button
-                          type="button"
-                          onClick={() => setSourceForm({ ...sourceForm, boampDepartementsText: GRAND_EST_DEPARTEMENTS.join(', ') })}
-                          className="px-3 py-2 rounded-lg text-xs font-medium shrink-0"
+                        <select
+                          aria-label={t('tender_rss_region_label')}
+                          className="px-2 py-2 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 shrink-0 max-w-[11rem]"
                           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                          value={regionIdForDepartements(parseDepartements(sourceForm.boampDepartementsText))}
+                          onChange={e => {
+                            const region = FRENCH_REGIONS.find(r => r.id === e.target.value);
+                            setSourceForm({ ...sourceForm, boampDepartementsText: region ? region.departements.join(', ') : '' });
+                          }}
                         >
-                          {t('tender_rss_boamp_preset_grand_est')}
-                        </button>
+                          <option value="">{t('tender_rss_region_all')}</option>
+                          {FRENCH_REGIONS.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                        </select>
                       </div>
                       <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_boamp_departements_hint')}</p>
                     </div>
@@ -866,14 +870,19 @@ export function TenderRssWatch() {
                           value={sourceForm.tedNutsText}
                           onChange={e => setSourceForm({ ...sourceForm, tedNutsText: e.target.value })}
                         />
-                        <button
-                          type="button"
-                          onClick={() => setSourceForm({ ...sourceForm, tedNutsText: GRAND_EST_NUTS })}
-                          className="px-3 py-2 rounded-lg text-xs font-medium shrink-0"
+                        <select
+                          aria-label={t('tender_rss_region_label')}
+                          className="px-2 py-2 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 shrink-0 max-w-[11rem]"
                           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                          value={regionIdForNuts(parseNuts(sourceForm.tedNutsText))}
+                          onChange={e => {
+                            const region = FRENCH_REGIONS.find(r => r.id === e.target.value);
+                            setSourceForm({ ...sourceForm, tedNutsText: region ? region.nuts : '' });
+                          }}
                         >
-                          {t('tender_rss_boamp_preset_grand_est')}
-                        </button>
+                          <option value="">{t('tender_rss_region_all')}</option>
+                          {FRENCH_REGIONS.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+                        </select>
                       </div>
                       <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_ted_nuts_hint')}</p>
                     </div>
@@ -972,7 +981,8 @@ export function TenderRssWatch() {
                   />
                   {t('tender_rss_enabled')}
                 </label>
-                <div className="flex justify-end gap-2 pt-2">
+                </div>
+                <div className="flex justify-end gap-2 px-6 py-4 shrink-0" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <button
                     type="button"
                     onClick={() => setIsSourceModalOpen(false)}
