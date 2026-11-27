@@ -47,6 +47,11 @@ export interface ContexteEnvoiDce {
    */
   additif?: { revision: DceRevision; numero: number };
   /**
+   * Envoi de documents choisis : identifiants des pièces du DCE à joindre (celles qui concernent les lots de
+   * l'entreprise seulement). Comme l'additif, ni pièces du marché ni lien de dépôt : le lien déjà remis reste valable.
+   */
+  piecesChoisies?: string[];
+  /**
    * Demande de confirmation des quantités : par entreprise, les postes à confirmer. Rien n'est joint (ni DCE ni pièces
    * du marché) ; un lien de dépôt personnel est créé, c'est là que l'entreprise répond.
    */
@@ -66,7 +71,8 @@ export function donneesSansReseau(ctx: ContexteEnvoiDce, entreprise: EntrepriseS
     entreprise: entreprise.nom,
     lots: ctx.lots.filter(l => entreprise.lots_ids.includes(l.id)),
     piecesMarche: [],
-    lignesIndices: lignesIndices(piecesEntreprise, ctx.documents),
+    // Envoi de documents choisis : le message ne cite que ces pièces (le tableau d'indices joint reste complet).
+    lignesIndices: lignesIndices(ctx.piecesChoisies ? piecesEntreprise.filter(p => !!p.id && ctx.piecesChoisies!.includes(p.id)) : piecesEntreprise, ctx.documents),
     visite: ctx.visite ? visitePourMessage(entreprise, ctx.visite.creneaux, ctx.visite.site) : undefined,
     questionReponse: ctx.questionReponse,
     quantites: ctx.quantites?.[entreprise.id],
@@ -81,7 +87,9 @@ export async function preparerEnvoiEntreprise(ctx: ContexteEnvoiDce, entreprise:
   if (ctx.quantites) return preparerQuantites(ctx, entreprise);
   const piecesEntreprise = piecesDeEntreprise(ctx.pieces, entreprise.lots_ids);
   const lignes = lignesIndices(piecesEntreprise, ctx.documents);
-  const revisees = ctx.additif ? new Set(ctx.additif.revision.pieces.map(p => p.id)) : null;
+  const revisees = ctx.additif ? new Set(ctx.additif.revision.pieces.map(p => p.id))
+    : ctx.piecesChoisies ? new Set(ctx.piecesChoisies) : null;
+  const sansDce = !!ctx.additif || !!ctx.piecesChoisies; // ni pièces du marché ni nouveau lien de dépôt
   const aJoindre = documentsAJoindre(revisees ? piecesEntreprise.filter(p => !!p.id && revisees.has(p.id)) : piecesEntreprise, ctx.documents);
   const lotsEntreprise = ctx.lots.filter(l => entreprise.lots_ids.includes(l.id));
   const lotsCourts = lotsEntreprise.map(l => `Lot ${l.lot_number}`).join(', ');
@@ -98,7 +106,7 @@ export async function preparerEnvoiEntreprise(ctx: ContexteEnvoiDce, entreprise:
   // Pièces du marché (RC, CCAP, acte d'engagement), générées d'après les réglages actuels. Une
   // pièce déjà versée au DCE part avec le DCE : on ne la joint pas deux fois.
   const piecesMarche: string[] = [];
-  if (ctx.genererPiecesMarche && !ctx.additif) {
+  if (ctx.genererPiecesMarche && !sansDce) {
     const versees = new Set<string>();
     for (const p of piecesEntreprise) {
       if (!(p.document_ids ?? []).some(id => ctx.documents.some(d => d.id === id))) continue;
@@ -116,7 +124,7 @@ export async function preparerEnvoiEntreprise(ctx: ContexteEnvoiDce, entreprise:
   // Lien de dépôt personnel : un lien précédent de cette entreprise est alors révoqué (le jeton
   // n'est jamais conservé en clair).
   let lienDepot: string | undefined; let echecLienDepot = false;
-  if (ctx.depotActif && ctx.projectId && !ctx.additif) {
+  if (ctx.depotActif && ctx.projectId && !sansDce) {
     try {
       const r = await apiFetch<{ url: string }>(`/api/projects/${ctx.projectId}/depot/invites`, {
         method: 'POST',

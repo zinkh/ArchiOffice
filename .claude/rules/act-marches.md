@@ -96,6 +96,19 @@ migration).
   **tableau d'émargement** PDF paysage (`planEmargement`) : une page par créneau avec ses entreprises inscrites, lots, lieu,
   colonnes représentant, fonction, téléphone et signature à remplir à la main, quatre lignes vierges ; sans créneau défini,
   une feuille générale reprend toutes les entreprises consultées. Aucune migration. Tests : `actVisitesDejaVisite.test.ts`.
+- **Versement au DCE depuis l'onglet PRO** (`act/DceVersementPro.tsx`) : CCTP et DPGF, un fichier par lot, **toujours
+  sans prix**. Le DPGF existe en PDF (« DPGF (sans prix) ») et en **Excel** (« DPGF Excel (sans prix) », `produireDossier`
+  format `autre`, `avecPrix: false`, nom `Code_DPGF_NumLot-NomLot-Indice.xlsx`, `deposerFichierDce({ mimeType })`). Le
+  classeur est une pièce DISTINCTE du PDF du même lot (intitulé « DPGF (Excel) - Lot xx ») : `documentDeLaPiece` retrouve la
+  pièce par type ET intitulé, donc l'Excel n'est jamais pris pour une nouvelle version du PDF (et inversement).
+- **Envoyer des documents choisis** (`act/DceEnvoiDocumentsPanel.tsx`, sous la matrice des pièces du DCE) : un document seul
+  (bouton de sa ligne) ou une sélection de documents mis à jour (indice et date du fichier affichés), à plusieurs
+  entreprises. Mode `documents` de `DceEnvoiGroupeDialog` (message unique, un mail individuel par entreprise). Sont proposées
+  les entreprises que les pièces concernent (`entreprisesConcerneesParPieces` : pièce « tous lots » ou l'un de SES lots), sans
+  exiger qu'elles aient déjà reçu le DCE ; chacune ne reçoit que ceux des documents choisis qui touchent ses lots
+  (`ContexteEnvoiDce.piecesChoisies`), avec le tableau d'indices complet, ni pièces du marché ni nouveau lien de dépôt (le
+  sien reste valable). Ce n'est pas la transmission du DCE : `marquageEnvoi` ne pose rien (`dce_transmis_le` intact). Modèle
+  `MODELE_*_DOCUMENTS`. Pas de suivi « déjà envoyé » par document. Tests : `dceEnvoiDocuments.test.ts`.
 - **Ajout d'une entreprise** (`EntrepriseAddForm.tsx`, bouton « Ajouter » de l'en-tête) : un mini
   formulaire au-dessus du tableau (entreprise choisie dans les contacts ou créée sur place, email,
   corps d'état, lots, dates, DCE à envoyer) remplace l'ancienne ligne vide ajoutée tout en bas. À

@@ -105,9 +105,11 @@ export function rattacherPieces<D extends EntreePieceDce>(
 /** Dépose le PDF dans les documents de l'affaire (nouveau document, ou nouvelle version) et rend son identifiant. */
 export async function deposerFichierDce(opts: {
   projectId: string; nomFichier: string; blob: Blob; existantId?: string;
+  /** Type du fichier déposé ; PDF par défaut (le DPGF Excel passe le type du classeur). */
+  mimeType?: string;
 }): Promise<string> {
   const form = new FormData();
-  form.append('file', new File([opts.blob], opts.nomFichier, { type: 'application/pdf' }));
+  form.append('file', new File([opts.blob], opts.nomFichier, { type: opts.mimeType ?? 'application/pdf' }));
   form.append('name', opts.nomFichier);
   form.append('category', 'DCE');
   form.append('phase', 'ACT');

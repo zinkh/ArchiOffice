@@ -29,11 +29,15 @@ export default function DceVersementPro({ projectId, projectName, codeAffaire, l
   documentsAffaire: DocumentDce[];
   onVerser: (versements: Array<{ spec: SpecPieceDce; documentId: string }>) => void;
 }) {
-  const [enCours, setEnCours] = useState<'cctp' | 'dpgf' | null>(null);
+  const [enCours, setEnCours] = useState<'cctp' | 'dpgf' | 'dpgf_xlsx' | null>(null);
   const [message, setMessage] = useState<{ texte: string; erreur: boolean } | null>(null);
 
-  const verser = async (doc: 'cctp' | 'dpgf') => {
-    setEnCours(doc); setMessage(null);
+  /** `dpgf_xlsx` : le DPGF en classeur Excel (sans prix, comme le PDF), versé comme une pièce à part du PDF du même lot. */
+  const verser = async (choix: 'cctp' | 'dpgf' | 'dpgf_xlsx') => {
+    const doc = choix === 'cctp' ? 'cctp' : 'dpgf';
+    const excel = choix === 'dpgf_xlsx';
+    const etiquette = excel ? 'DPGF Excel' : doc.toUpperCase();
+    setEnCours(choix); setMessage(null);
     try {
       const dpgf = await apiFetch<DPGF>(`/api/projects/${encodeURIComponent(projectId)}/dpgf`);
       if (!dpgf?.lots?.length) throw new Error('Aucun lot dans le document PRO : rédigez le CCTP ou le DPGF avant de le verser.');
@@ -46,29 +50,33 @@ export default function DceVersementPro({ projectId, projectName, codeAffaire, l
           ?? lots.find(l => l.lot_number.trim().toLowerCase() === String(lot.numero).trim().toLowerCase());
         if (!lotProjet) { sansLot.push(`Lot ${lot.numero}`); continue; }
         const res = await produireDossier({
-          dpgf, bpu: null, documents: { [doc]: 'pdf' }, selection: { ...SELECTION_COMPLETE, lotNumeros: [lot.numero] },
+          dpgf, bpu: null, documents: { [doc]: excel ? 'autre' : 'pdf' }, selection: { ...SELECTION_COMPLETE, lotNumeros: [lot.numero] },
           avecPrix: false, cctpParBatiment: false, parLot: false, projectName, settings,
         });
         const fichier = res.fichiers[0];
         if (!fichier) continue; // lot sans contenu pour ce document
         const spec: SpecPieceDce = {
           typeDoc: doc === 'cctp' ? 'CCTP' : 'DPGF',
-          nom: `${doc === 'cctp' ? 'CCTP' : 'DPGF'} - ${suffixeLot(lot)}`, lotsIds: [lotProjet.id],
+          // Le classeur est une pièce distincte du PDF : même type, autre intitulé, donc jamais une « nouvelle version » du PDF.
+          nom: `${excel ? 'DPGF (Excel)' : doc === 'cctp' ? 'CCTP' : 'DPGF'} - ${suffixeLot(lot)}`, lotsIds: [lotProjet.id],
         };
         // Nom systématique Code_Pièce_NumLot-NomLot-Indice : l'indice est celui que le serveur donnera à ce versement.
         const existant = documentDeLaPiece(dce, documentsAffaire, spec);
         const nomFichier = nomFichierDce({
           code: codeAffaire, piece: spec.typeDoc, lot: { numero: String(lot.numero), titre: lot.titre },
-          indice: existant ? indiceSuivant(existant.indice) : 'A',
+          indice: existant ? indiceSuivant(existant.indice) : 'A', ext: excel ? 'xlsx' : 'pdf',
         });
-        const documentId = await deposerFichierDce({ projectId, nomFichier, blob: fichier.blob, existantId: existant?.id });
+        const documentId = await deposerFichierDce({
+          projectId, nomFichier, blob: fichier.blob, existantId: existant?.id,
+          mimeType: excel ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : undefined,
+        });
         if (!existant) nouvelles++;
         versements.push({ spec, documentId });
       }
-      if (versements.length === 0) throw new Error(`Aucun lot du ${doc.toUpperCase()} n'a de contenu à verser.`);
+      if (versements.length === 0) throw new Error(`Aucun lot du ${etiquette} n'a de contenu à verser.`);
       onVerser(versements);
       setMessage({
-        texte: `${versements.length} fichier${versements.length > 1 ? 's' : ''} ${doc.toUpperCase()} versé${versements.length > 1 ? 's' : ''} au DCE (${nouvelles} nouveau${nouvelles > 1 ? 'x' : ''}, ${versements.length - nouvelles} mis à jour). Chaque entreprise ne reçoit que ceux de ses lots.`
+        texte: `${versements.length} fichier${versements.length > 1 ? 's' : ''} ${etiquette} versé${versements.length > 1 ? 's' : ''} au DCE (${nouvelles} nouveau${nouvelles > 1 ? 'x' : ''}, ${versements.length - nouvelles} mis à jour). Chaque entreprise ne reçoit que ceux de ses lots.`
           + (sansLot.length ? ` Non versés, lot absent de l'affaire : ${sansLot.join(', ')}.` : ''),
         erreur: false,
       });
@@ -79,13 +87,17 @@ export default function DceVersementPro({ projectId, projectName, codeAffaire, l
 
   return (
     <div className="flex flex-wrap items-center gap-2 px-5 py-3 border-b border-[var(--tblr-border)]">
-      <span className="text-[0.6875rem] font-semibold text-[var(--tblr-muted)]">Verser au DCE, un PDF par lot :</span>
+      <span className="text-[0.6875rem] font-semibold text-[var(--tblr-muted)]">Verser au DCE, un fichier par lot :</span>
       <button type="button" className={BOUTON} disabled={!!enCours} onClick={() => verser('cctp')}>
         <IconFolderPlus size={13} /> {enCours === 'cctp' ? 'Versement…' : 'CCTP'}
       </button>
       <button type="button" className={BOUTON} disabled={!!enCours} onClick={() => verser('dpgf')}
         title="Le DPGF est versé sans prix, pour être chiffré par les entreprises">
         <IconFolderPlus size={13} /> {enCours === 'dpgf' ? 'Versement…' : 'DPGF (sans prix)'}
+      </button>
+      <button type="button" className={BOUTON} disabled={!!enCours} onClick={() => verser('dpgf_xlsx')}
+        title="Le DPGF au format Excel, sans prix : les entreprises le chiffrent directement dans le classeur">
+        <IconFolderPlus size={13} /> {enCours === 'dpgf_xlsx' ? 'Versement…' : 'DPGF Excel (sans prix)'}
       </button>
       {message && <p role={message.erreur ? 'alert' : 'status'} className={`basis-full text-xs font-bold ${message.erreur ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{message.texte}</p>}
     </div>

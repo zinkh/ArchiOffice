@@ -15,7 +15,7 @@ import type { EntrepriseSuivi } from '../../lib/actEntreprises';
 import type { PieceMarcheGeneree } from '../../lib/marchePieces';
 import { LIBELLE_MOTIF, lignesCochees, planEnvoiGroupe, type ModeEnvoi } from '../../lib/dceEnvoiGroupe';
 import {
-  JETONS_MODELE, MODELE_CORPS, MODELE_CORPS_ADDITIF, MODELE_SUJET_ADDITIF, MODELE_CORPS_QUANTITES, MODELE_CORPS_REPONSE, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_QUANTITES, MODELE_SUJET_REPONSE, MODELE_SUJET_VISITE, blocsMessageDce, jetonsInconnus, remplirModele,
+  JETONS_MODELE, MODELE_CORPS, MODELE_CORPS_ADDITIF, MODELE_CORPS_DOCUMENTS, MODELE_SUJET_DOCUMENTS, MODELE_SUJET_ADDITIF, MODELE_CORPS_QUANTITES, MODELE_CORPS_REPONSE, MODELE_CORPS_VISITE, MODELE_SUJET, MODELE_SUJET_QUANTITES, MODELE_SUJET_REPONSE, MODELE_SUJET_VISITE, blocsMessageDce, jetonsInconnus, remplirModele,
 } from '../../lib/dceEnvoiMessage';
 import { donneesSansReseau, preparerEnvoiEntreprise, type ContexteEnvoiDce } from '../../lib/dceEnvoiPreparation';
 
@@ -38,6 +38,11 @@ const TEXTES: Record<ModeEnvoi, { sujet: string; corps: string; objet: string; v
     sujet: MODELE_SUJET_ADDITIF, corps: MODELE_CORPS_ADDITIF, objet: 'l\'additif', verbe: 'Envoyer l\'additif à',
     description: 'Seules les entreprises qui ont déjà reçu le DCE et que les pièces modifiées concernent sont proposées. Chacune reçoit son propre message, avec un lien « j\'ai bien reçu » qui lui est personnel.',
     pied: 'Les fichiers des pièces modifiées et le tableau des indices sont joints à chaque message. Aucun nouveau lien de dépôt n\'est créé : celui de l\'entreprise reste valable.',
+  },
+  documents: {
+    sujet: MODELE_SUJET_DOCUMENTS, corps: MODELE_CORPS_DOCUMENTS, objet: 'les documents choisis', verbe: 'Envoyer les documents à',
+    description: 'Seules les entreprises que ces documents concernent (leurs lots) sont proposées. Chacune reçoit son propre message, avec ceux de ces documents qui concernent ses lots. Les entreprises sans adresse ou marquées « ne répond pas » ne peuvent pas être cochées.',
+    pied: 'Les fichiers choisis et le tableau des indices sont joints à chaque message. Ni pièces du marché ni nouveau lien de dépôt : celui de l\'entreprise reste valable. L\'envoi ne vaut pas transmission du DCE.',
   },
   quantites: {
     sujet: MODELE_SUJET_QUANTITES, corps: MODELE_CORPS_QUANTITES, objet: 'la demande de confirmation des quantités', verbe: 'Demander confirmation à',
@@ -145,7 +150,7 @@ export default function DceEnvoiGroupeDialog({ titre, mode, dejaDiffusee, entrep
       maj(id, { etat: 'encours' });
       try {
         // Une convocation ne joint rien et ne crée aucun lien de dépôt : pas de préparation réseau.
-        const prepBrute = mode === 'dce' || mode === 'additif' || mode === 'quantites'
+        const prepBrute = mode === 'dce' || mode === 'additif' || mode === 'quantites' || mode === 'documents'
           ? await preparerEnvoiEntreprise(ctx, ligne.entreprise)
           : { fichiers: [] as File[], donnees: donneesSansReseau(contexte, ligne.entreprise) };
         const prep = mode === 'additif' && prepBrute.donnees.additif
