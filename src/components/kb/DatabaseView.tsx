@@ -2,7 +2,7 @@
 // étiquettes colorées, recherche, filtres, tris, colonnes masquables, ajout de ligne et de colonne.
 // Les modifications s'appliquent tout de suite puis partent au serveur ; un échec recharge les lignes.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence } from 'motion/react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   IconArrowUpRight, IconCalendar, IconCheckbox, IconDots, IconHash, IconLink, IconList, IconPlus, IconSearch,
   IconTags, IconTrash, IconTypography, IconLayoutList, IconUpload,
@@ -64,8 +64,7 @@ function PropertyHeader({ property, onRename, onDelete, onHide }: {
         onClick={() => setOpen(true)}
         aria-label={`${t('kb_column_menu')} : ${property.name}`}
         aria-haspopup="dialog"
-        className="ml-auto p-1 rounded hover:bg-[var(--tblr-surface)]"
-        style={{ color: 'var(--tblr-muted)' }}
+        className="kb-ghost kb-reveal ml-auto !min-h-0 !p-1"
       >
         <IconDots size={14} aria-hidden />
       </button>
@@ -110,7 +109,7 @@ function AddPropertyButton({ onAdd }: { onAdd: (name: string, type: Exclude<KbPr
 
   return (
     <>
-      <button ref={anchor} type="button" onClick={() => setOpen(true)} aria-label={t('kb_column_add') as string} aria-haspopup="dialog" className="p-1 rounded hover:bg-[var(--tblr-surface)]" style={{ color: 'var(--tblr-muted)' }}>
+      <button ref={anchor} type="button" onClick={() => setOpen(true)} aria-label={t('kb_column_add') as string} aria-haspopup="dialog" className="kb-ghost !min-h-0 !p-1">
         <IconPlus size={16} aria-hidden />
       </button>
       <KbPopover anchorRef={anchor} open={open} onClose={() => setOpen(false)} label={t('kb_column_add') as string} width={260}>
@@ -138,7 +137,8 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [freshRowId, setFreshRowId] = useState<string | null>(null);
+  const saveTimer =useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -180,6 +180,7 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
   const addRow = async () => {
     try {
       const created = await kbApi.createPage({ parent_id: database.id, title: '' });
+      setFreshRowId(created.id);
       setRows(prev => [...prev, { ...created, properties: created.properties ?? {} }]);
     } catch (e: any) { showToast(errorText(e), 'error'); }
   };
@@ -257,30 +258,32 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
   if (loading) return <ListSkeleton rows={4} />;
   if (failed) return <ErrorState onRetry={() => void load()} />;
 
+  const toolsActive = filtersActive || (config.sorts?.length ?? 0) > 0 || hidden.length > 0;
+
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <h2 className="text-[1.0625rem] font-semibold mr-auto" style={{ color: 'var(--tblr-text)' }}>{database.title || t('kb_untitled')}</h2>
-        <KbViewControls properties={properties} config={config} onChange={updateConfig} />
-        <label className="relative">
-          <span className="sr-only">{t('kb_search_rows')}</span>
-          <IconSearch size={14} aria-hidden className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--tblr-muted)' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('kb_search_rows') as string} className="tblr-input pl-8 w-40 sm:w-52" />
-        </label>
-        <button type="button" onClick={() => setImportOpen(true)} className="btn btn-secondary inline-flex items-center gap-1.5" aria-label={t('kb_import') as string} aria-haspopup="dialog">
-          <IconUpload size={16} aria-hidden /><span className="hidden sm:inline">{t('kb_import')}</span>
-        </button>
-        <button type="button" onClick={() => void addRow()} className="btn btn-primary inline-flex items-center gap-1.5">
-          <IconPlus size={16} aria-hidden />{t('kb_new')}
-        </button>
+    <div className="kb-db">
+      <h2 className="sr-only">{database.title || t('kb_untitled')}</h2>
+      <div className="flex flex-wrap items-center gap-1 mb-1 min-h-8">
+        <p className="mr-auto px-1 text-[0.8125rem]" style={{ color: 'var(--tblr-muted)' }}>{t('kb_row_count', { count: shownRows.length })}</p>
+        <div className="kb-tools flex flex-wrap items-center gap-0.5" data-active={toolsActive}>
+          <KbViewControls properties={properties} config={config} onChange={updateConfig} />
+          <label className="kb-search">
+            <span className="sr-only">{t('kb_search_rows')}</span>
+            <IconSearch size={14} aria-hidden />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('kb_search_rows') as string} />
+          </label>
+          <button type="button" onClick={() => setImportOpen(true)} className="kb-ghost" aria-label={t('kb_import') as string} title={t('kb_import') as string} aria-haspopup="dialog">
+            <IconUpload size={16} aria-hidden />
+          </button>
+        </div>
       </div>
 
-      <div className="card overflow-x-auto">
-        <table className="tblr-table w-full" style={{ minWidth: `${Math.max(1, visibleProperties.length) * 12}rem` }}>
+      <div className="overflow-x-auto">
+        <table className="kb-table" style={{ minWidth: `${Math.max(1, visibleProperties.length) * 11}rem` }}>
           <thead>
             <tr>
               {visibleProperties.map(property => (
-                <th key={property.id} scope="col" style={{ width: property.width ? `${property.width}px` : undefined }}>
+                <th key={property.id} scope="col" className="kb-hover-reveal" style={{ width: property.width ? `${property.width}px` : undefined }}>
                   <PropertyHeader
                     property={property}
                     onRename={name => void renameProperty(property, name)}
@@ -301,9 +304,15 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
               </tr>
             )}
             {shownRows.map(row => (
-              <tr key={row.id} className="group">
+              // Seule une ligne qu'on vient d'ajouter apparaît en fondu : pas de cascade à l'ouverture de la base.
+              <motion.tr
+                key={row.id}
+                className="kb-hover-reveal"
+                initial={row.id === freshRowId ? { opacity: 0, y: -8 } : false}
+                animate={{ opacity: 1, y: 0 }}
+              >
                 {visibleProperties.map(property => (
-                  <td key={property.id} className="align-top">
+                  <td key={property.id}>
                     <div className="flex items-start gap-1">
                       <div className="flex-1 min-w-0">
                         <KbCell
@@ -318,8 +327,7 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
                           type="button"
                           onClick={() => onOpenRow(row.id)}
                           aria-label={`${t('kb_open_row')} : ${row.title || t('kb_untitled')}`}
-                          className="p-1 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 hover:bg-[var(--tblr-surface-2)]"
-                          style={{ color: 'var(--tblr-muted)' }}
+                          className="kb-ghost kb-reveal !min-h-0 !p-1"
                         >
                           <IconArrowUpRight size={14} aria-hidden />
                         </button>
@@ -327,23 +335,24 @@ export function DatabaseView({ database, onOpenRow }: DatabaseViewProps) {
                     </div>
                   </td>
                 ))}
-                <td className="align-top text-right">
+                <td className="text-right">
                   <button
                     type="button"
                     onClick={() => void trashRow(row)}
                     aria-label={`${t('kb_row_trash')} : ${row.title || t('kb_untitled')}`}
-                    className="p-1 rounded opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 hover:bg-[var(--tblr-surface-2)]"
-                    style={{ color: 'var(--tblr-muted)' }}
+                    className="kb-ghost kb-reveal !min-h-0 !p-1"
                   >
                     <IconTrash size={14} aria-hidden />
                   </button>
                 </td>
-              </tr>
+              </motion.tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-[0.8125rem]" style={{ color: 'var(--tblr-muted)' }}>{t('kb_row_count', { count: shownRows.length })}</p>
+      <button type="button" onClick={() => void addRow()} className="kb-ghost mt-1 w-full justify-start">
+        <IconPlus size={16} aria-hidden />{t('kb_new')}
+      </button>
 
       {dialog}
       <Toast toast={toast} />

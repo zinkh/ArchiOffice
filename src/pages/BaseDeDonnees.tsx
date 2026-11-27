@@ -2,12 +2,12 @@
 // (tableaux typés comme « Fabricants »). Route /base-de-donnees/:pageId?. API : server/routes/knowledgeBase.ts.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AnimatePresence } from 'motion/react';
-import { IconDatabase, IconMenu2, IconUpload } from '@tabler/icons-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { IconDatabase, IconFilePlus, IconFileText, IconLayoutSidebar, IconTable, IconUpload } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import type { KbPage } from '../lib/kb';
 import { kbApi } from '../lib/kbApi';
-import { kbBreadcrumb } from '../lib/kbTree';
+import { buildKbTree, kbBreadcrumb } from '../lib/kbTree';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { useConfirmDialog } from '../components/ui/ConfirmDialog';
 import { Toast } from '../components/ui/Toast';
@@ -16,7 +16,9 @@ import { KbImportDialog } from '../components/kb/KbImportDialog';
 import { KbSidebar } from '../components/kb/KbSidebar';
 import { KbPageView } from '../components/kb/KbPageView';
 
-const PRODUCT_TAGS: Array<{ label: string; color: 'bleu' | 'brique' | 'ocre' | 'gris' }> = [
+const NAV_KEY = 'kb:nav-open';
+
+const PRODUCT_TAGS:Array<{ label: string; color: 'bleu' | 'brique' | 'ocre' | 'gris' }> = [
   { label: 'Construction vitrée', color: 'bleu' },
   { label: 'Pavés de verre', color: 'brique' },
   { label: 'Menuiseries extérieures', color: 'ocre' },
@@ -36,12 +38,20 @@ export default function BaseDeDonnees() {
   const [page, setPage] = useState<KbPage | null>(null);
   const [pageLoading, setPageLoading] = useState(false);
   const [pageFailed, setPageFailed] = useState(false);
-  const [navOpen, setNavOpen] = useState(false);
+  // Volet des pages replié par défaut (surface épurée) ; le choix est mémorisé dans le navigateur (confort seulement).
+  const [navOpen, setNavOpen] = useState(() => {
+    try { return localStorage.getItem(NAV_KEY) === '1'; } catch { return false; }
+  });
+  const toggleNav = () => setNavOpen(open => {
+    try { localStorage.setItem(NAV_KEY, open ? '0' : '1'); } catch { /* confort seulement */ }
+    return !open;
+  });
   const [importOpen, setImportOpen] = useState(false);
 
   const errorText = (e: any) => e?.message || (t('kb_error_generic') as string);
   const openPage = useCallback((id: string | null) => {
-    setNavOpen(false);
+    // Sur téléphone le volet recouvre la page : il se referme à l'ouverture d'une page. Au bureau il reste en place.
+    if (window.matchMedia?.('(max-width: 1023px)').matches) setNavOpen(false);
     navigate(id ? `/base-de-donnees/${id}` : '/base-de-donnees');
   }, [navigate]);
 
@@ -148,67 +158,109 @@ export default function BaseDeDonnees() {
     catch (e: any) { showToast(errorText(e), 'error'); }
   };
 
+  const rootPages = buildKbTree(pages).slice(0, 8).map(node => node.page);
+
   if (treeLoading) return <ListSkeleton rows={6} />;
   if (treeFailed) return <ErrorState onRetry={() => { setTreeLoading(true); void loadTree(); }} />;
 
   return (
-    <div className="lg:grid lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-6 items-start">
+    <div className="kb-canvas">
       <button
         type="button"
-        onClick={() => setNavOpen(v => !v)}
+        onClick={toggleNav}
         aria-expanded={navOpen}
-        className="btn btn-secondary mb-3 inline-flex items-center gap-1.5 lg:hidden"
+        className="kb-ghost mb-2"
       >
-        <IconMenu2 size={16} aria-hidden />{t('kb_toggle_pages')}
+        <IconLayoutSidebar size={16} aria-hidden />{t('kb_toggle_pages')}
       </button>
-      <aside className={`${navOpen ? 'block' : 'hidden'} lg:block mb-4 lg:mb-0 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto`}>
-        <KbSidebar
-          pages={pages}
-          activeId={pageId ?? null}
-          onOpen={openPage}
-          onCreate={(kind, parentId) => void create(kind, parentId)}
-          onToggleFavorite={target => void toggleFavorite(target)}
-          onTrash={target => void trash(target)}
-          onRestore={target => void restore(target)}
-          onDeleteForever={target => void deleteForever(target)}
-        />
-      </aside>
+      <div className="lg:flex lg:items-start lg:gap-8">
+        <AnimatePresence initial={false}>
+          {navOpen && (
+            <motion.aside
+              key="pages"
+              initial={{ opacity: 0, x: -14 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -14 }}
+              className="mb-4 lg:mb-0 lg:w-60 lg:shrink-0 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto"
+            >
+              <KbSidebar
+                pages={pages}
+                activeId={pageId ?? null}
+                onOpen={openPage}
+                onCreate={(kind, parentId) => void create(kind, parentId)}
+                onToggleFavorite={target => void toggleFavorite(target)}
+                onTrash={target => void trash(target)}
+                onRestore={target => void restore(target)}
+                onDeleteForever={target => void deleteForever(target)}
+              />
+            </motion.aside>
+          )}
+        </AnimatePresence>
 
-      <main className="min-w-0">
-        {pageId && pageLoading && <ListSkeleton rows={4} />}
-        {pageId && pageFailed && <ErrorState message={t('kb_page_missing') as string} onRetry={() => openPage(null)} />}
-        {pageId && page && !pageLoading && !pageFailed && (
-          <KbPageView
-            key={page.id}
-            page={page}
-            pages={pages}
-            onOpen={openPage}
-            onLocalChange={patch => updateLocal(page.id, patch)}
-            onTrash={target => void trash(target)}
-          />
-        )}
-        {!pageId && (
-          <section className="card p-6 max-w-2xl" aria-label={t('kb_welcome_title') as string}>
-            <div className="flex items-center gap-2 mb-2">
-              <IconDatabase size={20} aria-hidden style={{ color: 'var(--tblr-primary)' }} />
-              <h1 className="text-[1.25rem] font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('kb_welcome_title')}</h1>
-            </div>
-            <p className="mb-4" style={{ color: 'var(--tblr-muted)' }}>{t('kb_welcome_text')}</p>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => void create('page', null)} className="btn btn-primary">{t('kb_new_page')}</button>
-              <button type="button" onClick={() => void create('database', null)} className="btn btn-secondary">{t('kb_new_database')}</button>
-              <button type="button" onClick={() => setImportOpen(true)} className="btn btn-secondary inline-flex items-center gap-1.5" aria-haspopup="dialog">
-                <IconUpload size={16} aria-hidden />{t('kb_import_file')}
-              </button>
-            </div>
-            <h2 className="mt-6 mb-2 text-[0.6875rem] font-semibold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('kb_templates')}</h2>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => void createFabricants()} className="btn btn-secondary">{t('kb_template_fabricants')}</button>
-              <button type="button" onClick={() => void createDetails()} className="btn btn-secondary">{t('kb_template_details')}</button>
-            </div>
-          </section>
-        )}
-      </main>
+        <motion.main layout="position" className="min-w-0 flex-1">
+          {pageId && pageLoading && <ListSkeleton rows={4} />}
+          {pageId && pageFailed && <ErrorState message={t('kb_page_missing') as string} onRetry={() => openPage(null)} />}
+          {pageId && page && !pageLoading && !pageFailed && (
+            <motion.div
+              key={page.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className={`mx-auto w-full ${page.kind === 'database' ? 'max-w-6xl' : 'max-w-[46rem]'}`}
+            >
+              <KbPageView
+                page={page}
+                pages={pages}
+                onOpen={openPage}
+                onLocalChange={patch => updateLocal(page.id, patch)}
+                onTrash={target => void trash(target)}
+              />
+            </motion.div>
+          )}
+          {!pageId && (
+            <motion.section
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mx-auto w-full max-w-[46rem] pt-8"
+              aria-label={t('kb_welcome_title') as string}
+            >
+              <IconDatabase size={28} aria-hidden style={{ color: 'var(--tblr-muted)' }} />
+              <h1 className="mt-3 text-[2.25rem] font-bold leading-tight tracking-tight" style={{ color: 'var(--tblr-text)' }}>{t('kb_welcome_title')}</h1>
+              <p className="mt-2 mb-6 max-w-xl" style={{ color: 'var(--tblr-muted)' }}>{t('kb_welcome_text')}</p>
+              <div className="flex flex-col items-start gap-0.5">
+                <button type="button" onClick={() => void create('page', null)} className="kb-ghost" style={{ color: 'var(--tblr-text)' }}>
+                  <IconFilePlus size={16} aria-hidden />{t('kb_new_page')}
+                </button>
+                <button type="button" onClick={() => void create('database', null)} className="kb-ghost" style={{ color: 'var(--tblr-text)' }}>
+                  <IconDatabase size={16} aria-hidden />{t('kb_new_database')}
+                </button>
+                <button type="button" onClick={() => setImportOpen(true)} className="kb-ghost" style={{ color: 'var(--tblr-text)' }} aria-haspopup="dialog">
+                  <IconUpload size={16} aria-hidden />{t('kb_import_file')}
+                </button>
+              </div>
+              <h2 className="mt-8 mb-1 px-2.5 text-[0.75rem] font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('kb_templates')}</h2>
+              <div className="flex flex-col items-start gap-0.5">
+                <button type="button" onClick={() => void createFabricants()} className="kb-ghost" style={{ color: 'var(--tblr-text)' }}><IconTable size={16} aria-hidden />{t('kb_template_fabricants')}</button>
+                <button type="button" onClick={() => void createDetails()} className="kb-ghost" style={{ color: 'var(--tblr-text)' }}><IconFileText size={16} aria-hidden />{t('kb_template_details')}</button>
+              </div>
+              {rootPages.length > 0 && (
+                <>
+                  <h2 className="mt-8 mb-1 px-2.5 text-[0.75rem] font-medium" style={{ color: 'var(--tblr-muted)' }}>{t('kb_pages')}</h2>
+                  <ul className="flex flex-col items-start gap-0.5">
+                    {rootPages.map(root => (
+                      <li key={root.id}>
+                        <button type="button" onClick={() => openPage(root.id)} className="kb-ghost" style={{ color: 'var(--tblr-text)' }}>
+                          <span aria-hidden className="w-4 text-center leading-none">{root.icon || (root.kind === 'database' ? '▦' : '▫')}</span>
+                          <span className="truncate">{root.title || t('kb_untitled')}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </motion.section>
+          )}
+        </motion.main>
+      </div>
 
       {dialog}
       <Toast toast={toast} />

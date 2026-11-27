@@ -39,7 +39,7 @@ export function KbPopover({ anchorRef, open, onClose, label, width = 260, childr
       <div
         role="dialog"
         aria-label={label}
-        className="fixed z-[61] p-1 rounded-lg border overflow-y-auto"
+        className="kb-pop fixed z-[61] p-1.5 rounded-xl border overflow-y-auto backdrop-blur-sm"
         style={{
           top: pos.top, left: pos.left, width,
           maxHeight: `calc(100dvh - ${pos.top + 16}px)`,

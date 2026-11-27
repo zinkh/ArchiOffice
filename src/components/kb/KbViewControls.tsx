@@ -17,10 +17,9 @@ function ControlButton({ anchorRef, label, count, icon, onClick }: {
   anchorRef: React.RefObject<HTMLButtonElement | null>; label: string; count: number; icon: React.ReactNode; onClick: () => void;
 }) {
   return (
-    <button ref={anchorRef} type="button" onClick={onClick} className="btn btn-secondary inline-flex items-center gap-1.5" aria-haspopup="dialog" aria-label={label}>
+    <button ref={anchorRef} type="button" onClick={onClick} className="kb-ghost" aria-haspopup="dialog" aria-label={label} title={label}>
       {icon}
-      <span className="hidden sm:inline">{label}</span>
-      {count > 0 && <span className="tblr-badge">{count}</span>}
+      {count > 0 && <span className="text-[0.75rem] font-semibold" style={{ color: 'var(--tblr-primary)' }}>{count}</span>}
     </button>
   );
 }
