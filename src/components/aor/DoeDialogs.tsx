@@ -7,6 +7,7 @@ import { IconDownload, IconAlertTriangle } from '@tabler/icons-react';
 import { ModalShell } from '../ui/ModalShell';
 import { openSignedUrl } from '../../lib/signedStorageUrl';
 import { isValidEmail } from '../../lib/crDiffusion';
+import { ContactRecipientPicker } from '../ContactRecipientPicker';
 import { formatOctets } from '../../lib/consultationDepot';
 import {
   DOE_PIECES, RELANCE_INTERVALLE_MAX, RELANCE_INTERVALLE_MIN, RELANCE_MAX_BORNE, avisDocument,
@@ -238,6 +239,7 @@ export function DoeVisaDialog({ entreprise, onClose, onSubmit }: {
             {envoyer && (
               <div>
                 <label className={LABEL_DOE} htmlFor="doe-visa-email">{t('doe_email')}</label>
+                <ContactRecipientPicker className="mb-2" onPick={c => { if (c.email) setEmail(c.email); }} />
                 <input id="doe-visa-email" type="email" className={CHAMP_DOE} value={email} onChange={e => setEmail(e.target.value)} />
                 {avis === 'defavorable' && <p className="text-xs mt-1 text-[var(--tblr-muted)]">{t('doe_visa_link_hint')}</p>}
               </div>
@@ -371,6 +373,7 @@ export function DoeArchiveDialog({ etat, onClose, onSubmit }: {
             {(envoyer || etat.moa.email) && (
               <div>
                 <label className={LABEL_DOE} htmlFor="doe-archive-email">{t('doe_archive_recipient', { nom: etat.moa.nom ?? '' })}</label>
+                <ContactRecipientPicker className="mb-2" onPick={c => { if (c.email) setDestinataire(c.email); }} />
                 <input id="doe-archive-email" type="email" className={CHAMP_DOE} value={destinataire} onChange={e => setDestinataire(e.target.value)} />
                 <p className="text-xs mt-1 text-[var(--tblr-muted)]">{t('doe_archive_send_hint')}</p>
               </div>

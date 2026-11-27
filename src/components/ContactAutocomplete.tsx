@@ -9,7 +9,8 @@ interface ContactAutocompleteProps {
   contacts: Contact[];
   value: string; // contact_id
   onChange: (contactId: string) => void;
-  onAddNew?: () => void;
+  /** Reçoit le texte déjà tapé, pour préremplir la fiche du nouveau contact. */
+  onAddNew?: (query: string) => void;
   placeholder?: string;
   className?: string;
   inputClassName?: string;
@@ -101,7 +102,7 @@ export function ContactAutocomplete({ contacts, value, onChange, onAddNew, place
             type="button"
             onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
-              onAddNew();
+              onAddNew(query);
             }}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 p-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md transition-colors"
             title={addNewLabel}
@@ -120,7 +121,7 @@ export function ContactAutocomplete({ contacts, value, onChange, onAddNew, place
           {onAddNew && (
             <button
               type="button"
-              onClick={() => { onAddNew(); setShowSuggestions(false); }}
+              onClick={() => { onAddNew(query); setShowSuggestions(false); }}
               className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2 transition-colors border-b border-zinc-100 dark:border-zinc-700 text-blue-600 dark:text-blue-400 font-bold sticky top-0 bg-white dark:bg-zinc-800 z-10"
             >
               <div className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center">

@@ -266,6 +266,7 @@ import type { Project } from '@/src/types';
 ### Component Style
 
 - **Toujours suivre `DESIGN.md` (racine) pour toute interface** : couleurs en `var(--tblr-*)` (jamais `bg-zinc-*`, `bg-blue-600`, hex en dur, ni classes shadcn comme `bg-primary` ou `bg-card`, qui n'existent pas ici), classes `.btn-*`, `.card`, `.tblr-input`, deux rayons seulement (4 px, 8 px), pas de `shadow-lg` sur une carte, texte 11 px minimum en `rem`. Le relire avant de toucher à un écran.
+- **Coordonnées : toujours depuis les contacts.** Chaque fois qu'un écran demande un nom, un e-mail ou un téléphone (destinataire, diffusion, signataire, émetteur, participant...), le choix se fait dans les contacts du cabinet par une liste déroulante avec recherche, dont une ligne « Créer un nouveau contact » ouvre `ContactModal` sans quitter l'écran. Utiliser `ContactAutocomplete` (champ lié à un `contact_id`) ou `ContactRecipientPicker` (renseigne les champs de l'écran), jamais une saisie libre seule. Le champ reste modifiable après le choix.
 - Tailwind utility classes for all styling
 - `clsx` for conditional class merging
 - Tabler Icons (`@tabler/icons-react`) for icons

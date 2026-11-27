@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils';
 import { launchOriginRef } from '../../lib/launchOrigin';
 import { DEFAULT_SPRING } from '../../lib/motion';
 import type { UserProfile } from '../../services/userService';
+import { ContactRecipientPicker, contactDisplayName } from '../ContactRecipientPicker';
 import { FOCUS_FIELD, FOCUS_RING, MONO_LABEL, ROLES, RoleGlyph, roleTone, tint, type SystemRole } from './teamShared';
 
 type NewUser = Omit<UserProfile, 'id'>;
@@ -73,6 +74,18 @@ export default function AddMemberModal({ isSubmitting, onClose, onSubmit }: AddM
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 px-5 py-5 sm:px-6">
+          <div>
+            <span className={cn(MONO_LABEL, 'mb-1.5 block')}>Reprendre un contact de l'agence</span>
+            <ContactRecipientPicker
+              initialCategory="Équipe"
+              onPick={c => setForm(f => ({
+                ...f,
+                name: `${c.first_name || ''} ${c.last_name || ''}`.trim() || contactDisplayName(c),
+                email: c.email || c.email_work || f.email,
+                role: f.role || c.job_title || '',
+              }))}
+            />
+          </div>
           <label className="block">
             <span className={cn(MONO_LABEL, 'mb-1.5 block')}>{t('team_full_name_label')}</span>
             <input ref={firstField} type="text" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className={INPUT} placeholder={t('team_full_name_placeholder') as string} />

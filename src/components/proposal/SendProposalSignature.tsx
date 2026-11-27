@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ModalShell } from '../ui/ModalShell';
+import { ContactRecipientPicker, contactDisplayName } from '../ContactRecipientPicker';
 export function SendProposalSignature({ file, proposalId, email, name, onSent, onClose }: {
   file: File; proposalId: string; email: string; name: string; onSent: () => void; onClose: () => void;
 }) {
@@ -20,6 +21,7 @@ export function SendProposalSignature({ file, proposalId, email, name, onSent, o
       <p className="text-sm">{t('signature_provider_current')} <strong>{provider || t('signature_provider_none')}</strong></p>
       <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('proposal_sign_explanation')}</p>
       {error && <p role="alert" style={{ color: 'var(--tblr-danger)' }}>{error}</p>}
+      <ContactRecipientPicker initialCategory="Client" onPick={c => { setName(contactDisplayName(c)); if (c.email) setEmail(c.email); }} />
       <label className="block text-sm" htmlFor="proposal-signer-name">{t('proposal_sign_name')}</label>
       <input id="proposal-signer-name" className="form-control w-full" required maxLength={200} value={recipientName} onChange={e => setName(e.target.value)} />
       <label className="block text-sm" htmlFor="proposal-signer-email">{t('proposal_sign_email')}</label>
