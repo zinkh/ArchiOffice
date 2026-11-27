@@ -16,6 +16,8 @@ export interface AorSectionDef {
   label: string;
   /** Nombre d'éléments affiché dans la barre. */
   count?: number | null;
+  /** Total des éléments : le badge s'affiche « count / total » (ex. réserves ouvertes sur total). */
+  total?: number | null;
   /** Le nombre désigne des éléments en attente : pastille ambre. */
   alert?: boolean;
   children: ReactNode;
@@ -52,7 +54,7 @@ function defilerVers(cible: HTMLElement, behavior: ScrollBehavior) {
   else window.scrollTo({ top: window.scrollY + ecart, behavior });
 }
 
-function Compteur({ count, alert }: { count?: number | null; alert?: boolean }) {
+function Compteur({ count, total, alert }: { count?: number | null; total?: number | null; alert?: boolean }) {
   if (count == null) return null;
   return (
     <span className={cn(
@@ -61,7 +63,7 @@ function Compteur({ count, alert }: { count?: number | null; alert?: boolean }) 
         ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
         : 'bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]',
     )}>
-      {count}
+      {total != null ? `${count} / ${total}` : count}
     </span>
   );
 }
@@ -119,7 +121,7 @@ export function AorLayout({ sections }: { sections: AorSectionDef[] }) {
                   : 'text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)]',
               )}>
               {s.label}
-              <Compteur count={s.count} alert={s.alert} />
+              <Compteur count={s.count} total={s.total} alert={s.alert} />
             </button>
           ))}
         </div>

@@ -5185,7 +5185,7 @@ export default function ProjectDetail() {
             )}
             {activeTab === 'AOR' && (
               <AorLayout sections={[
-                { id: 'reserves', label: t('projectdetail_reserves_title'), count: reservesOuvertes, alert: true, children: (<>
+                { id: 'reserves', label: t('projectdetail_reserves_title'), count: reservesOuvertes, total: reserves.length, alert: true, children: (<>
                 <ReprendreObservationsBanner projectId={id || ''} onReservesChanged={fetchReserves} />
 
                 <ReserveTracker
