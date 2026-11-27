@@ -3,18 +3,19 @@
 // message). Ce module décide, sans rien envoyer, quelles entreprises peuvent recevoir le
 // message et pourquoi les autres sont écartées, puis ce qu'il faut enregistrer après l'envoi.
 import { destinatairesEntreprise, type EntrepriseSuivi } from './actEntreprises';
-import { visiteNotifiee } from './actVisites';
+import { aDejaVisite, visiteNotifiee } from './actVisites';
 
 /** `dce` : envoi du dossier ; `visite` : convocation à la visite ; `reponse` : diffusion d'une réponse publique ; `additif` : modification du DCE ; `quantites` : demande de confirmation des quantités. */
 export type ModeEnvoi = 'dce' | 'visite' | 'reponse' | 'additif' | 'quantites';
 
-export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot' | 'sans_creneau';
+export type MotifExclusion = 'ne_repond_pas' | 'sans_adresse' | 'sans_lot' | 'sans_creneau' | 'deja_visite';
 
 export const LIBELLE_MOTIF: Record<MotifExclusion, string> = {
   ne_repond_pas: 'Marquée « ne répond pas »',
   sans_adresse: 'Aucune adresse e-mail',
   sans_lot: 'Aucun lot assigné',
   sans_creneau: 'Aucun créneau de visite affecté',
+  deja_visite: 'A déjà effectué la visite',
 };
 
 export interface LigneEnvoiGroupe {
@@ -39,6 +40,7 @@ export function planEnvoiGroupe(
       : destinataires.length === 0 ? 'sans_adresse'
       : mode === 'dce' && entreprise.lots_ids.length === 0 ? 'sans_lot'
       : mode === 'visite' && !entreprise.visite_creneau_id ? 'sans_creneau'
+      : mode === 'visite' && aDejaVisite(entreprise) ? 'deja_visite'
       : undefined;
     const dejaEnvoye = mode === 'dce' ? !!entreprise.dce_transmis_le : mode === 'visite' ? visiteNotifiee(entreprise)
       : mode === 'quantites' ? !!entreprise.quantites_demandees_le : dejaDiffusee.has(entreprise.id);
@@ -63,7 +65,7 @@ export function entreprisesDceAEnvoyer<E extends EntrepriseSuivi>(entreprises: E
 
 /** Entreprises à convoquer : un créneau leur est affecté et elles n'en ont pas encore été prévenues. */
 export function entreprisesAConvoquer<E extends EntrepriseSuivi>(entreprises: E[]): E[] {
-  return entreprises.filter(e => !!e.visite_creneau_id && !e.ne_repond_pas && !visiteNotifiee(e));
+  return entreprises.filter(e => !!e.visite_creneau_id && !e.ne_repond_pas && !aDejaVisite(e) && !visiteNotifiee(e));
 }
 
 /**

@@ -87,6 +87,15 @@ migration).
   lien de dépôt). Un créneau modifié depuis la dernière convocation affiche « à renotifier »
   (`aRenotifier`) et l'entreprise redevient cochée ; une entreprise déjà convoquée pour son créneau
   actuel est décochée d'office. La page de dépôt n'affiche pas encore la visite (livraison suivante).
+  **Entreprise ayant déjà visité** (`aDejaVisite` : créneau affecté ET `visite_presence = 'presente'`, `actVisites.ts`) :
+  `visitePourMessage` ne rend rien, donc le jeton `{{visite}}` d'un renvoi du DCE n'annonce ni ne propose aucune visite
+  (individuel et groupé) ; elle n'est plus « à convoquer » (`entreprisesAConvoquer`) et la convocation dédiée l'écarte avec le
+  motif `deja_visite` ; la page de dépôt (`visiteDeLinvitation`, `consultationDepotPublic.ts`) ne lui montre plus de visite.
+  **Exports des visites** (`src/lib/actVisitesExport.ts`, boutons sous « Créneaux de visites ») : liste des entreprises
+  ayant fait la visite avec date et heure (PDF et Excel, `entreprisesAyantVisite`, classées par date puis par nom) et
+  **tableau d'émargement** PDF paysage (`planEmargement`) : une page par créneau avec ses entreprises inscrites, lots, lieu,
+  colonnes représentant, fonction, téléphone et signature à remplir à la main, quatre lignes vierges ; sans créneau défini,
+  une feuille générale reprend toutes les entreprises consultées. Aucune migration. Tests : `actVisitesDejaVisite.test.ts`.
 - **Ajout d'une entreprise** (`EntrepriseAddForm.tsx`, bouton « Ajouter » de l'en-tête) : un mini
   formulaire au-dessus du tableau (entreprise choisie dans les contacts ou créée sur place, email,
   corps d'état, lots, dates, DCE à envoyer) remplace l'ancienne ligne vide ajoutée tout en bas. À

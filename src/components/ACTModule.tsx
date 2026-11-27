@@ -1303,6 +1303,7 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
               onInviterDepot={e => setInviterPour(e.id)}
               entreprises={consultation.entreprises}
               creneauxVisite={consultation.creneaux_visite || []}
+              settings={settings}
               onChangeCreneaux={creneaux_visite => update({ ...consultation, creneaux_visite })}
               visiteSite={consultation.visite_site}
               onChangeVisiteSite={visite_site => update({ ...consultation, visite_site })}

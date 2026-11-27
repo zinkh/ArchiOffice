@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   IconSearch, IconSend, IconLink, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus, IconCalendarEvent, IconPhone,
+  IconClipboardList, IconDownload,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { groupByLot } from '../lib/actExport';
@@ -25,7 +26,9 @@ import { entreprisesAConvoquer, entreprisesDceAEnvoyer, marquageEnvoi, type Mode
 import DceEnvoiGroupeDialog from './act/DceEnvoiGroupeDialog';
 import DossierPartageDialog, { type NouveauPartage } from './act/DossierPartageDialog';
 import { ENTETE_DOSSIER_PARTAGE, ENTETE_DOSSIER_PARTAGE_LIENS, type ElementDossierPartage } from '../lib/dossierPartageMail';
-import { aRenotifier, bilanVisite, libelleVisite, visiteNotifiee, type CreneauVisite, type PresenceVisite, type VisiteSite } from '../lib/actVisites';
+import { aDejaVisite, aRenotifier, bilanVisite, libelleVisite, visiteNotifiee, type CreneauVisite, type PresenceVisite, type VisiteSite } from '../lib/actVisites';
+import { exportEmargementVisiteToPDF, exportVisitesEffectueesToExcel, exportVisitesEffectueesToPDF } from '../lib/actVisitesExport';
+import type { AgencySettings } from '../lib/proposalExport';
 
 export type EntrepriseRow = EntrepriseSuivi & { corps_etat_codes?: string[] };
 
@@ -62,6 +65,8 @@ interface Props {
   onDocumentDepose?: () => void;
   entreprises: EntrepriseRow[];
   creneauxVisite?: CreneauVisite[];
+  /** Réglages du cabinet (en-tête et pied des exports de visite : liste des présents, émargement). */
+  settings?: AgencySettings | null;
   onChangeCreneaux?: (next: CreneauVisite[]) => void;
   /** Lieu et consignes de la visite, cités dans le mail d'envoi du DCE et dans la convocation. */
   visiteSite?: VisiteSite;
@@ -246,7 +251,7 @@ export default function ACTEntreprisesTable({
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
   depot, depotRecuLe, onInviterDepot, projectId, depotDeadlineAt = null, genererPiecesMarche,
   dcePartages = [], onAjouterPartage, onRetirerPartage, onDocumentDepose,
-  creneauxVisite = [], onChangeCreneaux, visiteSite, onChangeVisiteSite,
+  creneauxVisite = [], settings, onChangeCreneaux, visiteSite, onChangeVisiteSite,
   contactsTelephone = entrepriseContacts,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
@@ -306,6 +311,10 @@ export default function ACTEntreprisesTable({
   };
   const dceAEnvoyer = useMemo(() => entreprisesDceAEnvoyer(entreprises), [entreprises]);
   const aConvoquer = useMemo(() => entreprisesAConvoquer(entreprises), [entreprises]);
+  const visitesEffectuees = useMemo(
+    () => entreprises.filter(e => aDejaVisite(e) && creneauxVisite.some(c => c.id === e.visite_creneau_id)).length,
+    [entreprises, creneauxVisite],
+  );
   const contexteVisite = useMemo(() => ({ creneaux: creneauxVisite, site: visiteSite }), [creneauxVisite, visiteSite]);
 
   // Lecture seule : la date d'une remise à traiter nourrit le statut affiché,
@@ -593,6 +602,30 @@ export default function ACTEntreprisesTable({
             </span>
           </div>
         )}
+        <div className="flex items-center gap-2 flex-wrap" role="group" aria-label="Exports des visites">
+          <button type="button" disabled={!settings}
+            onClick={() => settings && exportEmargementVisiteToPDF(entreprises, lots, creneauxVisite, settings, projectName, visiteSite)}
+            title="Feuille à imprimer et à faire signer sur place, une page par créneau"
+            className="inline-flex items-center gap-1 min-h-10 px-3 rounded-lg border border-[var(--tblr-border)] text-sm font-medium hover:bg-[var(--tblr-primary-lt)] disabled:opacity-50">
+            <IconClipboardList size={14} aria-hidden="true" /> Tableau d'émargement (PDF)
+          </button>
+          <button type="button" disabled={!settings || visitesEffectuees === 0}
+            onClick={() => settings && exportVisitesEffectueesToPDF(entreprises, lots, creneauxVisite, settings, projectName, contactsTelephone)}
+            title={visitesEffectuees === 0 ? 'Aucune entreprise n\'est pointée « présente »' : 'Liste des entreprises ayant fait la visite, avec la date'}
+            className="inline-flex items-center gap-1 min-h-10 px-3 rounded-lg border border-[var(--tblr-border)] text-sm font-medium hover:bg-[var(--tblr-primary-lt)] disabled:opacity-50">
+            <IconDownload size={14} aria-hidden="true" /> Liste des visites (PDF)
+          </button>
+          <button type="button" disabled={!settings || visitesEffectuees === 0}
+            onClick={() => settings && exportVisitesEffectueesToExcel(entreprises, lots, creneauxVisite, settings, projectName, contactsTelephone)}
+            title={visitesEffectuees === 0 ? 'Aucune entreprise n\'est pointée « présente »' : 'Liste des entreprises ayant fait la visite, avec la date'}
+            className="inline-flex items-center gap-1 min-h-10 px-3 rounded-lg border border-[var(--tblr-border)] text-sm font-medium hover:bg-[var(--tblr-primary-lt)] disabled:opacity-50">
+            <IconDownload size={14} aria-hidden="true" /> Liste des visites (Excel)
+          </button>
+          <span className="text-xs text-[var(--tblr-muted)]">
+            {visitesEffectuees === 0 ? 'Aucune visite pointée pour le moment.'
+              : `${visitesEffectuees} entreprise${visitesEffectuees > 1 ? 's ont' : ' a'} déjà visité : elles ne sont plus convoquées ni invitées à visiter lors d'un renvoi du DCE.`}
+          </span>
+        </div>
         {creneauxVisite.length === 0 ? <p className="text-xs text-[var(--tblr-muted)]">Aucun créneau défini.</p> :
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{[...creneauxVisite].sort((a,b) => a.date_heure.localeCompare(b.date_heure)).map(c => {
             const bilan = bilanVisite(c.id, entreprises, lots);

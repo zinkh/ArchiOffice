@@ -186,6 +186,8 @@ export function registerConsultationDepotPublicRoutes(app: Express, deps: RouteD
       .filter((c: any) => c && typeof c.id === 'string' && typeof c.date_heure === 'string' && !Number.isNaN(new Date(c.date_heure).getTime()))
       .sort((a: any, b: any) => a.date_heure.localeCompare(b.date_heure));
     const entreprise = (Array.isArray(consultation?.entreprises) ? consultation.entreprises : []).find((e: any) => e?.id === inv.entreprise_id);
+    // Une entreprise pointée « présente » a déjà visité : la page ne lui annonce ni ne lui propose aucune visite.
+    if (entreprise?.visite_creneau_id && entreprise?.visite_presence === 'presente') return null;
     const affecte = creneaux.find(c => c.id === entreprise?.visite_creneau_id);
     const lieu = typeof consultation?.visite_site?.lieu === 'string' ? consultation.visite_site.lieu.trim().slice(0, 500) : '';
     const consignes = typeof consultation?.visite_site?.consignes === 'string' ? consultation.visite_site.consignes.trim().slice(0, 2000) : '';

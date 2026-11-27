@@ -13,6 +13,30 @@ export interface VisiteSite { lieu?: string; consignes?: string }
 /** Ce que le message dit de la visite à une entreprise (dates déjà mises en forme). */
 export interface BlocVisite { creneaux: string[]; assigne: boolean; lieu?: string; consignes?: string }
 
+/** L'entreprise a effectué la visite : un créneau lui est affecté et sa présence est pointée « présente ». */
+export function aDejaVisite(e: Pick<EntrepriseVisite, 'visite_creneau_id' | 'visite_presence'>): boolean {
+  return !!e.visite_creneau_id && e.visite_presence === 'presente';
+}
+
+export interface LigneVisiteEffectuee<E> { entreprise: E; creneau: CreneauVisite }
+
+/** Entreprises ayant fait la visite, avec le créneau (donc la date), classées par date puis par nom. */
+export function entreprisesAyantVisite<E extends EntrepriseVisite & { nom: string }>(
+  entreprises: E[], creneaux: CreneauVisite[],
+): LigneVisiteEffectuee<E>[] {
+  const lignes: LigneVisiteEffectuee<E>[] = [];
+  const vues = new Set<string>();
+  for (const entreprise of entreprises) {
+    if (!aDejaVisite(entreprise) || vues.has(entreprise.id)) continue;
+    const creneau = creneaux.find(c => c.id === entreprise.visite_creneau_id);
+    if (!creneau) continue;
+    vues.add(entreprise.id);
+    lignes.push({ entreprise, creneau });
+  }
+  return lignes.sort((a, b) => a.creneau.date_heure.localeCompare(b.creneau.date_heure)
+    || a.entreprise.nom.localeCompare(b.entreprise.nom, 'fr'));
+}
+
 /** L'entreprise a reçu le créneau qui lui est affecté aujourd'hui. */
 export function visiteNotifiee(e: Pick<EntrepriseVisite, 'visite_creneau_id' | 'visite_convoquee_creneau_id'>): boolean {
   return !!e.visite_creneau_id && e.visite_convoquee_creneau_id === e.visite_creneau_id;
@@ -28,8 +52,10 @@ export function aRenotifier(e: Pick<EntrepriseVisite, 'visite_creneau_id' | 'vis
  * qu'elle peut choisir. Sans créneau à citer, aucune visite n'est annoncée (le lieu seul ne suffit pas).
  */
 export function visitePourMessage(
-  e: Pick<EntrepriseVisite, 'visite_creneau_id'>, creneaux: CreneauVisite[], site?: VisiteSite, maintenant: Date = new Date(),
+  e: Pick<EntrepriseVisite, 'visite_creneau_id' | 'visite_presence'>, creneaux: CreneauVisite[], site?: VisiteSite, maintenant: Date = new Date(),
 ): BlocVisite | undefined {
+  // Une entreprise pointée « présente » a déjà visité : rien n'est annoncé ni proposé (renvoi du DCE).
+  if (aDejaVisite(e)) return undefined;
   const tries = [...creneaux].sort((a, b) => a.date_heure.localeCompare(b.date_heure));
   const lieu = site?.lieu?.trim() || undefined;
   const consignes = site?.consignes?.trim() || undefined;
