@@ -6,7 +6,7 @@ import { Toast } from './ui/Toast';
 import { PillTabs } from './ui/PillTabs';
 import { BottomSheet, SheetOption } from './ui/BottomSheet';
 import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
-import { buildDiffusionRecipients, type LotIntervenantInput } from '../lib/crDiffusion';
+import { applyCrTemplate, buildDiffusionRecipients, crTemplateValues, DEFAULT_CR_SUBJECT_TEMPLATE, type LotIntervenantInput } from '../lib/crDiffusion';
 import { apiFetch, baseFetchJson, SERVER_UNAVAILABLE_CODE } from '../lib/api';
 import { checkAttachment, MAX_ATTACHMENTS } from '../lib/pdfAttachments';
 import { getAccessToken } from '../lib/authToken';
@@ -505,7 +505,18 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     return loadCroquisExportItems({ kind: 'siteReport', id: selectedReport.id, projectId: project.id, pending: selectedReport.pendingSync });
   };
 
-  const sendDiffusion = async (contactIds: string[]) => {
+  // Objet proposé dans la fenêtre : celui du modèle du cabinet (Réglages), les variables remplacées pour ce compte-rendu.
+  const diffusionDefaultSubject = useMemo(() => {
+    if (!selectedReport) return '';
+    const modele = typeof settings?.crMailSubjectTemplate === 'string' ? settings.crMailSubjectTemplate.trim() : '';
+    return applyCrTemplate(modele || DEFAULT_CR_SUBJECT_TEMPLATE, crTemplateValues({
+      reportNumber: selectedReport.report_number, reportDate: selectedReport.date, nextMeeting: selectedReport.nextMeeting,
+      projectName: project.name, projectCode: project.project_code, projectAddress: project.address,
+      agencyName: settings?.agencyName,
+    }));
+  }, [selectedReport, settings, project.name, project.project_code, project.address]);
+
+  const sendDiffusion = async (contactIds: string[], custom: { subject: string; note: string } = { subject: '', note: '' }) => {
     if (!selectedReport || contactIds.length === 0) return;
     if (!settings) { setDiffusionError('Réglages du cabinet non chargés, réessayez dans un instant.'); return; }
     setDiffusionBusy(true);
@@ -531,6 +542,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       body.append('file', blob, filename);
       body.append('contact_ids', JSON.stringify(contactIds));
       if (includePrevious) body.append('include_previous', '1');
+      if (custom.subject) body.append('subject', custom.subject);
+      if (custom.note) body.append('note', custom.note);
       // Pas d'apiFetch ici : il imposerait un Content-Type JSON, or un envoi multipart doit
       // laisser le navigateur poser sa propre limite.
       const headers = new Headers();
@@ -927,12 +940,13 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     const lot = lots_list.find(l => l.id === choice.lot_id);
     setReportObservations(prev => prev.map(o => (o.id === obsId ? {
       ...o, lot_id: choice.lot_id ?? undefined, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id ?? undefined,
+      ...(choice.contact_ids ? { contact_ids: choice.contact_ids } : {}),
       lot: lot ? { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } : undefined,
     } : o)));
     try {
       await queuedJsonRequest({
         entity: 'observation', id: crypto.randomUUID(), method: 'PUT', url: `/api/observations/${obsId}`,
-        body: { lot_id: choice.lot_id, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id },
+        body: { lot_id: choice.lot_id, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id, ...(choice.contact_ids ? { contact_ids: choice.contact_ids } : {}) },
       });
       setSaveError(false);
     } catch (err) {
@@ -1866,7 +1880,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         includePrevious={includePrevious}
         previousCount={previousOpenObservations.length}
         onIncludePreviousChange={changeIncludePrevious}
-        onSend={ids => void sendDiffusion(ids)}
+        defaultSubject={diffusionDefaultSubject}
+        onSend={(ids, custom) => void sendDiffusion(ids, custom)}
         onClose={() => setDiffusionOpen(false)}
       />
 

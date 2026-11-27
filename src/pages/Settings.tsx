@@ -20,6 +20,7 @@ import { cn } from '../lib/utils';
 import { IconLanguage, IconDatabase } from '@tabler/icons-react';
 import { StorageUsageCard } from '../components/StorageUsageCard';
 import { apiFetch } from '../lib/api';
+import { CR_TEMPLATE_VARIABLES, DEFAULT_CR_BODY_TEMPLATE, DEFAULT_CR_SUBJECT_TEMPLATE } from '../lib/crDiffusion';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
 import { checkCloudLinkStatus, upgradeToCloud, retryImport, reconnectCloud } from '../lib/cloudSync';
 import { CloudReconnectForm } from '../components/CloudReconnectForm';
@@ -352,6 +353,8 @@ export default function Settings() {
     language: 'fr',
     senderOption: 'agency' as 'agency' | 'personal',
     defaultEmailTemplate: '',
+    crMailSubjectTemplate: '',
+    crMailBodyTemplate: '',
     logoUrl: '',
     smtpHost: '',
     smtpPort: '587',
@@ -2921,6 +2924,38 @@ export default function Settings() {
               onChange={e => setSettings({...settings, defaultEmailTemplate: e.target.value})} />
             {renderSaveButton('email', () => saveSection('email', {
               senderOption: settings.senderOption, defaultEmailTemplate: settings.defaultEmailTemplate,
+            }))}
+          </div>
+
+          {/* ── Message de diffusion des comptes-rendus de chantier ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Diffusion des comptes-rendus de chantier</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                Objet et texte d'introduction des messages envoyés avec « Diffuser ». Laissez vide pour le modèle par défaut.
+                Vous pouvez encore les adapter, et ajouter une remarque particulière, à chaque envoi.
+              </p>
+            </div>
+            <label className="block text-sm">
+              <span className="font-semibold">Objet</span>
+              <input type="text" className="tblr-input mt-1 w-full" maxLength={300}
+                placeholder={DEFAULT_CR_SUBJECT_TEMPLATE}
+                value={settings.crMailSubjectTemplate ?? ''}
+                onChange={e => setSettings({ ...settings, crMailSubjectTemplate: e.target.value })} />
+            </label>
+            <label className="block text-sm">
+              <span className="font-semibold">Texte d'introduction</span>
+              <textarea className="tblr-input mt-1 w-full" rows={4} maxLength={4000}
+                placeholder={DEFAULT_CR_BODY_TEMPLATE}
+                value={settings.crMailBodyTemplate ?? ''}
+                onChange={e => setSettings({ ...settings, crMailBodyTemplate: e.target.value })} />
+            </label>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Variables : {CR_TEMPLATE_VARIABLES.map(v => `{${v.key}} (${v.label.toLowerCase()})`).join(', ')}.
+            </p>
+            {renderSaveButton('crmail', () => saveSection('crmail', {
+              crMailSubjectTemplate: (settings.crMailSubjectTemplate ?? '').trim() || null,
+              crMailBodyTemplate: (settings.crMailBodyTemplate ?? '').trim() || null,
             }))}
           </div>
 

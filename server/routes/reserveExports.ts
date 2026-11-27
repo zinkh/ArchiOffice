@@ -15,8 +15,7 @@ import { sendEmailLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { handleDocumentUpload } from '../documentUpload';
 import { resolveEmailSender } from '../emailSender';
-import { sendViaAccount } from '../mailSend';
-import { combinedSendError, sendMailWithSenderFallback } from '../smtpSend';
+import { hasOwnSmtp, sendViaBestRoute } from '../mailRoute';
 import { loadReserveContext, RESERVE_KINDS, RESERVE_TITLE, readIncludeLevees, readKind, readLots, type ReserveKind } from '../reserveDiffusionContext';
 import {
   buildReserveMail, statutDiffusion,
@@ -181,27 +180,12 @@ export function registerReserveExportRoutes(app: Express, { supabaseAdmin, getTe
       const attachments = [{ filename, content: file.buffer, contentType: 'application/pdf' }];
 
       try {
-        // Le SMTP du cabinet d'abord : le message part de l'adresse de l'agence. La boîte connectée de la
-        // personne ne sert qu'en repli, ou quand le cabinet n'a pas de SMTP.
-        let smtpError: unknown = null;
-        let sentBySmtp = false;
-        if (transporter) {
-          try {
-            await sendMailWithSenderFallback(transporter, { from: sender.from, replyTo, to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments }, smtpUser);
-            sentBySmtp = true;
-          } catch (err) {
-            console.warn('[POST reserve-exports/send] envoi par le SMTP du cabinet impossible', (err as any)?.message);
-            smtpError = err;
-            if (!defaultAccount) throw err;
-          }
-        }
-        if (!sentBySmtp) {
-          try {
-            await sendViaAccount(supabaseAdmin, defaultAccount, { to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments });
-          } catch (accountErr) {
-            throw smtpError ? new Error(combinedSendError(defaultAccount, accountErr, smtpError)) : accountErr;
-          }
-        }
+        // SMTP propre au cabinet d'abord, sinon la boîte connectée de la personne : jamais l'adresse du SMTP de
+        // la plateforme tant qu'une boîte est connectée (server/mailRoute.ts).
+        await sendViaBestRoute(
+          { supabaseAdmin, transporter, smtpUser, defaultAccount, ownSmtp: hasOwnSmtp(settings), from: sender.from, replyTo },
+          { to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments },
+        );
       } catch (err: any) {
         console.error('[POST reserve-exports/send] envoi impossible', recipient.key, err?.message);
         const out = await record({ ...base, status: 'echec', sent_at: new Date().toISOString(), error: String(err?.message || 'Envoi impossible').slice(0, 300) });

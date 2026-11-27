@@ -23,7 +23,10 @@ interface Props {
   /** Nombre d'anciennes observations non levées de l'opération. */
   previousCount: number;
   onIncludePreviousChange: (value: boolean) => void;
-  onSend: (contactIds: string[]) => void;
+  /** Objet tel que le modèle du cabinet le produit (les variables propres à chaque destinataire y sont remplacées à l'envoi). */
+  defaultSubject: string;
+  /** `subject` vide = objet du modèle du cabinet ; `note` = remarque particulière ajoutée à chaque message. */
+  onSend: (contactIds: string[], custom: { subject: string; note: string }) => void;
   onClose: () => void;
 }
 
@@ -33,17 +36,25 @@ interface Props {
  * le nombre d'observations qui lui sont adressées. Ceux sans adresse sont
  * signalés et ne peuvent pas être cochés.
  */
-export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipients, busy, result, error, includePrevious, previousCount, onIncludePreviousChange, onSend, onClose }: Props) {
+export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipients, busy, result, error, includePrevious, previousCount, onIncludePreviousChange, defaultSubject, onSend, onClose }: Props) {
   const titleId = useId();
   const descId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
   const sendRef = useRef<HTMLButtonElement>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [subject, setSubject] = useState(defaultSubject);
+  const [note, setNote] = useState('');
 
   // À l'ouverture : tous ceux qu'on peut joindre sont cochés (« tous les intervenants »).
   useEffect(() => {
     if (open) setSelected(new Set(recipients.filter(r => r.email).map(r => r.contactId)));
   }, [open, recipients]);
+
+  // À l'ouverture : objet du modèle du cabinet, sans remarque. La personne peut les adapter pour CETTE diffusion.
+  useEffect(() => {
+    if (open) { setSubject(defaultSubject); setNote(''); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   useEscapeKey(open && !busy, onClose);
 
@@ -139,6 +150,32 @@ export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipient
             </p>
           ) : (
             <>
+              <div className="mb-3 space-y-2">
+                <label className="block text-sm">
+                  <span className="font-semibold text-[var(--tblr-text)]">Objet du message</span>
+                  <input
+                    type="text"
+                    value={subject}
+                    maxLength={300}
+                    disabled={busy}
+                    onChange={e => setSubject(e.target.value)}
+                    className="tblr-input mt-1 w-full"
+                  />
+                  <span className="block text-xs text-[var(--tblr-muted)]">Modèle par défaut réglable dans Réglages, rubrique e-mail.</span>
+                </label>
+                <label className="block text-sm">
+                  <span className="font-semibold text-[var(--tblr-text)]">Remarque particulière (facultative)</span>
+                  <textarea
+                    value={note}
+                    maxLength={4000}
+                    rows={3}
+                    disabled={busy}
+                    onChange={e => setNote(e.target.value)}
+                    placeholder="Ajoutée sous l'introduction du message de chaque destinataire."
+                    className="tblr-input mt-1 w-full"
+                  />
+                </label>
+              </div>
               <label className="mb-2 flex items-start gap-2 min-h-11 text-sm text-[var(--tblr-text)] cursor-pointer">
                 <input type="checkbox" checked={includePrevious} disabled={busy} onChange={e => onIncludePreviousChange(e.target.checked)} className="rounded size-4 mt-0.5" />
                 <span>
@@ -202,7 +239,11 @@ export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipient
             <button
               ref={sendRef}
               type="button"
-              onClick={() => onSend(recipients.filter(r => selected.has(r.contactId)).map(r => r.contactId))}
+              onClick={() => onSend(
+                recipients.filter(r => selected.has(r.contactId)).map(r => r.contactId),
+                // Objet inchangé : le modèle du cabinet reste appliqué côté serveur.
+                { subject: subject.trim() === defaultSubject.trim() ? '' : subject.trim(), note: note.trim() },
+              )}
               disabled={busy || count === 0}
               className="min-h-11 flex items-center gap-1.5 px-4 py-2 bg-[var(--tblr-primary)] hover:brightness-90 disabled:opacity-50 text-white rounded-lg text-sm font-bold transition"
             >
